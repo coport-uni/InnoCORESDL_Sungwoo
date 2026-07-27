@@ -53,7 +53,9 @@ def _load(path: Path) -> tuple[Config, ServerConfig]:
     return cell_cfg, server_cfg
 
 
-def _load_balance_linear(path: Path) -> tuple[BalanceLinearConfig, ServerConfig]:
+def _load_balance_linear(
+    path: Path,
+) -> tuple[BalanceLinearConfig, ServerConfig]:
     raw = tomllib.loads(path.read_text(encoding="utf-8"))
     linear = raw.get("linear", {})
     balance = raw.get("balance", {})

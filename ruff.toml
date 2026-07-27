@@ -1,0 +1,14 @@
+# 80-col / 4-space per CLAUDE.md. Lint rules stay at ruff's defaults;
+# the sibling driver repos' wider `select` (E, W, I, N) is not adopted
+# here yet -- it flags 41 pre-existing issues, mostly N803/N815 on the
+# server's API field names, which cannot change without breaking /v1.
+line-length = 80
+indent-width = 4
+
+# Driver submodules keep their upstream style (mirrors the
+# .claude/hooks/post-write-lint.sh skip).
+extend-exclude = ["external"]
+
+[format]
+indent-style = "space"
+quote-style = "double"

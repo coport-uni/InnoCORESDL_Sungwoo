@@ -11,12 +11,19 @@ boundary rule). Each cell is one process: a FastAPI `/v1` server wrapping one
 
 ## Steps
 
-### 1. Vendor your driver
-Copy the device's L0 driver into `vendor/<codename>/` (a package) — same as
-`vendor/sy01b/`, `vendor/mks_motor/`, etc. Keep the upstream files verbatim;
-put any local shim (e.g. VID:PID resolution like `vendor/lmc/`) in a separate
-module. Record the source repo + commit + any local change in
-`vendor/VENDORED.md`. Add the driver's runtime deps to `requirements.txt`.
+### 1. Add your driver as a submodule
+Add the device's L0 driver repo under `external/` — same as
+`external/SyringePumpController/`, `external/MKSServo57DCANController/`, etc.:
+
+```bash
+git submodule add https://github.com/coport-uni/<Repo> external/<Repo>
+```
+
+Never make local-only edits inside `external/` — commit upstream, push,
+then bump the pin. Give the repo a `pyproject.toml` so it installs as a
+package, add it to `requirements.txt` as `-e ./external/<Repo>`, and
+describe it in `external/SUBMODULES.md`. Anything the driver is missing
+(e.g. VID:PID port resolution) belongs upstream, not in a local shim.
 
 ### 2. Write `cell/<your>_cell.py`
 Copy `cell/pump_gantry_cell.py` (or `balance_linear_cell.py`) as a template
@@ -59,7 +66,7 @@ Rules:
   one-time setup, return the instance. Hold drivers as attributes (`has-a`);
   translate name/unit/order in the method bodies (Adapter pattern).
 - Intra-cell imports are relative (`from .cell_protocol import ...`); driver
-  imports are absolute (`from vendor.<codename> import ...`).
+  imports are absolute, by *package* name (`from sy01b import ...`).
 
 ### 3. Raise the right `CellError` — it maps to HTTP automatically
 `server/errors.py` maps each subclass to a status code, so just raise the
@@ -106,7 +113,8 @@ base URL; the operator web's switcher picks it up. Adding a cell = a registry
 entry, not a new site.
 
 ## Checklist
-- [ ] driver in `vendor/<codename>/` + `VENDORED.md` + `requirements.txt`
+- [ ] driver submodule in `external/<Repo>/` (installable) + `SUBMODULES.md`
+      + `-e` line in `requirements.txt`
 - [ ] `cell/<your>_cell.py` implements all `Cell` methods (absent → raise)
 - [ ] correct `CellError` subclasses raised
 - [ ] config dataclass + `_load_<shape>()` + `cell<N>.toml.example`

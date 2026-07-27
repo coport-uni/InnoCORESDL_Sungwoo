@@ -10,13 +10,13 @@ Sequence (operator-confirmed before the first motion):
 4. Motor returns to the origin.
 5. Heater and smart plug stop together.
 
-Run from the repo root (so ``vendor.*`` imports resolve)::
+Run from the repo root (so ``external.*`` imports resolve)::
 
     python -m demo_scenario.main
 
 Prerequisites:
     - Operator present with the motion path clear; keep an e-stop handy.
-    - Plug credentials in ``vendor/SmartPlugController/secure.env`` (or
+    - Plug credentials in ``external/SmartPlugController/secure.env`` (or
       ``KASA_USERNAME``/``KASA_PASSWORD``); without them the plug steps
       are skipped with a notice.
     - No other process (cell server, standalone tools) holding the
@@ -64,7 +64,9 @@ def move_down(mks) -> None:
     """Home the motor, then travel down to ``MOTOR_DOWN_MM``."""
     print(f"[motor] homing, then down to {MOTOR_DOWN_MM} mm")
     mks.home()
-    mks.move_to(MOTOR_DOWN_MM, speed_pct=MOTOR_SPEED_PCT, accel_pct=MOTOR_ACCEL_PCT)
+    mks.move_to(
+        MOTOR_DOWN_MM, speed_pct=MOTOR_SPEED_PCT, accel_pct=MOTOR_ACCEL_PCT
+    )
     print(f"[motor] at {mks.read_position_mm():.2f} mm")
 
 

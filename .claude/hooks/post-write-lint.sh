@@ -15,10 +15,10 @@ if [[ -z "$file_path" ]] \
     exit 0
 fi
 
-# Skip vendored drivers -- they keep their upstream style
-# and are excluded from this repo's ruff scope.
-if [[ "$file_path" == */vendor/* ]] \
-    || [[ "$file_path" == vendor/* ]]; then
+# Skip external driver submodules -- they keep their upstream
+# style and are excluded from this repo's ruff scope.
+if [[ "$file_path" == */external/* ]] \
+    || [[ "$file_path" == external/* ]]; then
     exit 0
 fi
 

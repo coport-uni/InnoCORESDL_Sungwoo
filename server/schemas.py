@@ -56,7 +56,9 @@ class WeightReadResponse(BaseModel):
 
 
 class AmbientRequest(BaseModel):
-    level: str = Field(description="very_stable | stable | unstable | very_unstable")
+    level: str = Field(
+        description="very_stable | stable | unstable | very_unstable"
+    )
 
 
 class AmbientResponse(BaseModel):
@@ -67,7 +69,9 @@ class AmbientResponse(BaseModel):
 
 
 class InitializeRequest(BaseModel):
-    force: int = Field(default=2, description="0/1/2 or 10..40 init force code.")
+    force: int = Field(
+        default=2, description="0/1/2 or 10..40 init force code."
+    )
     ccw: bool = False
 
 

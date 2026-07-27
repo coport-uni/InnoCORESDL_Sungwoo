@@ -9,9 +9,9 @@ the SDLClaude reference for two cell shapes:
 - **balance + linear cell** (cell4): MINAS A6 linear rail (`lmc`) + the single
   Entris-II balance (`entris_ii`) that shuttles under cell1–3.
 
-All hardware drivers are **vendored** in-repo (`vendor/`), so the project runs
-standalone — see [`vendor/VENDORED.md`](vendor/VENDORED.md) for upstream
-sources and commits.
+All hardware drivers are tracked as **git submodules** under `external/` —
+see [`external/SUBMODULES.md`](external/SUBMODULES.md) for the upstream
+repos and pinned commits.
 
 ## L1 server, cells & web
 
@@ -25,10 +25,9 @@ web (React, web/)  ──HTTP /v1──▶  server/ (FastAPI)  ──▶  Cell  
 | [`cell/cell_protocol.py`](cell/cell_protocol.py) | the `Cell` interface + `CellError` hierarchy (→ HTTP status) |
 | [`cell/pump_gantry_cell.py`](cell/pump_gantry_cell.py) | `PumpGantryCell` — pump + XZ gantry (ESP32 `mks_motor`) |
 | [`cell/balance_linear_cell.py`](cell/balance_linear_cell.py) | `BalanceLinearCell` — MINAS A6 linear (`lmc`) + balance |
-| [`vendor/lmc/`](vendor/lmc/) | codename `lmc` — VID:PID shim over the vendored MINAS A6 raw driver |
 | [`server/`](server/) | `create_app` + `/v1` routes + schemas + error mapping + `__main__` |
 | [`web/`](web/) | the operator UI (one web for the whole SDL; cell switcher) |
-| [`vendor/`](vendor/) | all hardware drivers, vendored in-repo (see `VENDORED.md`) |
+| [`external/`](external/) | all hardware driver repos as git submodules — `sy01b`, `entris_ii`, `mks_motor`, `LinearMotorController` (see `SUBMODULES.md`) |
 
 ```bash
 # run a cell server (real hardware)
@@ -66,13 +65,17 @@ returning `0x15` (NAK) is in xBPI mode — wrong interface menu. The ambient
 ## Dependencies
 
 Python ≥ 3.12, in the shared conda env **`sdl`** (new terminals activate it).
-All hardware drivers are vendored in-repo (`vendor/`), so a fresh install only
-needs their runtime deps + the server stack (no GitHub / sibling clones):
+The drivers come from the `external/` submodules, installed in editable
+mode straight from the working tree, so a fresh checkout needs both:
 
 ```bash
 conda activate sdl
-pip install -r requirements.txt   # pyserial/pyftdi + fastapi/uvicorn/httpx
+git submodule update --init --recursive
+pip install -r requirements.txt   # -e external/* + pyserial/pyftdi + fastapi
 ```
+
+The four driver packages import under their *package* names, not their
+repo names: `sy01b`, `entris_ii`, `mks_motor`, `LinearMotorController`.
 
 ## See also
 
@@ -86,4 +89,5 @@ pip install -r requirements.txt   # pyserial/pyftdi + fastapi/uvicorn/httpx
 - [`ADDING_A_CELL.md`](ADDING_A_CELL.md) — step-by-step for bringing a new
   hardware cell onto this `/v1` server + web (start here to add hardware).
 - [`CLAUDE.md`](CLAUDE.md) — conventions and environment for working here.
-- [`vendor/VENDORED.md`](vendor/VENDORED.md) — vendored driver sources + commits.
+- [`external/SUBMODULES.md`](external/SUBMODULES.md) — driver submodule
+  upstreams + pinned commits.
