@@ -5,7 +5,7 @@ cell4 (see ``balance_linear_cell.py``), so the balance methods of the :class:`ce
 protocol raise here. The XZ gantry is the three MKS SERVO57D motors driven by
 the ESP32 ``mks_motor`` driver (paired-Z safety interlock, pyftdi), addressed
 by FTDI serial — vendored from **ESP32S3BOX3MotorController** (the sole XZ
-gantry reference; see ``vendor/VENDORED.md``).
+gantry reference; see ``external/VENDORED.md``).
 
 Gantry calls mirror that repo's ``bridge.py`` (``open_xz`` + ``move_sync`` +
 ``home_xz``). Motion order is up → X → down (never diagonal). Hardware-verified
@@ -17,8 +17,8 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 
-from vendor.mks_motor import MKSMotor, prepare_usb_nodes, release_ftdi_sio
-from vendor.sy01b import SyringePumpController
+from mks_motor import MKSMotor, prepare_usb_nodes, release_ftdi_sio
+from sy01b import SyringePumpController
 
 from .cell_protocol import Cell, DeviceFaultError, WrongStateError
 
@@ -258,7 +258,9 @@ class PumpGantryCell(Cell):
             MKSMotor.stop_group_hard(self._z_motors + [self._x])
         except Exception as e:  # noqa: BLE001 — surface as a device fault
             raise DeviceFaultError(f"gantry stop failed: {e}", command="stop")
-        halt = getattr(self._pump, "halt", None) or getattr(self._pump, "stop", None)
+        halt = getattr(self._pump, "halt", None) or getattr(
+            self._pump, "stop", None
+        )
         if callable(halt):
             halt()
 
@@ -270,5 +272,6 @@ class PumpGantryCell(Cell):
                     fn()
                 except Exception:  # noqa: BLE001 — best-effort shutdown
                     print(
-                        f"warning: {type(dev).__name__}.close failed", file=sys.stderr
+                        f"warning: {type(dev).__name__}.close failed",
+                        file=sys.stderr,
                     )

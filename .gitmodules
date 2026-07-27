@@ -1,9 +1,27 @@
-[submodule "vendor/CommonClaude"]
-	path = vendor/CommonClaude
+[submodule "external/CommonClaude"]
+	path = external/CommonClaude
 	url = https://github.com/coport-uni/CommonClaude.git
-[submodule "vendor/HotplateController"]
-	path = vendor/HotplateController
+[submodule "external/HotplateController"]
+	path = external/HotplateController
 	url = https://github.com/coport-uni/HotplateController
-[submodule "vendor/SmartPlugController"]
-	path = vendor/SmartPlugController
+[submodule "external/SmartPlugController"]
+	path = external/SmartPlugController
 	url = https://github.com/coport-uni/SmartPlugController
+[submodule "external/SyringePumpController"]
+	path = external/SyringePumpController
+	url = https://github.com/coport-uni/SyringePumpController
+[submodule "external/LinearMotorController"]
+	path = external/LinearMotorController
+	url = https://github.com/coport-uni/LinearMotorController
+[submodule "external/PrecisionScaleController"]
+	path = external/PrecisionScaleController
+	url = https://github.com/coport-uni/PrecisionScaleController
+[submodule "external/MKSServo57DCANController"]
+	path = external/MKSServo57DCANController
+	url = https://github.com/coport-uni/MKSServo57DCANController
+[submodule "external/FR5Controller"]
+	path = external/FR5Controller
+	url = https://github.com/coport-uni/FR5Controller
+[submodule "external/ESP32S3BOX3MotorController"]
+	path = external/ESP32S3BOX3MotorController
+	url = https://github.com/kkhyunhho/ESP32S3BOX3MotorController

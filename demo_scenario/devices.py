@@ -6,7 +6,7 @@ off, motor stopped and closed, pump port released) even when the
 scenario aborts mid-run. The scenario itself stays in ``main.py`` and
 only calls high-level driver methods on the yielded objects.
 
-All drivers are the vendored copies under ``vendor/`` — no new device
+All drivers are the vendored copies under ``external/`` — no new device
 code lives here.
 """
 
@@ -16,16 +16,16 @@ import asyncio
 from contextlib import contextmanager, suppress
 from typing import Iterator
 
-from vendor.HotplateController.hotplate_controller import (
+from external.HotplateController.hotplate_controller import (
     RctDigital,
     find_rct_port,
 )
-from vendor.mks_motor import MKSMotor, prepare_usb_nodes, release_ftdi_sio
-from vendor.SmartPlugController.smartplugcontroller import (
+from mks_motor import MKSMotor, prepare_usb_nodes, release_ftdi_sio
+from external.SmartPlugController.smartplugcontroller import (
     ControllerError,
     SmartPlugController,
 )
-from vendor.sy01b import SyringePumpController
+from sy01b import SyringePumpController
 
 
 @contextmanager
@@ -60,7 +60,9 @@ def hotplate(port: str | None = None) -> Iterator[RctDigital]:
 
 
 @contextmanager
-def motor(serial: str | None = None, coord_invert: bool = False) -> Iterator[MKSMotor]:
+def motor(
+    serial: str | None = None, coord_invert: bool = False
+) -> Iterator[MKSMotor]:
     """Yield a single configured MKS SERVO57D (standalone Z axis).
 
     Rebuilds the FTDI /dev nodes first (Docker private /dev goes stale
@@ -141,7 +143,9 @@ def plug_controller() -> SmartPlugController | None:
         return None
 
 
-def plug_switch(ctrl: SmartPlugController | None, target: str, *, on: bool) -> None:
+def plug_switch(
+    ctrl: SmartPlugController | None, target: str, *, on: bool
+) -> None:
     """Switch the plug(s) matching ``target`` on or off (blocking).
 
     Sync façade over the async kasa API so ``main.py`` stays

@@ -15,20 +15,39 @@ cell shapes live here (the SDLClaude reference implementations):
   **single** Entris-II balance (`entris_ii`) that shuttles under cell1–3 to
   weigh each dispense.
 
-**Self-contained (fully vendored).** All four hardware drivers are copied
-in-repo under `vendor/` — `sy01b`, `entris_ii`, `mks_motor` as packages and
-the MINAS A6 `linear_motor_controller` as a flat module — and imported as
-`vendor.<name>`. A fresh `pip install -r requirements.txt` needs no GitHub
-access or sibling clones; only the drivers' runtime deps (`pyserial`,
-`pyftdi`) come from PyPI. Upstream sources, commits, and the local changes
-applied are tracked in `vendor/VENDORED.md`; update a driver by re-copying
-its source. (The dev `sdl` env may still have the drivers as editable
-installs, but the cell imports the vendored copies.)
+**Drivers as submodules.** Every hardware driver is its own upstream repo,
+tracked as a **git submodule** under `external/`. The four the cells use
+are installable packages, wired into `requirements.txt` as editable
+installs, so the import name is the *package* name, not the repo name:
+
+| Repo under `external/` | Import | Device |
+|---|---|---|
+| `SyringePumpController` | `sy01b` | pump |
+| `PrecisionScaleController` | `entris_ii` | balance |
+| `ESP32S3BOX3MotorController` | `mks_motor` | XZ gantry |
+| `LinearMotorController` | `LinearMotorController` | MINAS A6 linear rail |
+
+Also present: `HotplateController` and `SmartPlugController` (imported by
+path as `external.<Repo>.<module>`), `FR5Controller` (robot arm, not
+packaged yet), and `MKSServo57DCANController` (a second, `ftd2xx`-based
+MKS driver kept for reference — it lacks the paired-Z interlock, so the
+gantry runs on `ESP32S3BOX3MotorController`).
+
+Setup:
+
+```bash
+git submodule update --init --recursive
+pip install -r requirements.txt
+```
+
+`git submodule status` is the authority on pins; `external/SUBMODULES.md`
+explains what each repo is. Never make local-only edits under `external/`
+— commit upstream, push, then bump the pin.
 
 ## Conventions
 
-Shared conventions come from **CommonClaude**, vendored as a submodule at
-`vendor/CommonClaude/` — read its `CLAUDE.md` for the full ruleset: MIT
+Shared conventions come from **CommonClaude**, tracked as a submodule at
+`external/CommonClaude/` — read its `CLAUDE.md` for the full ruleset: MIT
 code style (80-col, 4-space, `snake_case`, Google-style docstrings, no
 magic numbers), debug files in `claude_test/` (never `tests/`),
 ToDo.md + `gh` issue/branch/PR task workflow, Conventional Commits,
@@ -52,7 +71,7 @@ hardware stage; composition = device → **cell** → Phase-system.
 | `pre-write-guard.sh` | PreToolUse (Write/Edit) | blocks `debug_*`/`scratch_*`/`tmp_*`/`experiment_*` files in `tests/` — they belong in `claude_test/`. |
 | `pre-bash-secret-scan.sh` | PreToolUse (Bash) | blocks commands containing likely secret literals (API keys, `password=` …). |
 | `pre-read-env-guard.sh` | PreToolUse (Read) | blocks reads of `.env` / `*.key` / `*.pem` credential files. |
-| `post-write-lint.sh` | PostToolUse (Write/Edit) | `ruff check` + `ruff format --check` on every written `.py`; **skips `vendor/`** (vendored drivers keep upstream style). |
+| `post-write-lint.sh` | PostToolUse (Write/Edit) | `ruff check` + `ruff format --check` on every written `.py`; **skips `external/`** (driver submodules keep upstream style). |
 | `post-write-debug-remind.sh` | PostToolUse (Write/Edit) | reminds to index new `claude_test/` files in `claude_test/README.md`. |
 | Stop prompt hook | Stop | verifies ToDo.md entry, `gh` issue, and ruff pass before finishing. |
 
@@ -64,19 +83,22 @@ hardware stage; composition = device → **cell** → Phase-system.
 | `cell/cell_protocol.py` | `Cell` protocol + `CellError` hierarchy the server maps to HTTP. |
 | `cell/pump_gantry_cell.py` | `PumpGantryCell` (cell1–3) — pump (`sy01b`) + XZ gantry (ESP32 `mks_motor`, paired-Z interlock), no balance. |
 | `cell/balance_linear_cell.py` | `BalanceLinearCell` — real cell4: MINAS A6 linear rail (`lmc`) + Entris-II balance, no pump. Run with `python -m server --config server/cell4.toml` (shape auto-detected from the `[linear]` table). |
-| `vendor/lmc/` | Codename `lmc` package — VID:PID-resolving shim (`__init__.py`) over the vendored MINAS A6 raw driver (`linear_motor_controller.py`, RS485 standard protocol with a PID closed loop); imported as `vendor.lmc`. |
 | `server/` | FastAPI **L1 `/v1` server** — thin HTTP bridge over the cell (mirrors `sy01b-server`). |
-| `vendor/` | All hardware drivers vendored in-repo (`sy01b`, `entris_ii`, `mks_motor`, `linear_motor_controller`); see `vendor/VENDORED.md` for sources/commits. Also holds git **submodules**: `CommonClaude` (conventions), `HotplateController`, `SmartPlugController`. |
-| `.claude/` | Hook scripts + `settings.json` copied from `vendor/CommonClaude` (see "Hooks"). |
+| `external/` | All hardware driver repos as git **submodules** — see the Overview table above and `external/SUBMODULES.md`. Also holds `CommonClaude` (conventions). |
+| `.claude/` | Hook scripts + `settings.json` copied from `external/CommonClaude` (see "Hooks"). |
 | `.mcp.json` | Project-scope MCP servers required by CommonClaude §7: **serena** (semantic code nav), **context7** (library docs), **fetch** (web pages as Markdown). Needs `uvx` + `npx` on PATH. |
 | `README.md` | User-facing usage + bench notes. |
 | `ADDING_A_CELL.md` | Step-by-step guide to add a new hardware cell (the *how*; SDLClaude has the *why*). |
-| `requirements.txt` | Runtime deps only (`pyserial`, `pyftdi`, `fastapi`, …); the drivers themselves are vendored. |
+| `requirements.txt` | The four driver submodules as editable installs (`-e ./external/<Repo>`), plus runtime deps (`pyserial`, `pyftdi`, `fastapi`, …). |
 | `LearnedPatterns.md` | Running log of gotchas (see below). |
 
 - **Shared conda env `sdl`** (Python 3.12); new terminals activate it. All
-  drivers are vendored under `vendor/` and imported as `vendor.<name>`, so
-  the cell needs no `sys.path` bootstrap (the repo root is already importable).
+  drivers live under `external/` as submodules; run
+  `git submodule update --init --recursive` after cloning. (As of
+  2026-07-27 no `sdl` env exists in this container — `conda env list`
+  shows `base`/`peallab`/… and bare `python3` is the Debian 3.12, which
+  is PEP 668 externally-managed. Create `sdl`, or use a venv, before
+  `pip install -r requirements.txt`.)
 - Runs in a Docker container; the container's `/dev` is a private tmpfs, so
   USB device nodes can go stale after re-enumeration / a Docker restart. The
   `mks_motor` driver's `prepare_usb_nodes()` / `release_ftdi_sio()` rebuild
@@ -105,8 +127,8 @@ auto-detect by the Sartorius vendor ID.
 |---|---|---|
 | Balance (Entris-II BCE224I) | `24BC:0010` | USB-C, Sartorius CDC → `ttyACM*`; omit `scale_port` to auto-detect. Must be passed into the container (`lsusb` shows `24bc:0010`). |
 | Pump (SY-01B) | `1A86:7523` | CH340 USB-serial → `ttyUSB*`; `pump.port = "1A86:7523"`. |
-| XZ motors (3× MKS SERVO57D) | `0403:6001` | FTDI USB2CAN adapters, addressed by **serial**: X = `NTAM63XD`, the other two (`A10PUO5V`, `A10PUO5W`) are the paired Z. Driven via pyftdi (`mks_motor`), vendored from **ESP32S3BOX3MotorController** (the sole XZ gantry reference). |
-| MINAS A6 linear rail (`lmc`) | `110A:1150` | Moxa UPort 1150 RS-485 adapter is the linear's serial link (NOT a TI USB3410, NOT the balance). `linear_port = "110A:1150"` resolved at runtime by `vendor.lmc.resolve_port`. |
+| XZ motors (3× MKS SERVO57D) | `0403:6001` | FTDI USB2CAN adapters, addressed by **serial**: X = `NTAM63XD`, the other two (`A10PUO5V`, `A10PUO5W`) are the paired Z. Driven via pyftdi (`mks_motor` from **`external/ESP32S3BOX3MotorController`**, the sole XZ gantry reference — *not* `MKSServo57DCANController`, which lacks the group-interlock API). |
+| MINAS A6 linear rail | `110A:1150` | Moxa UPort 1150 RS-485 adapter is the linear's serial link (NOT a TI USB3410, NOT the balance). `linear_port = "110A:1150"` resolved at runtime from the VID:PID. |
 | ESP32-S3 | `303A:1001` | Other project; unrelated. |
 
 ### Valve port gotcha (critical)
@@ -131,10 +153,11 @@ interface menu. SBI serial defaults: 9600 / ODD / 8 / 1.
 ### MINAS A6 amp prerequisites (linear rail)
 
 The linear (Y) rail runs on the **MINAS standard serial protocol over RS485**
-(`vendor.lmc.LinearMotorController`), not Modbus. Amp parameters: `Pr5.37 = 0`
+(`external/LinearMotorController/LinearMotorController.py`), not Modbus. Amp
+parameters: `Pr5.37 = 0`
 (standard protocol), `Pr5.30 = 2` (9600 bps), `Pr5.31 = 1` (slave ID); serial
 9600 / 8N1. `move_to_mm` runs a software closed loop whose per-iteration speed
-is set by the driver's `PIDController` (P-tuned; see `linear_motor_controller.py`
+is set by the driver's `PIDController` (P-tuned; see `LinearMotorController.py`
 `class PIDController`), converging to ±0.1 mm and aborting if the residual
 stops shrinking — this replaced the earlier fixed step schedule and fixes the
 overshoot without switching to Modbus.
@@ -162,7 +185,7 @@ overshoot without switching to Modbus.
 
 ## Research before coding
 
-Before calling into a driver, read its actual method in `vendor/<name>/`
+Before calling into a driver, read its actual method in `external/<Repo>/`
 (and that driver's upstream CLAUDE.md / LearnedPatterns) rather than
 guessing — they have hardware quirks documented there (e.g. SY-01B `Q`-only
 busy polling, balance AUTO W/ jitter, MKS first-command drop at limits).

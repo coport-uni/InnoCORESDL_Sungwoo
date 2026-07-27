@@ -5,7 +5,7 @@ under cell1–3 to weigh each dispense. It has **no pump**, so the pump methods
 of the :class:`cell_protocol.Cell` protocol raise.
 
 The linear (Y) rail runs on the **MINAS standard serial protocol over RS485**
-(:class:`vendor.lmc.LinearMotorController`, amp ``Pr5.37=0``): absolute
+(:class:`external.lmc.LinearMotorController`, amp ``Pr5.37=0``): absolute
 positioning (``move_to_mm``) runs a software closed loop whose per-iteration
 speed command comes from the driver's ``PIDController`` (P-tuned), converging
 to ±0.1 mm and aborting if the residual stops shrinking. Hardware-verified at
@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from vendor.entris_ii import PrecisionScaleController
+from entris_ii import PrecisionScaleController
 
 from .cell_protocol import (
     AMBIENT_LEVELS,
@@ -24,7 +24,7 @@ from .cell_protocol import (
     InvalidArgError,
     WrongStateError,
 )
-from vendor.lmc import LinearMotorController
+from LinearMotorController import LinearMotorController
 
 
 @dataclass(frozen=True, slots=True)

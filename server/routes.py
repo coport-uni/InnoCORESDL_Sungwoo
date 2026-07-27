@@ -167,7 +167,9 @@ async def ambient(request: Request, body: AmbientRequest) -> AmbientResponse:
     tags=["Pump"],
     summary="Home plunger + valve",
 )
-async def initialize(request: Request, body: InitializeRequest) -> InitializeResponse:
+async def initialize(
+    request: Request, body: InitializeRequest
+) -> InitializeResponse:
     cell = _cell(request)
     async with request.app.state.lock:
         state = await run_in_threadpool(
@@ -257,7 +259,9 @@ async def gantry_home(request: Request) -> GantryResponse:
     tags=["Gantry"],
     summary="Move the XZ gantry (up → X → down)",
 )
-async def gantry_move(request: Request, body: GantryMoveRequest) -> GantryResponse:
+async def gantry_move(
+    request: Request, body: GantryMoveRequest
+) -> GantryResponse:
     cell = _cell(request)
     async with request.app.state.lock:
         x_mm, z_mm = await run_in_threadpool(
@@ -293,7 +297,9 @@ async def linear_home(request: Request) -> LinearResponse:
     tags=["Linear"],
     summary="Move the linear Y rail to an absolute mm target",
 )
-async def linear_move(request: Request, body: LinearMoveRequest) -> LinearResponse:
+async def linear_move(
+    request: Request, body: LinearMoveRequest
+) -> LinearResponse:
     cell = _cell(request)
     async with request.app.state.lock:
         y_mm = await run_in_threadpool(lambda: cell.move_linear(body.y_mm))
