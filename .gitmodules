@@ -24,4 +24,4 @@
 	url = https://github.com/coport-uni/FR5Controller
 [submodule "external/ESP32S3BOX3MotorController"]
 	path = external/ESP32S3BOX3MotorController
-	url = https://github.com/kkhyunhho/ESP32S3BOX3MotorController
+	url = https://github.com/coport-uni/ESP32S3BOX3MotorController

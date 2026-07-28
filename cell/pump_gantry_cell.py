@@ -65,7 +65,7 @@ def _no_linear() -> WrongStateError:
 
 
 def _absent(family: str) -> WrongStateError:
-    # Defensive stub for the action sets only Cell D (cell5) has: the
+    # Defensive stub for the action sets only Cell 5 (cell5) has: the
     # single Z stage, the hotplate and the IR lamp. Same contract as the
     # stubs above — a stray call gets 409, not an AttributeError.
     return WrongStateError(f"pump+gantry cell has no {family}", command=family)
@@ -258,7 +258,7 @@ class PumpGantryCell(Cell):
     def move_linear(self, y_mm: float) -> float:
         raise _no_linear()
 
-    # ── Cell D action sets (none on a pump+gantry cell) ─────────────────
+    # ── Cell 5 action sets (none on a pump+gantry cell) ─────────────────
     def home_zstage(self) -> float:
         raise _absent("zstage")
 

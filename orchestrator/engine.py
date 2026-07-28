@@ -35,13 +35,19 @@ from orchestrator.scenario import (
     Scenario,
     ScenarioError,
     Step,
+    UNTIL_RESULT_ROOT,
     ValidationIssue,
     VariableError,
+    WaitValueError,
     eval_assert,
     load_scenario_text,
     resolve,
+    resolve_wait_s,
     validate_scenario,
 )
+
+#: How often a running ``wait_s`` hold re-checks for an abort request.
+WAIT_SLICE_S = 0.2
 
 
 class RunState(str, Enum):
@@ -548,6 +554,8 @@ class Engine:
         try:
             if step.kind == "assert":
                 record["result"] = self._run_assert(run, step)
+            elif step.kind == "wait":
+                record["result"] = await self._run_wait(run, step)
             else:
                 record["result"] = await self._call_cell(run, step)
             record["ok"] = True
@@ -557,6 +565,7 @@ class Engine:
             VariableError,
             AssertSyntaxError,
             AssertionFailure,
+            WaitValueError,
         ) as exc:
             record["ok"] = False
             record["result"] = None
@@ -568,6 +577,25 @@ class Engine:
         record["finished_utc"] = utc_now()
         record["duration_s"] = round(time.monotonic() - clock, 3)
         return record
+
+    async def _run_wait(self, run: Run, step: Step) -> dict[str, Any]:
+        """Hold for ``wait_s`` seconds, re-checking for an abort.
+
+        The hold is sliced so an ``abort`` cuts it short instead of
+        letting a long thermal soak keep the run alive; the record then
+        shows how long was actually waited.
+        """
+        seconds = resolve_wait_s(step, run.context)
+        waited = 0.0
+        while waited < seconds and not run.abort_requested:
+            slice_s = min(WAIT_SLICE_S, seconds - waited)
+            await asyncio.sleep(slice_s)
+            waited += slice_s
+        return {
+            "requested_s": seconds,
+            "waited_s": round(waited, 3),
+            "aborted": run.abort_requested,
+        }
 
     def _run_assert(self, run: Run, step: Step) -> dict[str, Any]:
         assert step.assert_expr is not None
@@ -584,17 +612,59 @@ class Engine:
             if step.timeout_s is not None
             else run.scenario.defaults.timeout_s
         )
-        async with self._locks.acquire(step.cell):
-            result = await self._client.call(
-                step.cell,
-                step.action,
-                method=step.method,
-                body=body,
-                timeout_s=timeout,
-            )
+        if step.until is not None:
+            result = await self._poll_until(run, step, timeout)
+        else:
+            async with self._locks.acquire(step.cell):
+                result = await self._client.call(
+                    step.cell,
+                    step.action,
+                    method=step.method,
+                    body=body,
+                    timeout_s=timeout,
+                )
         if step.save_as:
             run.vars[step.save_as] = result
         return result
+
+    async def _poll_until(self, run: Run, step: Step, timeout: float) -> Any:
+        """Repeat a GET until its ``until:`` expression holds.
+
+        ``step.timeout_s`` bounds the whole poll; each HTTP call runs
+        under the orchestrator's default step timeout. The cell lock is
+        held per read, not across the loop, so an abort's stop
+        broadcast is never queued behind the poll.
+
+        Raises:
+            AssertionFailure: The deadline passed (or the run was
+                aborted) before the condition held.
+        """
+        assert step.cell is not None and step.action is not None
+        assert step.until is not None
+        deadline = time.monotonic() + timeout
+        last: Any = None
+        while True:
+            async with self._locks.acquire(step.cell):
+                last = await self._client.call(
+                    step.cell,
+                    step.action,
+                    method=step.method,
+                    timeout_s=self._config.step_timeout_s,
+                )
+            expression = resolve(
+                step.until, {**run.context, UNTIL_RESULT_ROOT: last}
+            )
+            if eval_assert(expression):
+                return last
+            if run.abort_requested:
+                raise AssertionFailure(
+                    f"until aborted before it held: {expression}"
+                )
+            if time.monotonic() >= deadline:
+                raise AssertionFailure(
+                    f"until not reached within {timeout}s: {expression}"
+                )
+            await asyncio.sleep(step.poll_s)
 
     async def _finish(self, run: Run) -> None:
         if run.abort_requested:

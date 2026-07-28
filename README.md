@@ -1,60 +1,199 @@
 # InnoCORESDL
 
-A self-driving-lab cell project: hardware drivers composed behind a `Cell`
-interface, each cell served over its own FastAPI `/v1` API (**L1**), with an
-orchestrator above them that runs scenario files across cells (**L2**).
+**A self-driving laboratory (SDL), one layer at a time.** This repository
+teaches two lab computers (NUC1, NUC2) to run chemistry-lab hardware —
+syringe pumps, motorized stages, a balance, a hotplate, an IR lamp — from
+**scenario files** instead of a human clicking buttons.
 
-Three cell shapes exist, the SDLClaude reference implementations:
+If you have never seen a system like this, start with the picture:
 
-| Shape | Cells | Devices |
-|---|---|---|
-| pump + gantry | cell1–3 (Cell A/B/C) | syringe pump (`sy01b`) + XZ gantry — one X and **two synchronized Z** MKS motors |
-| balance + linear | cell4 | MINAS A6 linear rail (`lmc`) + the Phase's single Entris-II balance |
-| pump + Z + thermal | cell5 (Cell D) | pump + **one** MKS motor as a standalone Z + IKA hotplate + IR lamp on a Tapo plug |
+```mermaid
+graph TB
+    YAML["📄 Scenario file (YAML)<br/><i>'home the axis, heat to 40 C,<br/>hold 2 min, switch off'</i>"]
+    ORCH["🧠 L2 Orchestrator (:17100)<br/>reads the scenario, calls cells over HTTP,<br/>pauses for operator confirmation"]
+    CELL["🔌 L1 cell servers (one per cell)<br/>a small web API in front of each<br/>group of devices"]
+    DRV["⚙️ Drivers (external/ submodules)<br/>speak each device's serial/LAN protocol"]
+    HW["🔬 Hardware<br/>pumps, motors, balance,<br/>hotplate, IR lamp"]
+
+    YAML --> ORCH -->|"HTTP /v1"| CELL --> DRV --> HW
+```
+
+Each layer only talks to the one below it. The orchestrator (**L2**) never
+touches a serial port — it only speaks HTTP to the cell servers (**L1**),
+and each cell server is the *single owner* of its devices' ports. That one
+rule prevents two programs from fighting over the same cable.
+
+---
+
+## The bench (who runs what, and where)
+
+Two NUCs share this one repository; only their config files differ.
+Measured bench addresses (2026-07-28): **NUC1 = 192.168.0.126**,
+**NUC2 = 192.168.0.120**.
+
+```mermaid
+graph TB
+    subgraph NUC1["🖥 NUC1 — synthesis (192.168.0.126)"]
+        C1["cell1 · Cell A (:17054)<br/>pump + XZ gantry<br/>(1 X + 2 synced Z motors)"]
+        C4["cell4 (:17060)<br/>MINAS A6 linear rail +<br/>the Phase's single balance"]
+    end
+
+    subgraph NUC2["🖥 NUC2 — analysis (192.168.0.120)"]
+        C2["cell2 · Cell B (:17056)<br/>clone of Cell A"]
+        C3["cell3 · Cell C (:17058)<br/>clone of Cell A"]
+        C5["cell5 · Cell 5 (:17062)<br/>pump* + single Z motor +<br/>IKA hotplate + IR lamp<br/>✅ bench-verified"]
+    end
+
+    ORCH["🧠 Orchestrator (:17100)<br/>one process, anywhere on the LAN"]
+    ORCH -->|HTTP| C1
+    ORCH -->|HTTP| C4
+    ORCH -->|HTTP| C2
+    ORCH -->|HTTP| C3
+    ORCH -->|HTTP| C5
+```
+
+\* Cell 5's syringe pump is not on the bench yet — its config simply omits
+the `[pump]` table and the cell serves the other three devices, answering
+HTTP 409 for pump requests.
+
+### What each cell contains
+
+A **cell** is one server owning one group of devices. Three shapes exist
+(`cell/` has one Python class per shape); cells sharing a shape differ
+only by config.
+
+| Cell | NUC · port | Shape (class) | Devices inside | Status |
+|---|---|---|---|---|
+| **cell1** (Cell A) | NUC1 · 17054 | pump + gantry (`PumpGantryCell`) | Runze SY-01B syringe pump (`sy01b`, CH340 serial) · XZ gantry: 1× X + 2× **synchronized** Z MKS SERVO57D motors (`mks_motor`, FTDI/CAN, paired-Z interlock) | built, no bench run |
+| **cell2** (Cell B) | NUC2 · 17056 | pump + gantry (`PumpGantryCell`) | identical clone of Cell A — different USB serials only | built, no bench run |
+| **cell3** (Cell C) | NUC2 · 17058 | pump + gantry (`PumpGantryCell`) | identical clone of Cell A | built, no bench run |
+| **cell4** | NUC1 · 17060 | balance + linear (`BalanceLinearCell`) | MINAS A6 linear rail (`LinearMotorController`, RS-485) · the Phase's **single** Entris-II balance (`entris_ii`, Sartorius CDC) that shuttles under cell1–3 to weigh each dispense | built, no bench run |
+| **cell5** (Cell 5) | NUC2 · 17062 | pump + Z + thermal (`PumpZThermalCell`) | syringe pump (*not fitted yet* — optional `[pump]` table) · **one** MKS SERVO57D as a standalone Z axis (`mks_motor`, FTDI `NTB3EP5R`) · IKA RCT digital hotplate (`HotplateController`, STM32 VCP, direct USB port) · IR lamp on a Tapo P110M plug (`SmartPlugController`, LAN `192.168.0.237`) | ✅ **bench-verified** |
+
+Special properties per cell worth remembering:
+
+- **cell1–3**: the two Z motors always move together through the
+  driver's paired-Z desync interlock — the highest-stakes subsystem.
+- **cell4**: holds the *only* balance in the Phase, and its `stop()` is
+  currently a no-op (GAP-1).
+- **cell5**: the only cell that **heats** — uniquely, its `stop()` also
+  kills the heater, the stirrer, and the lamp, not just motion.
 
 All hardware drivers are git submodules under `external/` — see
 [`external/SUBMODULES.md`](external/SUBMODULES.md).
 
 ---
 
-## Status
+## Status — what is actually proven
 
-**cell4 runs on real hardware.** On 2026-07-28 the balance + linear-rail
-cell completed `demo_weigh_at_position.yaml` end to end through L2 —
-15/15 steps, run `20260728T111725Z-demo_weigh_at_position` — zeroing the
-balance, carrying it 50 mm, weighing a vial at 25.7424 g and returning.
-The other cell shapes have not been through the same bring-up.
+**Two cells now run on real hardware.** Cell 5 on NUC2 and cell4 on NUC1
+were both brought up on 2026-07-28, each completing real scenarios through
+the full L1 + L2 stack. cell1–3 are built and simulator-tested; cell1's
+gantry is mid bring-up.
 
 | Layer | State |
 |---|---|
-| L1 cell4 (balance + linear) | **bench-verified**: identity, status, tare, weigh, home, move |
-| L1 cell1–3 / cell5 | code complete; cell1's gantry is mid bring-up (LearnedPatterns #22–#25), cell5 untouched by hardware |
-| L1 `/v1` server | 26 routes, serving cell4 against real devices |
-| L2 orchestrator | registry, client, validator, engine, runlog, `/v1`, CLI — 71 tests, plus real runs against cell4 |
-| Deployment | systemd template + Docker Compose, **never deployed to a NUC** |
+| L1 cell5 (Z + hotplate + lamp) | **bench-verified on NUC2** — see the ladder below |
+| L1 cell4 (balance + linear rail) | **bench-verified on NUC1** — identity, status, tare, weigh, home, move |
+| L1 cell1–3 | code complete; cell1's gantry mid bring-up (LearnedPatterns #22–#25) |
+| L1 `/v1` server | 26 routes, serving cell4 and cell5 against real devices |
+| L2 orchestrator | registry, client, validator, engine (`wait_s`, `until:`), runlog, `/v1`, CLI — **71 tests**, plus real runs on both cells |
+| Deployment | systemd template + Docker Compose, **never deployed as a service** (bench runs used the venv directly) |
 
-What the first real run measured, and what it settled:
+### How cell4 was verified
+
+`demo_weigh_at_position.yaml` completed **15/15** (run
+`20260728T111725Z`): zero the balance, carry it 50 mm, weigh a vial at
+25.7424 g, return. What the run settled:
 
 | Question | Answer |
 |---|---|
 | Can cell4 weigh somewhere other than where it settles? | **Yes.** Carrying the balance 50 mm and back shifted a 25.7 g reading by **0.0039 g** |
 | How fast is a settled weight read? | ~1.2 s (stream 2.6 lines/s, consecutive-3 spread median 0.0005 g) |
 | How fast is a 50 mm move? | ~6 s |
-| Is the RS485 link reliable? | **No** — see the EMI note below. Reads survive it; moves abort on it, deliberately |
+| Is the RS485 link reliable? | **No** — see the EMI note under Bench notes. Reads survive it; moves abort on it, deliberately |
 
-Every number above is a bench measurement. The 71 tests touch no
+Every number there is a bench measurement. The 71 tests touch no
 hardware, which is the point: they cannot tell you any of this.
+
+
+| Layer | Built | Verified | Not yet |
+|---|---|---|---|
+| L1 cells | all three shapes | **cell5 on real hardware** (Z + hotplate + lamp); others: imports, OpenAPI, shape inference, error mapping | cell1–4 physical behaviour |
+| L1 `/v1` server | 26 routes | **cell5 live on NUC2:17062** — diagnose, 10/10 hotplate-state stress, lamp over LAN | cell1–4 bench bring-up |
+| L2 orchestrator | registry, client, validator, engine (`wait_s`, `until:`), runlog, `/v1`, CLI | 45 tests; **three real Cell 5 runs completed** (below) | multi-cell / cross-NUC runs |
+| Deployment | systemd template + Docker Compose | — | never deployed as a service (bench runs used the venv directly) |
+
+### How Cell 5 was verified
+
+Verification climbed a ladder — each rung earns the next. Nothing moves
+until a human at the bench says so:
+
+```mermaid
+flowchart LR
+    A["1 · Identity<br/>lsusb / udevadm:<br/>which device is which"] -->
+    B["2 · L1 probes<br/>read-only GETs:<br/>diagnose, state ×10, lamp"] -->
+    C["3 · Dry run<br/>orchestrator validate:<br/>zero devices touched"] -->
+    D["4 · Gated real run<br/>operator confirms, then<br/>the scenario executes"]
+```
+
+1. **Device identity** — Z motor = NTREX USB2CAN FTDI serial `NTB3EP5R`;
+   hotplate = STM32 VCP `0483:5740` (auto-detected); IR lamp = Tapo P110M
+   at `192.168.0.237` (a bare IP the cell resolves by itself).
+2. **L1 probes** — `GET /v1/diagnose` (pump correctly reported absent),
+   `hotplate/state` ×10 = **10/10** after the USB fix (see bench rules),
+   `lamp/state` over the LAN.
+3. **L2 dry run** — `python -m orchestrator validate` on every scenario:
+   0 issues. The validator checks each step against the live cell's own
+   OpenAPI, so typos die here, not mid-run.
+4. **Gated real runs** — submitted through the orchestrator API; the
+   first hazardous step of each run waited for explicit operator
+   confirmation. Every run ended with the cell safe (heater off, lamp
+   off, Z parked at home) and wrote a full runlog under `runs/`:
+
+| Run | Result | What it proved |
+|---|---|---|
+| `cell5_lamp_heat_40c` | ✅ 13/13 steps | lamp switching, 40 °C setpoint, poll-until-temperature, verified shutdown; an abort mid-poll killed heater+lamp immediately |
+| `cell5_z_cycles` (50 mm) | ✅ 17/17 steps | homing (15.5 s), three 0↔50 mm strokes (~3.6 s each), re-home |
+| `cell5_final` | ✅ 21/21 steps | home → 400 mm → home, then lamp+heater to 40 °C, **2-minute dwell at temperature**, verified all-off |
+
+What one of those runs looks like on the wire:
+
+```mermaid
+sequenceDiagram
+    actor Op as Operator
+    participant O as Orchestrator (:17100)
+    participant C as cell5 (:17062)
+    participant HW as Hardware
+
+    Op->>O: POST /v1/runs (scenario)
+    O->>C: GET /openapi.json  (dry-run check)
+    O-->>Op: paused — "next step energizes hardware"
+    Op->>O: confirm
+    O->>C: POST /v1/lamp/switch {enabled: true}
+    C->>HW: Tapo plug ON (LAN)
+    O->>C: POST /v1/hotplate/temperature {celsius: 40}
+    O->>C: POST /v1/hotplate/heater {enabled: true}
+    loop until plate ≥ 39 °C (poll every 5 s)
+        O->>C: GET /v1/hotplate/state
+    end
+    Note over O: wait_s 120 — dwell at temperature
+    O->>C: POST /v1/hotplate/heater {enabled: false}
+    O->>C: POST /v1/lamp/switch {enabled: false}
+    O-->>Op: completed — runlog written
+```
 
 ### Safety gaps you must know before touching hardware
 
 | | |
 |---|---|
-| **GAP-9** | `POST /v1/stop` **cannot interrupt a command already in flight** — on any cell. It waits for the same lock the move holds; measured 4.2 s late on a 5 s move. L2's abort inherits this. |
+| **GAP-9** | `POST /v1/stop` **cannot interrupt a command already in flight** — on any cell. It waits for the same lock the move holds; measured 4.2 s late on a 5 s move. L2's abort inherits this. (`until:` polls are the exception — they re-acquire the lock per read, so an abort cuts them off immediately, as the bench confirmed.) |
 | **GAP-1** | cell4's `stop()` is a no-op even when it does run. |
 | **No alarm visibility** | the MINAS driver cannot read or clear an amp alarm, so `diagnose()` reports `stage.ok: true` on an amp that has tripped and de-energised its servo. The front panel is the only alarm indicator ([#15](https://github.com/coport-uni/InnoCORESDL_Sungwoo/issues/15)). |
 
-**Consequence: the physical e-stop is the only stop.** Both gaps, with their
-measurements and proposed fixes, are in [`docs/L1_AUDIT.md`](docs/L1_AUDIT.md).
+**Consequence: the physical e-stop is the only stop.** Both gaps, with
+their measurements and proposed fixes, are in
+[`docs/L1_AUDIT.md`](docs/L1_AUDIT.md).
 
 ### Two known faults deliberately left open
 
@@ -87,27 +226,58 @@ the manual rather than by provoking the amp.
 
 ---
 
-## Layout
+## Writing a scenario
 
-```
-scenario YAML ─▶ orchestrator/ :17100 ──HTTP /v1──▶ cell servers ──▶ Cell ──▶ drivers ──▶ hardware
+A scenario is plain YAML — data, never code. Steps run top to bottom;
+each step is either a cell call, a check, a hold, or a poll:
+
+```yaml
+name: my_first_scenario
+params:
+  hot_c: 40.0
+
+steps:
+  - id: lamp_on                    # call a cell action
+    cell: cell5
+    action: lamp/switch
+    body: {enabled: true}
+    save_as: lamp                  # keep the response as a variable
+
+  - id: check_lamp                 # assert — no device is touched
+    assert: "${lamp.is_on} == True"
+
+  - id: wait_hot                   # poll a read-only GET until true
+    cell: cell5
+    action: hotplate/state
+    method: GET
+    until: "${result.plate_c} >= ${params.hot_c} - 1.0"
+    poll_s: 5.0
+    timeout_s: 900.0
+
+  - id: hold                       # local timed hold (abort cuts it short)
+    wait_s: 120.0
 ```
 
-| Path | What |
-|---|---|
-| [`cell/`](cell/) | the cell layer: [`cell_protocol.py`](cell/cell_protocol.py) (interface + `CellError` hierarchy), [`pump_gantry_cell.py`](cell/pump_gantry_cell.py), [`balance_linear_cell.py`](cell/balance_linear_cell.py), [`pump_z_thermal_cell.py`](cell/pump_z_thermal_cell.py) |
-| [`server/`](server/) | the L1 `/v1` server — `create_app` + routes + schemas + error mapping. `nuc1/`, `nuc2/` hold the per-NUC config examples |
-| [`orchestrator/`](orchestrator/) | the L2 orchestrator: registry, cell client, scenario loader + dry-run validator, run engine, runlog, `/v1` API, CLI |
-| [`scenarios/`](scenarios/) | scenario files — `demo_linear_move.yaml`, `demo_weigh_at_position.yaml` (cell4, bench-verified), `demo_cell_d_warmup.yaml` |
-| [`deploy/`](deploy/) | systemd template unit for the cells, Compose for the orchestrator, NUC setup guide |
-| [`claude_test/`](claude_test/) | tests + the two bench tools (`preflight.py`, `smoke_l1.py`) |
-| [`docs/`](docs/) | the L2 spec, the M0 audit, the bring-up runbook |
-| [`external/`](external/) | every driver as a submodule |
+Things worth knowing before your first scenario:
+
+- **`validate` first, always**: `python -m orchestrator validate my.yaml`
+  checks every action and body field against the cell's live OpenAPI
+  without sending a single device command.
+- **`until:` is GET-only** — a command that moves or heats something must
+  never sit inside a retry loop.
+- **Temperature conditions need tolerance** (`>= target - 1.0`): the IKA
+  hotplate reports whole degrees and regulates just *under* its setpoint,
+  so an exact `>= 40.0` may never come true even when the panel shows 40.
+- **Never name a field `on`** — YAML 1.1 turns a bare `on:` into a
+  boolean before the orchestrator ever sees it. Heater and lamp take
+  `enabled` instead.
+- The first step that moves, heats, or energizes anything **pauses the
+  run until the operator confirms**. There is no flag to skip this.
 
 ### The `/v1` action sets
 
-A cell implements the sets its hardware has and answers 409 for the rest, so
-a misdirected call is legible instead of a crash.
+A cell implements the sets its hardware has and answers 409 for the rest,
+so a misdirected call is legible instead of a crash.
 
 | Set | Routes | Cells |
 |---|---|---|
@@ -121,27 +291,30 @@ a misdirected call is legible instead of a crash.
 | Lamp | `lamp/state`, `lamp/switch` | cell5 |
 | Safety | `stop` | all (see GAP-9) |
 
-L2 never hardcodes these — it reads each cell's `GET /openapi.json`, which is
-why adding Cell D's nine routes needed **zero** orchestrator changes.
+L2 never hardcodes these — it reads each cell's `GET /openapi.json`,
+which is why adding Cell 5's nine routes needed **zero** orchestrator
+changes.
 
 ---
 
 ## Quick start
 
 ```bash
-conda activate sdl                      # Python >= 3.12
+conda activate sdl                      # Python >= 3.12; on NUC2 use
+                                        # the repo-local .venv instead
 git submodule update --init --recursive
 pip install -r requirements.txt
 
 # L1 — one cell server (real hardware; shape auto-detected from the config)
-cp server/nuc1/cell4.toml.example server/nuc1/cell4.toml
-python -m server --config server/nuc1/cell4.toml         # :17060
+cp server/nuc2/cell5.toml.example server/nuc2/cell5.toml
+python -m server --config server/nuc2/cell5.toml         # :17062
 
 # L2 — the orchestrator
 cp orchestrator/config.toml.example orchestrator/config.toml
 python -m orchestrator serve                             # :17100
-python -m orchestrator validate scenarios/demo_linear_move.yaml   # no devices
-python -m orchestrator run      scenarios/demo_linear_move.yaml
+python -m orchestrator validate scenarios/demo_weigh_at_position.yaml  # no devices
+python -m orchestrator run      scenarios/demo_weigh_at_position.yaml  # cell4
+python -m orchestrator run      scenarios/demo_cell5_final.yaml        # cell5
 
 # checks that need no hardware
 pytest claude_test
@@ -155,38 +328,52 @@ have the vial loaded. `--step-mode` still exists and stops after *every*
 step; prefer it only when debugging, since thirteen prompts of which one
 matters is how an operator stops reading them.
 
-Ports are per cell (SDLClaude `ARCHITECTURE.md`): cell1=17054, cell2=17056,
-cell3=17058, cell4=17060, cell5=17062, orchestrator=17100.
+Ports are per cell (SDLClaude `ARCHITECTURE.md`): cell1=17054,
+cell2=17056, cell3=17058, cell4=17060, cell5=17062, orchestrator=17100.
 
 ---
 
-## Next: connecting the real hardware
+## Layout
 
-The runbook is [`docs/L1_BRINGUP.md`](docs/L1_BRINGUP.md). In short:
+| Path | What |
+|---|---|
+| [`cell/`](cell/) | the cell layer: [`cell_protocol.py`](cell/cell_protocol.py) (interface + `CellError` hierarchy), [`pump_gantry_cell.py`](cell/pump_gantry_cell.py), [`balance_linear_cell.py`](cell/balance_linear_cell.py), [`pump_z_thermal_cell.py`](cell/pump_z_thermal_cell.py) |
+| [`server/`](server/) | the L1 `/v1` server — `create_app` + routes + schemas + error mapping. `nuc1/`, `nuc2/` hold the per-NUC config examples |
+| [`orchestrator/`](orchestrator/) | the L2 orchestrator: registry, cell client, scenario loader + dry-run validator, run engine, runlog, `/v1` API, CLI |
+| [`scenarios/`](scenarios/) | scenario files — the bench-verified cell4 pair `demo_linear_move.yaml` / `demo_weigh_at_position.yaml`, `demo_cell5_warmup.yaml`, and the bench-verified Cell 5 set: `demo_cell5_lamp_blink.yaml`, `demo_cell5_hotplate_30c.yaml`, `demo_cell5_z_cycles.yaml`, `demo_cell5_lamp_heat_40c.yaml`, `demo_cell5_final.yaml` |
+| [`deploy/`](deploy/) | systemd template unit for the cells, Compose for the orchestrator, NUC setup guide |
+| [`claude_test/`](claude_test/) | tests + the two bench tools (`preflight.py`, `smoke_l1.py`) |
+| [`docs/`](docs/) | the L2 spec, the M0 audit, the bring-up runbook |
+| [`external/`](external/) | every driver as a submodule |
+
+---
+
+## Next: connecting the rest of the hardware
+
+**cell5 is done** (see Status); this applies to the remaining cells —
+cell2/cell3 on NUC2, cell1/cell4 on NUC1 — plus cell5's missing syringe
+pump (add the `[pump]` table back when it arrives). The runbook is
+[`docs/L1_BRINGUP.md`](docs/L1_BRINGUP.md). In short:
 
 1. **Collect what is still unknown** — `python claude_test/preflight.py`
-   lists exactly which addresses are still `TBD`: cell2/cell3 X-adapter FTDI
-   serials, cell5's Z serial, the IR lamp's plug name, the real NUC IPs, and
-   the safe travel per axis.
-2. **Bring up one cell at a time** — start its server, prove identity with
-   `GET /v1/diagnose`, then run the gated smoke test
-   (`python claude_test/smoke_l1.py --base-url … --suite …`). It stops before
-   every hazardous action and waits for the operator to type `go`.
+   lists exactly which addresses are still `TBD`.
+2. **Bring up one cell at a time** — start its server, prove identity
+   with `GET /v1/diagnose`, then run the gated smoke test
+   (`python claude_test/smoke_l1.py --base-url … --suite …`).
 3. **Run the two contract probes** — `--suite concurrency` (A7) and
-   `--suite stop` (A4). The second is expected to fail: it measures GAP-9.
-4. **Record everything in [`docs/L1_AUDIT.md`](docs/L1_AUDIT.md)**, and
-   replace the guessed `timeout_s` values in `scenarios/` with the measured
-   durations.
+   `--suite stop` (A4; expected to fail — it measures GAP-9).
+4. **Record everything in [`docs/L1_AUDIT.md`](docs/L1_AUDIT.md)** and
+   replace guessed `timeout_s` values with measured durations.
 5. **Then L2**: dry run → `--step-mode` → automatic.
 
 ### Roadmap
 
 | Milestone | State |
 |---|---|
-| M0 — L1 adequacy audit | code review done; cell4's physical checks done, other cells pending; 9 gaps recorded |
+| M0 — L1 adequacy audit | code review done; **cell4 and cell5 physical checks done**, cell1–3 pending; 9 gaps recorded |
 | M1 / M2 — registry + dry-run validator | done |
-| M4 / M5 — engine, runlog, failure policies, pause/resume/abort | done; exercised by real cell4 runs |
-| M6 — systemd + Docker + real `demo_linear_move` | **`demo_linear_move` and `demo_weigh_at_position` both run on cell4**; systemd/Compose artifacts still never deployed |
+| M4 / M5 — engine, runlog, failure policies, pause/resume/abort | done; exercised by real cell4 **and cell5** runs |
+| M6 — systemd + Docker + real demo scenarios | **cell4's two demos and cell5's four all run on hardware**; systemd/Compose artifacts still never deployed |
 | M7 — web scenario tab | not started; `web/` was removed with the other pre-L2 work and lives in git history |
 
 Open questions that shape the next phase, all recorded as gaps:
@@ -215,11 +402,11 @@ Milestone detail is in
 
 ### Valve port gotcha (critical)
 
-The pump's valve is a Runze M05 **Bi-pass** valve with only two fluid states
-90° apart. Firmware ports 1 & 3 land on the *same* state (and 2 & 4 on the
-other), so source and sink must be **90° apart, not 180°** — on this bench
-the reservoir is port 2 and the tip is port 1. Verify with the eye (which
-tube moves liquid), not the `?6` digit.
+The pump's valve is a Runze M05 **Bi-pass** valve with only two fluid
+states 90° apart. Firmware ports 1 & 3 land on the *same* state (and
+2 & 4 on the other), so source and sink must be **90° apart, not 180°** —
+on this bench the reservoir is port 2 and the tip is port 1. Verify with
+the eye (which tube moves liquid), not the `?6` digit.
 See [`LearnedPatterns.md`](LearnedPatterns.md) #1.
 
 ### Balance prerequisites (front panel, menu-only)
@@ -234,13 +421,35 @@ at all**, which is its own diagnosis (LearnedPatterns #11). A `0x15` (NAK) reply
 xBPI mode — wrong interface menu. The ambient filter comes from the cell
 config, not the panel.
 
-### Cell D specifics
+### Cell 5 specifics
 
-The hotplate has a cell-level `max_celsius` ceiling in its config, checked
-before the driver is called. The IR lamp's plug credentials live in
-`external/SmartPlugController/secure.env`, written by the operator — Claude
-Code does not read that file. Never run the hotplate driver's own dashboard
-(`hotplate_controller/server.py`) while cell5 is up: one owner per port.
+The hotplate has a cell-level `max_celsius` ceiling in its config,
+checked before the driver is called. The IR lamp's plug credentials live
+in `external/SmartPlugController/secure.env`, written by the operator —
+Claude Code does not read that file. Never run the hotplate driver's own
+dashboard (`hotplate_controller/server.py`) while cell5 is up: one owner
+per port.
+
+Hard-won bench rules from the 2026-07-28 bring-up (details in
+[`LearnedPatterns.md`](LearnedPatterns.md) #11–#14):
+
+- **The hotplate's USB stays on a direct NUC port, never the shared
+  hub.** Behind the hub its STM32 CDC interface wedged repeatedly and
+  eventually dropped off the bus. Recovery when it wedges: unplug USB →
+  hotplate off → wait 20 s → reconnect on the direct port → power on
+  (the interface board is USB-powered — cycling the hotplate alone
+  never resets it).
+- ModemManager is disabled on NUC2 and
+  `/etc/udev/rules.d/99-innocore-usb.rules` pins node permissions +
+  `ID_MM_DEVICE_IGNORE` for the FTDI and STM32 VCP ids.
+- **Temperature conditions need tolerance**: the RCT reports whole
+  degrees and regulates just under the setpoint (panel shows 40 while
+  serial says 39.0), so scenarios gate on `>= target - 1.0`.
+- The `[pump]` table is optional in the cell5 config: without it the
+  cell serves Z + hotplate + lamp and answers 409 on pump routes.
+- A lamp `target` may be a bare IP unknown to the submodule's
+  `device_list.md` — the cell synthesises the entry, so a re-DHCPed
+  plug never needs an edit under `external/`.
 
 ### The rail must not park on 0 mm (critical)
 
@@ -301,17 +510,21 @@ See [`LearnedPatterns.md`](LearnedPatterns.md) #8.
 
 ## Dependencies
 
-Python ≥ 3.12 in the shared conda env **`sdl`**. The drivers come from the
-`external/` submodules as editable installs, so a fresh checkout needs both:
+Python ≥ 3.12. The documented shared conda env **`sdl`** does not exist
+on NUC2 — the bench runs there use a repo-local **`.venv`** instead
+(created with `python3.12 -m venv --without-pip .venv` + get-pip.py,
+because `python3-venv` is not installed and conda is blocked on a ToS
+prompt; LearnedPatterns #28). The drivers come from the `external/`
+submodules as editable installs, so a fresh checkout needs both:
 
 ```bash
 git submodule update --init --recursive
 pip install -r requirements.txt
 ```
 
-The four packaged drivers import under their *package* names, not their repo
-names: `sy01b`, `entris_ii`, `mks_motor`, `LinearMotorController`. The
-hotplate and smart plug are still path-imported from `external/`.
+The four packaged drivers import under their *package* names, not their
+repo names: `sy01b`, `entris_ii`, `mks_motor`, `LinearMotorController`.
+The hotplate and smart plug are still path-imported from `external/`.
 
 ## See also
 
@@ -322,6 +535,6 @@ hotplate and smart plug are still path-imported from `external/`.
 - [`docs/L1_AUDIT.md`](docs/L1_AUDIT.md) — the M0 audit, gap list, smoke-test record.
 - [`docs/L1_BRINGUP.md`](docs/L1_BRINGUP.md) — the bench runbook.
 - [`ADDING_A_CELL.md`](ADDING_A_CELL.md) — how to add hardware as a cell.
-- [`LearnedPatterns.md`](LearnedPatterns.md) — every non-obvious problem hit
-  here, with the rule it produced. Read it before debugging.
+- [`LearnedPatterns.md`](LearnedPatterns.md) — every non-obvious problem
+  hit here, with the rule it produced. Read it before debugging.
 - [`CLAUDE.md`](CLAUDE.md) — conventions and environment for working here.

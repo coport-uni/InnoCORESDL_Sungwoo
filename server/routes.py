@@ -319,7 +319,7 @@ async def linear_move(
     return LinearResponse(y_mm=y_mm)
 
 
-# ── Z stage (single Z) — Cell D / cell5 ─────────────────────────────────────
+# ── Z stage (single Z) — Cell 5 / cell5 ─────────────────────────────────────
 
 
 @router.post(
@@ -356,7 +356,7 @@ async def zstage_move(
     return ZStageResponse(z_mm=z_mm)
 
 
-# ── Hotplate — Cell D / cell5 ───────────────────────────────────────────────
+# ── Hotplate — Cell 5 / cell5 ───────────────────────────────────────────────
 
 
 @router.get(
@@ -438,7 +438,7 @@ async def hotplate_stirrer(
     return StirrerResponse(**state)
 
 
-# ── Lamp (IR lamp on a Tapo plug) — Cell D / cell5 ──────────────────────────
+# ── Lamp (IR lamp on a Tapo plug) — Cell 5 / cell5 ──────────────────────────
 
 
 @router.get(
@@ -476,7 +476,7 @@ async def lamp_switch(request: Request, body: LampRequest) -> LampResponse:
     "/stop",
     response_model=StopResponse,
     tags=["Safety"],
-    summary="Abort all motion now (Cell D also kills heater, stirrer, lamp)",
+    summary="Abort all motion now (Cell 5 also kills heater, stirrer, lamp)",
 )
 async def stop(request: Request) -> StopResponse:
     cell = _cell(request)

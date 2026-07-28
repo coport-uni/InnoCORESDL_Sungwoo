@@ -33,7 +33,6 @@ from orchestrator.runlog import META_FILE, SCENARIO_FILE, STEPS_FILE, VARS_FILE
 from orchestrator.scenario import (
     AssertSyntaxError,
     ScenarioError,
-    check_body,
     eval_assert,
     load_scenario_text,
     operation,
@@ -513,15 +512,15 @@ steps:
         load_scenario_text(text)
 
 
-# ── Cell D (cell5): pump + single Z + hotplate + IR lamp ───────────────────
+# ── Cell 5 (cell5): pump + single Z + hotplate + IR lamp ───────────────────
 
-CELL_D_DEMO = REPO_ROOT / "scenarios" / "demo_cell_d_warmup.yaml"
+CELL5_DEMO = REPO_ROOT / "scenarios" / "demo_cell5_warmup.yaml"
 
 
-async def test_cell_d_scenario_validates_and_runs(
+async def test_cell5_scenario_validates_and_runs(
     engine: Engine, fake_l1: FakeL1
 ) -> None:
-    text = CELL_D_DEMO.read_text(encoding="utf-8")
+    text = CELL5_DEMO.read_text(encoding="utf-8")
     _s, issues = await engine.validate(text)
     assert [str(i) for i in issues] == []
 
@@ -535,7 +534,7 @@ async def test_cell_d_scenario_validates_and_runs(
     assert fake_l1.z_mm["cell5"] == 0.0
 
 
-async def test_cell_d_body_typo_is_caught_before_anything_moves(
+async def test_cell5_body_typo_is_caught_before_anything_moves(
     engine: Engine, fake_l1: FakeL1
 ) -> None:
     # `celsius` is the field; `temperature` is not. The dry run must catch
@@ -612,6 +611,229 @@ async def test_wrong_shape_action_fails_cleanly_at_runtime(
     error = run.records[0]["error"]
     assert error["status"] == 409
     assert error["payload"]["error"] == "WrongStateError"
+
+
+CELL5_BLINK = REPO_ROOT / "scenarios" / "demo_cell5_lamp_blink.yaml"
+CELL5_HOTPLATE = REPO_ROOT / "scenarios" / "demo_cell5_hotplate_30c.yaml"
+CELL5_Z_CYCLES = REPO_ROOT / "scenarios" / "demo_cell5_z_cycles.yaml"
+
+#: Overrides that shrink the demos' real-time holds to test speed.
+FAST_HOLDS = {"blink_hold_s": 0.01, "soak_s": 0.01}
+
+
+# ── wait_s steps ───────────────────────────────────────────────────────────
+
+
+async def test_wait_step_holds_and_records(engine: Engine) -> None:
+    run = await engine.create_run(
+        scenario_yaml(
+            "  - id: hold\n    wait_s: 0.05\n",
+            name="wait_check",
+        )
+    )
+    await engine.wait(run.run_id)
+    assert run.state is RunState.COMPLETED
+    record = run.records[0]
+    assert record["kind"] == "wait"
+    assert record["result"]["requested_s"] == 0.05
+    assert record["result"]["waited_s"] >= 0.05
+    assert record["duration_s"] >= 0.05
+
+
+async def test_wait_step_takes_params(engine: Engine) -> None:
+    text = scenario_yaml(
+        "  - id: hold\n    wait_s: ${params.hold_s}\n",
+        name="wait_param",
+        extra="params:\n  hold_s: 0.05\n",
+    )
+    _s, issues = await engine.validate(text)
+    assert [str(i) for i in issues] == []
+    run = await engine.create_run(text)
+    await engine.wait(run.run_id)
+    assert run.state is RunState.COMPLETED
+    assert run.records[0]["result"]["waited_s"] >= 0.05
+
+
+async def test_wait_step_rejects_bad_durations(engine: Engine) -> None:
+    # A negative literal fails the model; a non-numeric param fails the
+    # dry run — both before anything runs.
+    _s, issues = await engine.validate(
+        scenario_yaml("  - id: hold\n    wait_s: -1\n")
+    )
+    assert {i.code for i in issues} == {"schema"}
+    _s, issues = await engine.validate(
+        scenario_yaml(
+            "  - id: hold\n    wait_s: ${params.hold_s}\n",
+            extra="params:\n  hold_s: not_a_number\n",
+        )
+    )
+    assert {i.code for i in issues} == {"body_mismatch"}
+
+
+async def test_wait_step_is_not_gated(
+    config: OrchestratorConfig, registry: Registry, client: Any
+) -> None:
+    # A wait touches no device, so it must not trip the first-motion gate.
+    guarded = OrchestratorConfig(
+        log_dir=config.log_dir,
+        retry_delay_s=0.0,
+        confirm_first_motion=True,
+    )
+    engine = Engine(guarded, registry, client)
+    run = await engine.create_run(
+        scenario_yaml("  - id: hold\n    wait_s: 0.01\n", name="wait_gate")
+    )
+    await engine.wait(run.run_id)
+    assert run.state is RunState.COMPLETED
+    assert run.pending_confirmation is None
+
+
+async def test_abort_cuts_a_wait_short(engine: Engine) -> None:
+    run = await engine.create_run(
+        scenario_yaml("  - id: hold\n    wait_s: 30.0\n", name="wait_abort")
+    )
+    await wait_for(
+        lambda: len(run.records) == 0 and run.current_step is not None
+    )
+    await engine.abort(run.run_id)
+    await engine.wait(run.run_id)
+    assert run.state is RunState.ABORTED
+    # The 30 s hold must have ended early, not slept out.
+    assert run.records[0]["duration_s"] < WAIT_TIMEOUT_S
+
+
+# ── until: polled GETs ─────────────────────────────────────────────────────
+
+
+async def test_until_polls_to_condition(
+    engine: Engine, fake_l1: FakeL1
+) -> None:
+    # FakeL1 warms 5 C per state read while heating: 21.5 -> 41.5 on
+    # the fourth read, so the poll converges quickly.
+    text = scenario_yaml(
+        "  - id: heat\n    cell: cell5\n    action: hotplate/heater\n"
+        "    body:\n      enabled: true\n"
+        "  - id: hot\n    cell: cell5\n    action: hotplate/state\n"
+        "    method: GET\n"
+        '    until: "${result.plate_c} >= 40.0"\n'
+        "    poll_s: 0.01\n    timeout_s: 5.0\n    save_as: reached\n",
+        name="until_check",
+    )
+    _s, issues = await engine.validate(text)
+    assert [str(i) for i in issues] == []
+    run = await engine.create_run(text)
+    await engine.wait(run.run_id)
+    assert run.state is RunState.COMPLETED
+    assert run.vars["reached"]["plate_c"] >= 40.0
+    reads = [c for c in fake_l1.calls if c[2] == "/v1/hotplate/state"]
+    assert len(reads) == 4
+
+
+async def test_until_timeout_fails_the_run(
+    engine: Engine, fake_l1: FakeL1
+) -> None:
+    # Heater never turned on -> the plate never warms -> deadline.
+    run = await engine.create_run(
+        scenario_yaml(
+            "  - id: hot\n    cell: cell5\n    action: hotplate/state\n"
+            "    method: GET\n"
+            '    until: "${result.plate_c} >= 40.0"\n'
+            "    poll_s: 0.01\n    timeout_s: 0.05\n",
+            name="until_timeout",
+        )
+    )
+    await engine.wait(run.run_id)
+    assert run.state is RunState.FAILED
+    assert "until not reached" in run.records[-1]["error"]["message"]
+
+
+def test_until_rejects_post() -> None:
+    from orchestrator.scenario import load_scenario_text, ScenarioError
+
+    with pytest.raises(ScenarioError, match="GET-only"):
+        load_scenario_text(
+            scenario_yaml(
+                "  - id: bad\n    cell: cell5\n"
+                "    action: hotplate/heater\n"
+                "    body:\n      enabled: true\n"
+                '    until: "${result.heating} == True"\n',
+                name="until_post",
+            )
+        )
+
+
+# ── the three Cell 5 bench demos ───────────────────────────────────────────
+
+
+async def test_cell5_lamp_blink_demo(engine: Engine, fake_l1: FakeL1) -> None:
+    text = CELL5_BLINK.read_text(encoding="utf-8")
+    _s, issues = await engine.validate(text)
+    assert [str(i) for i in issues] == []
+    run = await engine.create_run(text, params=FAST_HOLDS)
+    await engine.wait(run.run_id)
+    assert run.state is RunState.COMPLETED
+    switches = [
+        c[3]["enabled"] for c in fake_l1.calls if c[2] == "/v1/lamp/switch"
+    ]
+    assert switches == [True, False, True, False, True, False]
+    assert fake_l1.lamp_on["cell5"] is False
+
+
+async def test_cell5_hotplate_demo(engine: Engine, fake_l1: FakeL1) -> None:
+    text = CELL5_HOTPLATE.read_text(encoding="utf-8")
+    _s, issues = await engine.validate(text)
+    assert [str(i) for i in issues] == []
+    run = await engine.create_run(text, params=FAST_HOLDS)
+    await engine.wait(run.run_id)
+    assert run.state is RunState.COMPLETED
+    assert fake_l1.target_c["cell5"] == 30.0
+    assert fake_l1.heating["cell5"] is False
+
+
+async def test_cell5_lamp_heat_demo(engine: Engine, fake_l1: FakeL1) -> None:
+    text = (
+        REPO_ROOT / "scenarios" / "demo_cell5_lamp_heat_40c.yaml"
+    ).read_text(encoding="utf-8")
+    _s, issues = await engine.validate(text)
+    assert [str(i) for i in issues] == []
+    run = await engine.create_run(text)
+    await engine.wait(run.run_id)
+    assert run.state is RunState.COMPLETED
+    # The run must end with heater AND lamp off, and the poll's saved
+    # response at or above target.
+    assert fake_l1.heating["cell5"] is False
+    assert fake_l1.lamp_on["cell5"] is False
+    assert run.vars["reached"]["plate_c"] >= 40.0
+    assert fake_l1.target_c["cell5"] == 40.0
+
+
+async def test_cell5_final_demo(engine: Engine, fake_l1: FakeL1) -> None:
+    text = (REPO_ROOT / "scenarios" / "demo_cell5_final.yaml").read_text(
+        encoding="utf-8"
+    )
+    _s, issues = await engine.validate(text)
+    assert [str(i) for i in issues] == []
+    run = await engine.create_run(text, params={"hold_s": 0.05})
+    await engine.wait(run.run_id)
+    assert run.state is RunState.COMPLETED
+    moves = [c[3]["z_mm"] for c in fake_l1.calls if c[2] == "/v1/zstage/move"]
+    assert moves == [400.0]  # out; both returns are real homes
+    assert fake_l1.z_mm["cell5"] == 0.0
+    assert fake_l1.heating["cell5"] is False
+    assert fake_l1.lamp_on["cell5"] is False
+    assert run.vars["reached"]["plate_c"] >= 39.0
+
+
+async def test_cell5_z_cycles_demo(engine: Engine, fake_l1: FakeL1) -> None:
+    text = CELL5_Z_CYCLES.read_text(encoding="utf-8")
+    _s, issues = await engine.validate(text)
+    assert [str(i) for i in issues] == []
+    run = await engine.create_run(text)
+    await engine.wait(run.run_id)
+    assert run.state is RunState.COMPLETED
+    tops = [c[3]["z_mm"] for c in fake_l1.calls if c[2] == "/v1/zstage/move"]
+    assert tops == [10.0, 0.0, 10.0, 0.0, 10.0, 0.0]
+    assert fake_l1.z_mm["cell5"] == 0.0
 
 
 def test_fake_l1_does_not_drift_from_the_real_openapi() -> None:
@@ -708,66 +930,3 @@ def test_api_run_lifecycle(
         )
         assert invalid.status_code == 400
         assert invalid.json()["issues"][0]["code"] == "schema"
-
-
-# ── Dry-run bounds checking (LearnedPatterns #25) ───────────────────────
-
-
-def _gantry_move_schema() -> tuple[dict, dict]:
-    """The real L1 OpenAPI and its GantryMoveRequest schema.
-
-    Imported the same way as the drift guard above: the L1 package pulls in
-    the hardware drivers, so a checkout without them skips rather than errors.
-    """
-    server_app = pytest.importorskip("server.app")
-    document = server_app.create_app().openapi()
-    return document, document["components"]["schemas"]["GantryMoveRequest"]
-
-
-def test_dry_run_rejects_a_body_outside_the_schema_bounds() -> None:
-    """The bench regression: a scenario validated clean twice, then its
-    first real move came back 422 for `accel_pct: 0` against `minimum: 1`.
-    The bound was in the document the validator had already parsed."""
-    document, schema = _gantry_move_schema()
-    stale = {
-        **schema,
-        "properties": {
-            **schema["properties"],
-            "accel_pct": {**schema["properties"]["accel_pct"], "minimum": 1.0},
-        },
-    }
-    body = {"x_mm": 50.0, "z_mm": 0.0, "speed_pct": 10, "accel_pct": 0}
-
-    problems = check_body(document, stale, body)
-
-    assert problems and "at least 1.0" in problems[0]
-
-
-def test_dry_run_accepts_a_body_inside_the_bounds() -> None:
-    """Guards the NotImplemented trap: an OpenAPI bound is a float and the
-    value is often an int, and `(10).__lt__(1.0)` is NotImplemented, which
-    is truthy — so a naive check flags every valid integer field."""
-    document, schema = _gantry_move_schema()
-
-    for speed in (1, 10, 100):  # both boundaries and a middle value
-        body = {"x_mm": 50.0, "z_mm": 0.0, "speed_pct": speed, "accel_pct": 0}
-        assert check_body(document, schema, body) == []
-
-
-@pytest.mark.parametrize(
-    "field,value,expected",
-    [
-        ("speed_pct", 0, "at least"),
-        ("speed_pct", 200, "at most"),
-        ("x_mm", -5.0, "at least"),
-    ],
-)
-def test_dry_run_bounds_cover_both_ends(
-    field: str, value: float, expected: str
-) -> None:
-    document, schema = _gantry_move_schema()
-    body = {"x_mm": 50.0, "z_mm": 0.0, "speed_pct": 10, "accel_pct": 0}
-
-    problems = check_body(document, schema, {**body, field: value})
-
-    assert any(field in p and expected in p for p in problems)

@@ -1429,3 +1429,122 @@ the *verification*, not just the outcome, survives.
   inside tolerance, so `move_to_mm` returns `already_in_tolerance`
   without commanding motion. A scenario that homes from a known
   non-zero position is needed before homing is trusted.
+
+## 2026-07-28 — NUC2 Cell D bring-up: pump-less shape, wait_s step, three bench demos
+
+- [x] Verified the bench hardware: MKS Z on FTDI `NTB3EP5R`
+      (NTREX USB2CAN, 0403:6001), IKA RCT digital on 0483:5740
+      (`/dev/ttyACM0`, auto-detected), tapo_plug1 reachable at
+      192.168.0.237 (P110M, secure.env in place). No syringe pump on the
+      bus (1A86:7523 absent).
+- [x] Made Cell D's pump optional: no `[pump]` table → the cell opens
+      with Z + hotplate + lamp and answers 409 on pump routes
+      (`cell/pump_z_thermal_cell.py`, `server/__main__.py`).
+- [x] Lamp target may be a bare IP unknown to the submodule's
+      device_list.md — the cell synthesises the entry
+      (`_resolve_lamp`; LearnedPatterns #29).
+- [x] Added the `wait_s` scenario step (local timed hold, abort-sliced,
+      not hazard-gated) to `orchestrator/scenario.py` + `engine.py`;
+      spec §8.1 updated; 8 new tests.
+- [x] Three Cell D bench scenarios: `demo_cell_d_lamp_blink.yaml`
+      (3 blinks ≈ 5 s), `demo_cell_d_hotplate_30c.yaml` (30 °C, 10 s
+      soak), `demo_cell_d_z_cycles.yaml` (home + 3 top-to-bottom
+      strokes). All validate + run against FakeL1 (40/40 tests pass).
+- [x] Real NUC2 configs written (gitignored): `server/nuc2/cell5.toml`,
+      `orchestrator/config.toml` (cell5 @ 127.0.0.1:17062).
+- [x] Python env bootstrapped in `.venv/` (LearnedPatterns #28).
+- [ ] Bench verification: blocked on USB permissions (dialout group +
+      raw-USB udev rule need sudo), then L1 server up → validate →
+      operator-gated runs of the three demos.
+- [x] Register the GitHub issue for this bring-up via `gh issue create` —
+      issue #8. (Needed a one-time `gh auth login` by the operator; the
+      `gh` CLI itself was installed to ~/.local/bin, no sudo.)
+
+## 2026-07-28 (cont.) — until: polled GET, lamp+heat-to-40C run, bench recovery
+
+- [x] Root-caused the RCT wedge chain: hotplate's USB interface is
+      USB-powered (hotplate power-cycle alone never resets it) and the
+      shared USB hub was destabilizing it — moved to a DIRECT NUC port
+      after a full drain (USB out -> power off -> 20 s -> direct port
+      -> power on): sweeps went 2/10 -> 10/10. ModemManager disabled
+      and udev MODE 0666 + ID_MM_DEVICE_IGNORE rules installed.
+- [x] Z motor CAN silence after the hub bounces — restored by the
+      operator re-powering the motor driver; SETUP OK.
+- [x] Added the `until:` polled GET to the scenario language (spec
+      §8.1): GET-only, `${result.*}` condition, `poll_s` interval,
+      `timeout_s` bounds the whole poll, per-read cell lock so abort
+      never queues. 4 new tests; FakeL1 hotplate now warms 5 C per
+      state read while heating. 44/44 pass.
+- [x] `scenarios/demo_cell_d_lamp_heat_40c.yaml` — lamp on, heat to
+      40 C, shut heater+lamp on arrival (user-requested sequence).
+- [x] Bench: diagnose ok (pump absent), hotplate/state 10/10 over
+      HTTP, all four Cell D scenarios validate ok against the live L1.
+- [x] Real run `cell_d_lamp_heat_40c` submitted through the
+      orchestrator API; operator confirmed the hazard gate.
+- [x] `until:` tolerance fix after the first real run hung at 39.0 C
+      (readback granularity + control band; LearnedPatterns #32). Rerun
+      COMPLETED 13/13 steps: lamp on -> 40 C -> heater+lamp off, final
+      state safe. Runlog runs/20260728T093205Z-cell_d_lamp_heat_40c.
+- [x] LearnedPatterns #31 (USB-powered interface + hub root cause,
+      full-drain recovery, direct-port rule) and #14.
+- [x] Real run `cell_d_z_cycles` COMPLETED 17/17 (z_top_mm=50 chosen by
+      the operator): home 15.5 s, three 0<->50 mm strokes at ~3.6 s
+      each, re-homed at the end. Runlog
+      runs/20260728T093713Z-cell_d_z_cycles.
+- [x] `scenarios/demo_cell_d_final.yaml` — the full user-specified
+      sequence: home -> 400 mm -> home -> lamp+heater to 40 C ->
+      2 min dwell -> everything off verified. Real run COMPLETED
+      21/21 steps (z_up 10.5 s, wait_hot 208.9 s, dwell 120 s);
+      final state z=0, heating off, lamp off. FakeL1 e2e test added
+      (45/45). Runlog runs/20260728T094346Z-cell_d_final.
+- [x] Documentation pass (user request): README Status rewritten around
+      the Cell D bench verification (device identity -> L1 probes ->
+      dry runs -> three gated real runs, with the results table and
+      how-verified ladder), scenario list + wait_s/until + Cell D bench
+      rules added; real NUC IPs (NUC1=192.168.0.126, NUC2=192.168.0.120)
+      recorded in orchestrator/config.toml.example, the real
+      config.toml (NUC1 cells staged as comments), and the spec's §2/§12
+      examples.
+- [x] Rename "Cell D" -> "Cell 5" repo-wide per the user's correction:
+      docs (README, CLAUDE.md, spec, audit, bringup, deploy), code
+      comments/docstrings, configs, and the scenario files
+      (demo_cell_d_* -> demo_cell5_*, name: cell_d_* -> cell5_*).
+      Historical ToDo/LearnedPatterns entries left as written
+      (append-only). All 6 scenarios re-validated against the live L1;
+      45/45 tests; ruff clean.
+- [x] README rewritten for readers new to this kind of automation:
+      layered mermaid overview, bench topology with real IPs, the
+      verification ladder, a run sequence diagram, and a scenario
+      mini-tutorial. (English per CommonClaude language rule.)
+- [x] README: per-cell composition table added (cell1-5 -- NUC/port,
+      shape class, devices with driver names, bench status, and the
+      per-cell special properties).
+- [x] Both PRs merged on the user's approval:
+      InnoCORESDL PR #9 (feat/cell-d-bench-bringup -> main, 6 commits)
+      and HotplateController PR #8 (fix/serial-robustness -> main,
+      d2c4b3d). Merged branches deleted local+remote; submodule left on
+      the pinned 2f3b8d6 (an ancestor of upstream main, identical
+      content, so no pin-bump commit is needed).
+
+## 2026-07-28 — Device repos updated with today's bench work
+
+- [x] HotplateController: PR #10 merged (docs/nuc2-bench-notes) — the
+      direct-USB-port rule, the full-drain wedge recovery, and the
+      whole-degree readback tolerance recorded in README Troubleshooting
+      + a bench-findings section; ToDo entry for the #8 verification.
+      (Serial hardening itself merged earlier as PR #8.)
+- [x] SmartPlugController: PR #15 merged (chore/nuc2-bench-2026-07-28) —
+      device_list.md plug1 corrected to 192.168.0.237, LearnedPatterns
+      §E4 (DHCP-drift rule), ToDo entry for the bench verification.
+- [ ] ESP32S3BOX3MotorController: push DENIED (repo belongs to
+      kkhyunhho; coport-uni has no write access). The intended ToDo
+      entry (single-motor group path bench-verified; CAN silent after
+      adapter USB power loss until the motor driver is re-powered) is
+      recorded here instead — ask kkhyunhho for access or a fork to
+      land it upstream.
+- [x] Submodule pins bumped: HotplateController -> 1c2bc8b,
+      SmartPlugController -> 00ef6c6.
+- [x] ESP32S3BOX3MotorController forked to coport-uni (upstream write
+      access denied): fork PR #2 merged with the Cell 5 bench ToDo
+      entry (issue #1); submodule URL repointed to the fork in
+      .gitmodules + SUBMODULES.md; pin bumped 872df98 -> f5c8089.

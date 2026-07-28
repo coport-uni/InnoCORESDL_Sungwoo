@@ -87,7 +87,7 @@ def _no_gantry() -> WrongStateError:
 
 
 def _absent(family: str) -> WrongStateError:
-    # Defensive stub for the action sets only Cell D (cell5) has: the
+    # Defensive stub for the action sets only Cell 5 (cell5) has: the
     # single Z stage, the hotplate and the IR lamp.
     return WrongStateError(
         f"balance+linear cell has no {family}", command=family

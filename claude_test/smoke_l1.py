@@ -26,7 +26,7 @@ Usage:
         --suite discovery --suite balance --suite linear \
         --out claude_test/smoke_cell4.md
 
-    # cell5 / Cell D (pump + single Z + hotplate + IR lamp)
+    # cell5 / Cell 5 (pump + single Z + hotplate + IR lamp)
     python claude_test/smoke_l1.py --base-url http://127.0.0.1:17062 \
         --suite discovery --suite lamp --suite hotplate --suite zstage \
         --suite pump --out claude_test/smoke_cell5.md
@@ -211,7 +211,7 @@ def _suites(step_mm: float, volume_uL: float) -> dict[str, tuple[Check, ...]]:
         "zstage": (
             Check(
                 "zstage_home",
-                "Home Cell D's single Z axis",
+                "Home Cell 5's single Z axis",
                 "zstage/home",
                 expect="z_mm 0.0; record the duration for A3",
                 briefing=(
