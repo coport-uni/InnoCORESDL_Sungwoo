@@ -28,6 +28,7 @@ from .cell_protocol import (
 )
 from LinearMotorController import (
     LinearMotorController,
+    LinkDroppedError,
     MotionStopError,
     MoveResult,
 )
@@ -260,6 +261,12 @@ class BalanceLinearCell(Cell):
             # moving and no software path can halt it, so this must reach
             # the operator verbatim rather than as a generic 500.
             raise DeviceFaultError(str(exc), command=command) from exc
+        except LinkDroppedError as exc:
+            # The USB link vanished mid-move and the rail was stopped.
+            # The driver refuses to resume across a reconnect, so this is
+            # a failed move with the rail parked somewhere unknown --
+            # a transport problem, not an amp fault, and never a success.
+            raise TransportError(str(exc), command=command) from exc
         return self._settled_mm(result, command)
 
     @staticmethod
