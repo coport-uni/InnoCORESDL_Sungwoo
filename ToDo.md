@@ -332,3 +332,9 @@ was a TBD standalone item through spec v0.9.
 - [x] README: per-cell composition table added (cell1-5 -- NUC/port,
       shape class, devices with driver names, bench status, and the
       per-cell special properties).
+- [x] Both PRs merged on the user's approval:
+      InnoCORESDL PR #9 (feat/cell-d-bench-bringup -> main, 6 commits)
+      and HotplateController PR #8 (fix/serial-robustness -> main,
+      d2c4b3d). Merged branches deleted local+remote; submodule left on
+      the pinned 2f3b8d6 (an ancestor of upstream main, identical
+      content, so no pin-bump commit is needed).
