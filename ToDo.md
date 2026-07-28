@@ -1262,6 +1262,9 @@ stopped before asking whether the amp was configured to care.
 
 ### THE ACTUAL CAUSE: Err16.0 overload — the rail was homing into its hard stop
 
+Tracked as issue #15. Fixed in dbc87b0 (`home_mm`, default 5.0) and
+driver 0e78c42; the operator actions below are still open.
+
 Operator read the amp's front panel: **Err16.0**, motor overload
 protection. That closes the chain and supersedes both earlier guesses in
 this file (POT, then "the amp's own state, cause unknown").
