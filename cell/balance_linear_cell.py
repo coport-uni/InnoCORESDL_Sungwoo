@@ -31,6 +31,7 @@ from LinearMotorController import (
     LinkDroppedError,
     MotionStopError,
     MoveResult,
+    SpeedCommandError,
 )
 
 
@@ -41,15 +42,30 @@ class BalanceLinearConfig:
     linear_port: str = "110A:1150"  # MINAS A6 over RS485 via Moxa UPort 1150
     scale_port: str | None = None  # None → auto-detect by Sartorius VID
     ambient: str | None = None
+    #: Where `linear/home` parks the rail, in mm. **Not 0.** On this
+    #: bench the 0 mm origin sits on the mechanical end stop, and the
+    #: closed loop coasts 1.5-1.8 mm past its target, so homing to 0
+    #: drives the carriage into the stop and holds it there until the
+    #: amp trips Err16.0 (motor overload) and de-energises the servo —
+    #: which is exactly what happened on 2026-07-28, after which every
+    #: move displaced 0 mm while the amp still answered serial normally.
+    #: Keep this clear of the stop by more than the coast distance.
+    home_mm: float = 5.0
 
 
-#: Budget for one settled weight read. Measured on this bench: 1.2-3.6 s
-#: to converge, so this is roughly eight times the worst observed case.
-#: Deliberately below the tightest `balance/weight` step timeout in the
-#: scenarios (40 s) so the driver's timeout fires first — its message
+#: Budget for one settled weight read. A healthy read on this bench
+#: converges in 1.2-3.6 s, so this is far more than the measurement
+#: needs — it is sized for the bench being *disturbed*, where the
+#: balance keeps rejecting its own readings as unsettled. 30 s was not
+#: enough: `confirm_zero` hit it exactly (30.003 s) on a pan that was
+#: empty and freshly tared.
+#:
+#: Still deliberately below the tightest `balance/weight` step timeout in
+#: the scenarios (75 s) so the driver's timeout fires first — its message
 #: names the likely cause ("is COM.OUTP set to AUTO.W/O?"), where a step
-#: timeout would only say the call was slow.
-SETTLE_TIMEOUT_S = 30.0
+#: timeout would only say the call was slow. Raise both together or the
+#: ordering inverts and the useful message is lost.
+SETTLE_TIMEOUT_S = 60.0
 
 
 def _no_pump() -> WrongStateError:
@@ -244,7 +260,12 @@ class BalanceLinearCell(Cell):
     def home_linear(self) -> float:
         # No discrete homing on the RS485 driver; the encoder origin is 0 mm,
         # reached by an absolute move via the driver's PID closed loop.
-        return self._absolute_move(0.0, "linear/home")
+        # Parks at `home_mm`, NOT at the 0 mm origin: on this bench 0 is on
+        # the mechanical stop, and homing there is what tripped Err16.0
+        # (see BalanceLinearConfig.home_mm). "Home" here means the defined
+        # safe rest position, which is the only useful meaning when the
+        # encoder origin is not a place the carriage can sit.
+        return self._absolute_move(self._cfg.home_mm, "linear/home")
 
     def move_linear(self, y_mm: float) -> float:
         # Absolute Y target in mm. The RS485 driver's move_to_mm runs a
@@ -261,6 +282,13 @@ class BalanceLinearCell(Cell):
             # moving and no software path can halt it, so this must reach
             # the operator verbatim rather than as a generic 500.
             raise DeviceFaultError(str(exc), command=command) from exc
+        except SpeedCommandError as exc:
+            # The amp never took the speed command, so the rail never
+            # started and is still where it was. A transport problem
+            # rather than an amp fault, and worth its own branch because
+            # the operator action differs: nothing is moving, so there is
+            # no e-stop decision to make -- just a retry.
+            raise TransportError(str(exc), command=command) from exc
         except LinkDroppedError as exc:
             # The USB link vanished mid-move and the rail was stopped.
             # The driver refuses to resume across a reconnect, so this is

@@ -39,6 +39,12 @@ params:
   # coarse move instead of chattering with small corrections, which is
   # where every bench failure happened.
   tolerance_mm: 2.0
+  # Where the rail rests, and NOT 0. The 0 mm encoder origin sits on the
+  # mechanical stop; with the loop coasting 1.5-1.8 mm past its target, a
+  # return to 0 pushes the carriage into the stop and holds it there
+  # until the amp trips Err16.0 (motor overload). Must match `home_mm` in
+  # the cell's config.
+  home_mm: 5.0
 
 defaults:
   on_fail: abort        # a motion step must never be retried blindly
@@ -63,7 +69,7 @@ steps:
     save_as: homed
 
   - id: verify_home
-    assert: "${homed.y_mm} <= ${params.tolerance_mm}"
+    assert: "${homed.y_mm} >= ${params.home_mm} - ${params.tolerance_mm} and ${homed.y_mm} <= ${params.home_mm} + ${params.tolerance_mm}"
 
   - id: move_out
     cell: cell4
@@ -95,9 +101,9 @@ steps:
     cell: cell4
     action: linear/move
     body:
-      y_mm: 0.0
+      y_mm: "${params.home_mm}"
     timeout_s: 60.0     # calibrate from M0/A3
     save_as: post
 
   - id: verify_back_home
-    assert: "${post.y_mm} <= ${params.tolerance_mm}"
+    assert: "${post.y_mm} >= ${params.home_mm} - ${params.tolerance_mm} and ${post.y_mm} <= ${params.home_mm} + ${params.tolerance_mm}"

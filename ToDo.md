@@ -1226,3 +1226,96 @@ stopped before asking whether the amp was configured to care.
       meaning into them without `MinasA6_driver_main.pdf`. Decoding them
       properly would make this diagnosable over the wire instead of by
       eye.
+
+### 2026-07-28 (later) — `demo_gantry_stair.yaml` + the dry run learns to read bounds
+
+- [x] **`scenarios/demo_gantry_stair.yaml`** — origin → (50,50) →
+      (100,100) → (150,150) → origin, the L2 form of the driver's own
+      `CVMeasure.py` stair. Asserts each 50 mm increment on **both** axes
+      against the previous waypoint's readings, cross-checks every
+      waypoint against `/v1/status`, bounds the far corner absolutely so
+      three good steps cannot drift the origin, and closes the loop by
+      comparing the parked position against the homed one. 31 steps, dry
+      run ok.
+      **The path is not diagonal**: `move_gantry` runs up → X → down
+      whenever X changes, so Z fully retracts between every waypoint and
+      the head never traverses X while lowered.
+- [x] **The dry run now checks numeric bounds**, not just field names and
+      types (`_check_bounds`). This is the gap that let `accel_pct: 0`
+      pass validation twice and then 422 on the bench — the bound was in
+      the OpenAPI document the validator had already fetched and parsed.
+      Verified against the exact regression, plus valid bodies and both
+      boundary values. LearnedPatterns #25.
+- [x] All five scenarios re-validated under the stricter check; the four
+      for cells on this bench pass (cell5's is `cell_unreachable`, as
+      expected — Cell D is on NUC2).
+- [x] Tests 71 passed, ruff clean.
+
+- [ ] **`demo_gantry_stair.yaml` NEEDS A TRAVEL DECISION BEFORE IT RUNS.**
+      It goes to 150 mm on both axes. The earlier run was deliberately
+      capped at **50 mm** because the clearance below Z was not measured,
+      and nothing on this bench has moved past 50 mm. The driver's
+      `_max_travel_mm = 400` is a software clamp, not a measurement.
+      Confirm 150 mm of free travel on X **and** below Z before running.
+- [ ] `demo_gantry_step.yaml` still has not been run end-to-end either;
+      run it first, it is the smaller of the two.
+
+### THE ACTUAL CAUSE: Err16.0 overload — the rail was homing into its hard stop
+
+Operator read the amp's front panel: **Err16.0**, motor overload
+protection. That closes the chain and supersedes both earlier guesses in
+this file (POT, then "the amp's own state, cause unknown").
+
+    successful run's move_home overshot to -1.797 mm, past the origin
+      -> rail pressed against the mechanical stop and kept pushing
+      -> Err16.0 overload trips, servo de-energises
+      -> every later move displaces exactly 0, in any direction
+      -> serial parameter reads/writes keep working throughout
+
+Everything measured fits: writes 30/30, all parameters correct, and
+`SRV-ON input = 1` — which says a signal is present on the wire, not
+that the servo is energised. An alarmed amp answers serial normally.
+
+- [x] Confirmed the driver has **no alarm read and no alarm clear at
+      all** (`grep alarm LinearMotorController.py` -> nothing). This is
+      why `diagnose()` still answered `stage.ok: true`: model and
+      version read fine, and nothing ever asks whether the amp is
+      alarmed. Same "health check that cannot fail" as the hardcoded
+      `ok: True` fixed in ca048f9, one level deeper.
+- [ ] **Operator, in this order**: pull the rail clear of the stop by
+      hand (the servo is off, so it moves freely), *then* clear the
+      alarm — panel, A-CLR on SI8, or an amp power cycle. Clearing while
+      still pressed re-trips it immediately.
+- [ ] **Stop homing into the stop.** The origin at 0 mm sits on the
+      mechanical stop and the closed loop coasts 1.5-1.8 mm past its
+      target, so `move_home` *drives into it every time*. The -1.797 mm
+      landing recorded above as "0.2 mm of margin left" was not a near
+      miss on an assert — it was the rail pushing the stop. Fix by
+      homing to a safe offset (~+3 mm) or redefining the origin; the
+      value needs the measured clearance to the stop, so ask the
+      operator for it rather than guessing.
+- [ ] **Teach the driver about alarms.** Add an alarm read, surface it
+      in `diagnose()` so `stage.ok` goes false when the amp is alarmed,
+      and name it in the move error instead of "stalled". Today's
+      sequence — stalled -> POT -> "amp state unknown" -> operator reads
+      the panel — was three wrong turns for something the amp knew and
+      could have said. `cmd=2 mode=0` returned `[01 52 00]`; decode it
+      against `MinasA6_driver_sub.pdf` P.7-28~7-41 rather than guessing.
+
+### Balance settle budget raised 30 s -> 60 s (operator request)
+
+`confirm_zero` failed at exactly 30.003 s, hitting `SETTLE_TIMEOUT_S`.
+
+- [x] `SETTLE_TIMEOUT_S` 30 -> 60 s, and the three `balance/weight` step
+      timeouts 40/60/60 -> **75 s**, keeping the invariant that the
+      driver's timeout fires first so its message ("is COM.OUTP set to
+      AUTO.W/O?") reaches the operator instead of a bare "step was slow".
+- [x] **Measured the balance while doing it, and it is healthy**:
+      2.6 lines/s, consecutive-3 spread median 0.0005 g, p90 0.0009 g,
+      and 21/23 windows inside the 0.002 g tolerance. A healthy settle
+      costs ~1.2 s.
+- [ ] So 30 s was never a tight budget — hitting it means the stream
+      went **silent**, and 60 s of silence still fails, just later. The
+      raise buys margin, not a fix. If it recurs, the question is why
+      the balance stopped talking (COM.OUTP reverted? menu? standby?),
+      not how long to wait.

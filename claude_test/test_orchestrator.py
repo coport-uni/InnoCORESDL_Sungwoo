@@ -19,7 +19,7 @@ from typing import Any, Callable
 import pytest
 from fastapi.testclient import TestClient
 
-from conftest import FakeL1, REPO_ROOT, openapi_document
+from conftest import FakeL1, HOME_MM, REPO_ROOT, openapi_document
 from orchestrator.app import create_app
 from orchestrator.engine import (
     Engine,
@@ -33,6 +33,7 @@ from orchestrator.runlog import META_FILE, SCENARIO_FILE, STEPS_FILE, VARS_FILE
 from orchestrator.scenario import (
     AssertSyntaxError,
     ScenarioError,
+    check_body,
     eval_assert,
     load_scenario_text,
     operation,
@@ -184,7 +185,8 @@ async def test_demo_run_completes_and_writes_runlog(
     assert len(run.records) == len(run.scenario.steps)
     assert all(r["ok"] for r in run.records)
     # The rail actually went out and came back on the simulated cell.
-    assert fake_l1.position_mm["cell4"] == 0.0
+    # The rail parks at the safe home, not on the 0 mm stop.
+    assert fake_l1.position_mm["cell4"] == HOME_MM
     assert run.vars["at_target"]["y_mm"] == run.params["target_mm"]
 
     log_dir = Path(run.log.dir)
@@ -211,7 +213,7 @@ async def test_params_override_reaches_the_body(
         for _c, _m, path, body in fake_l1.calls
         if path == "/v1/linear/move"
     ]
-    assert moves == [12.5, 0.0]
+    assert moves == [12.5, HOME_MM]
 
 
 async def test_parallel_block_uses_distinct_cells(engine: Engine) -> None:
@@ -230,7 +232,9 @@ async def test_assert_failure_fails_the_run(engine: Engine) -> None:
     text = scenario_yaml(
         "  - id: home\n    cell: cell4\n    action: linear/home\n"
         "    save_as: h\n"
-        '  - id: check\n    assert: "${h.y_mm} > 1.0"\n'
+        # Compared against a position the rail cannot reach, so this
+        # tests the assert machinery and not the fake's home value.
+        '  - id: check\n    assert: "${h.y_mm} > 1000.0"\n'
     )
     run = await engine.create_run(text)
     await engine.wait(run.run_id)
@@ -704,3 +708,66 @@ def test_api_run_lifecycle(
         )
         assert invalid.status_code == 400
         assert invalid.json()["issues"][0]["code"] == "schema"
+
+
+# ── Dry-run bounds checking (LearnedPatterns #25) ───────────────────────
+
+
+def _gantry_move_schema() -> tuple[dict, dict]:
+    """The real L1 OpenAPI and its GantryMoveRequest schema.
+
+    Imported the same way as the drift guard above: the L1 package pulls in
+    the hardware drivers, so a checkout without them skips rather than errors.
+    """
+    server_app = pytest.importorskip("server.app")
+    document = server_app.create_app().openapi()
+    return document, document["components"]["schemas"]["GantryMoveRequest"]
+
+
+def test_dry_run_rejects_a_body_outside_the_schema_bounds() -> None:
+    """The bench regression: a scenario validated clean twice, then its
+    first real move came back 422 for `accel_pct: 0` against `minimum: 1`.
+    The bound was in the document the validator had already parsed."""
+    document, schema = _gantry_move_schema()
+    stale = {
+        **schema,
+        "properties": {
+            **schema["properties"],
+            "accel_pct": {**schema["properties"]["accel_pct"], "minimum": 1.0},
+        },
+    }
+    body = {"x_mm": 50.0, "z_mm": 0.0, "speed_pct": 10, "accel_pct": 0}
+
+    problems = check_body(document, stale, body)
+
+    assert problems and "at least 1.0" in problems[0]
+
+
+def test_dry_run_accepts_a_body_inside_the_bounds() -> None:
+    """Guards the NotImplemented trap: an OpenAPI bound is a float and the
+    value is often an int, and `(10).__lt__(1.0)` is NotImplemented, which
+    is truthy — so a naive check flags every valid integer field."""
+    document, schema = _gantry_move_schema()
+
+    for speed in (1, 10, 100):  # both boundaries and a middle value
+        body = {"x_mm": 50.0, "z_mm": 0.0, "speed_pct": speed, "accel_pct": 0}
+        assert check_body(document, schema, body) == []
+
+
+@pytest.mark.parametrize(
+    "field,value,expected",
+    [
+        ("speed_pct", 0, "at least"),
+        ("speed_pct", 200, "at most"),
+        ("x_mm", -5.0, "at least"),
+    ],
+)
+def test_dry_run_bounds_cover_both_ends(
+    field: str, value: float, expected: str
+) -> None:
+    document, schema = _gantry_move_schema()
+    body = {"x_mm": 50.0, "z_mm": 0.0, "speed_pct": 10, "accel_pct": 0}
+
+    problems = check_body(document, schema, {**body, field: value})
+
+    assert any(field in p and expected in p for p in problems)

@@ -66,6 +66,13 @@ params:
   min_vial_g: 20.0
   max_vial_g: 30.0
   max_drift_g: 0.05     # how far the return move may shift the reading
+  # Where the rail rests, and NOT 0. The 0 mm encoder origin sits on the
+  # mechanical stop; the closed loop coasts 1.5-1.8 mm past its target,
+  # so a run that returned to 0 drove the carriage into the stop and held
+  # it there until the amp tripped Err16.0 (motor overload) and killed
+  # the servo. Must match `home_mm` in the cell's config, or `home` and
+  # `move_home` park in different places.
+  home_mm: 5.0
 
 defaults:
   on_fail: abort        # never retry a motion or a weighing step blindly
@@ -91,7 +98,7 @@ steps:
     save_as: homed
 
   - id: verify_home
-    assert: "${homed.y_mm} <= ${params.tolerance_mm} and ${homed.y_mm} >= -${params.tolerance_mm}"
+    assert: "${homed.y_mm} >= ${params.home_mm} - ${params.tolerance_mm} and ${homed.y_mm} <= ${params.home_mm} + ${params.tolerance_mm}"
 
   - id: tare
     cell: cell4
@@ -105,7 +112,10 @@ steps:
     cell: cell4
     action: balance/weight
     method: GET
-    timeout_s: 40.0
+    # 75 s, above the cell's 60 s settling budget, so a balance that
+    # never settles is reported by the driver ("is COM.OUTP set to
+    # AUTO.W/O?") rather than by a step timeout that only says "slow".
+    timeout_s: 75.0
     save_as: zeroed
 
   - id: verify_zeroed
@@ -137,7 +147,7 @@ steps:
       Continuing early is safe -- balance/weight blocks until the balance
       itself calls the value stable, so it costs a timeout, not a wrong
       number.)
-    timeout_s: 60.0     # settling is the operator's pace, not the bus's
+    timeout_s: 75.0     # settling is the operator's pace, not the bus's
     save_as: vial
 
   - id: verify_vial_present
@@ -151,12 +161,12 @@ steps:
     cell: cell4
     action: linear/move
     body:
-      y_mm: 0.0
+      y_mm: "${params.home_mm}"
     timeout_s: 90.0
     save_as: back
 
   - id: verify_back_home
-    assert: "${back.y_mm} <= ${params.tolerance_mm} and ${back.y_mm} >= -${params.tolerance_mm}"
+    assert: "${back.y_mm} >= ${params.home_mm} - ${params.tolerance_mm} and ${back.y_mm} <= ${params.home_mm} + ${params.tolerance_mm}"
 
   # The point of the second read: the vial has not changed, so any
   # difference from `weigh` is what carrying the balance did to the
@@ -166,7 +176,7 @@ steps:
     cell: cell4
     action: balance/weight
     method: GET
-    timeout_s: 60.0
+    timeout_s: 75.0
     save_as: vial_after
 
   - id: verify_no_drift
