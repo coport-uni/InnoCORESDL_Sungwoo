@@ -300,3 +300,13 @@ was a TBD standalone item through spec v0.9.
       state safe. Runlog runs/20260728T093205Z-cell_d_lamp_heat_40c.
 - [x] LearnedPatterns #13 (USB-powered interface + hub root cause,
       full-drain recovery, direct-port rule) and #14.
+- [x] Real run `cell_d_z_cycles` COMPLETED 17/17 (z_top_mm=50 chosen by
+      the operator): home 15.5 s, three 0<->50 mm strokes at ~3.6 s
+      each, re-homed at the end. Runlog
+      runs/20260728T093713Z-cell_d_z_cycles.
+- [x] `scenarios/demo_cell_d_final.yaml` — the full user-specified
+      sequence: home -> 400 mm -> home -> lamp+heater to 40 C ->
+      2 min dwell -> everything off verified. Real run COMPLETED
+      21/21 steps (z_up 10.5 s, wait_hot 208.9 s, dwell 120 s);
+      final state z=0, heating off, lamp off. FakeL1 e2e test added
+      (45/45). Runlog runs/20260728T094346Z-cell_d_final.

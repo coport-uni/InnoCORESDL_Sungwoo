@@ -701,6 +701,23 @@ async def test_cell_d_lamp_heat_demo(engine: Engine, fake_l1: FakeL1) -> None:
     assert fake_l1.target_c["cell5"] == 40.0
 
 
+async def test_cell_d_final_demo(engine: Engine, fake_l1: FakeL1) -> None:
+    text = (REPO_ROOT / "scenarios" / "demo_cell_d_final.yaml").read_text(
+        encoding="utf-8"
+    )
+    _s, issues = await engine.validate(text)
+    assert [str(i) for i in issues] == []
+    run = await engine.create_run(text, params={"hold_s": 0.05})
+    await engine.wait(run.run_id)
+    assert run.state is RunState.COMPLETED
+    moves = [c[3]["z_mm"] for c in fake_l1.calls if c[2] == "/v1/zstage/move"]
+    assert moves == [400.0]  # out; both returns are real homes
+    assert fake_l1.z_mm["cell5"] == 0.0
+    assert fake_l1.heating["cell5"] is False
+    assert fake_l1.lamp_on["cell5"] is False
+    assert run.vars["reached"]["plate_c"] >= 39.0
+
+
 async def test_cell_d_z_cycles_demo(engine: Engine, fake_l1: FakeL1) -> None:
     text = CELL_D_Z_CYCLES.read_text(encoding="utf-8")
     _s, issues = await engine.validate(text)
