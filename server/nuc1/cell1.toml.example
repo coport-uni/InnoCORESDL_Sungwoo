@@ -3,6 +3,10 @@
 #   systemctl enable --now cell@nuc1-cell1
 #   # or, by hand:  python -m server --config server/nuc1/cell1.toml
 
+# Omit this whole table to run the cell as a gantry with no pump: every
+# /v1/pump/* call then answers 409 ("configured without a pump") and
+# diagnose() reports pump.present=false, instead of the cell failing to
+# open at all. That is how cell1 runs while its SY-01B is off the bench.
 [pump]
 port = "1A86:7523"     # SY-01B CH340 USB-serial (VID:PID)
 syringe_uL = 125
@@ -11,7 +15,9 @@ init_force = 2
 [stage]
 # FTDI serial of the X adapter; the other two adapters are the paired Z,
 # auto-assigned and always driven together (mks_motor move_sync).
-serial_x = "NTAM63XD"
+# Run external/ESP32S3BOX3MotorController/CAN2USBAdapterDeviceRecognition.py
+# to read the serials off the adapters actually plugged into this NUC.
+serial_x = "NTAMU6TO"
 z_coord_invert = true
 x_coord_invert = true
 

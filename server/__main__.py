@@ -41,12 +41,16 @@ def _load(path: Path) -> tuple[Config, ServerConfig]:
     stage = raw.get("stage", {})
     server = raw.get("server", {})
     cell_cfg = Config(
-        pump_port=pump.get("port", "1A86:7523"),
+        # No [pump] table → the cell serves its gantry alone and the pump
+        # action set 409s. The default only applies when the table exists
+        # but omits `port`; absence of the table is a deliberate "no pump",
+        # not a request for the default one.
+        pump_port=pump.get("port", "1A86:7523") if pump else None,
         pump_address=int(pump.get("address", 1)),
         pump_baud=int(pump.get("baud", 9600)),
         syringe_uL=int(pump.get("syringe_uL", 125)),
         pump_init_force=int(pump.get("init_force", 2)),
-        motor_serial_x=stage.get("serial_x", "NTAM63XD"),
+        motor_serial_x=stage.get("serial_x", "NTAMU6TO"),
         z_coord_invert=bool(stage.get("z_coord_invert", True)),
         x_coord_invert=bool(stage.get("x_coord_invert", True)),
         home_dir_z=int(stage.get("home_dir_z", 0)),
