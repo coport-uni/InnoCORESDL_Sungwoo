@@ -31,7 +31,14 @@ description: >
 
 params:
   target_mm: 50.0
-  tolerance_mm: 0.1     # the driver's closed loop converges to +-0.1 mm
+  # 2.0 mm, matching the driver's default. This is not slack in the
+  # assert -- it is the value the closed loop is driven to, and it must
+  # not be tighter than what move_to_mm accepts or every run fails on a
+  # rail the driver considers arrived. It is set above the measured
+  # coast (1.5-1.8 mm at speed 25) so the loop converges on the first
+  # coarse move instead of chattering with small corrections, which is
+  # where every bench failure happened.
+  tolerance_mm: 2.0
 
 defaults:
   on_fail: abort        # a motion step must never be retried blindly

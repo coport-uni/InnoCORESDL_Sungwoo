@@ -741,3 +741,33 @@ move_to_weigh  ->  HTTP 500: did not reach its target (stalled);
       this rate. Next step is physical: swap the UPort, or at least its
       USB cable. The balance on the same bus has not faltered once all
       day.
+
+### Positioning tolerance relaxed to 2.0 mm (operator's choice)
+
+Of the three options put to the operator — retry the speed write, switch
+to the amp's position-control mode, or relax the tolerance — the last was
+chosen, at 2.0 mm.
+
+- [x] The value is not arbitrary. `tolerance_mm` is handed down to
+      `move_relative_mm`, whose poll loop stops as soon as the remaining
+      distance is inside it, so it governs **how the rail is driven**, not
+      just what counts as arrival. Set above the measured coast
+      (1.5-1.8 mm at speed 25) the first coarse move lands inside
+      tolerance; set below it, the loop overshoots and then enters the
+      small-correction regime where every bench failure occurred.
+- [x] `external/LinearMotorController` `6786366`: `move_to_mm` default
+      0.1 -> 2.0, with the measurement recorded in the docstring.
+- [x] Both scenarios' `params.tolerance_mm` 0.1 -> 2.0. The scenario
+      value must not be tighter than the driver's, or every run fails an
+      assert on a rail the driver considers arrived.
+- [x] ruff clean, `pytest` 32 pass, all three scenarios parse, driver
+      default and scenario params confirmed equal. Recorded failures of
+      1.846, 1.408 and 0.676 mm all fall inside the new tolerance.
+- [ ] **Unverified on hardware** — the adapter has been faulted since
+      before the change. The premise to confirm is that one coarse move
+      lands inside 2 mm, removing the correction chatter entirely.
+- [ ] 2 mm is a 20x relaxation and a real loss of precision, accepted to
+      buy convergence over an unreliable link. Revisit if the bench needs
+      finer positioning *and* the RS485 link becomes dependable — or if
+      the position-control mode is adopted, which would make the
+      trade-off unnecessary.
