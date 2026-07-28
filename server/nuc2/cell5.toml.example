@@ -1,0 +1,46 @@
+# NUC2 / Cell D -- pump + single Z stage + hotplate + IR lamp (Tapo plug).
+# Copy to server/nuc2/cell5.toml (gitignored), then:
+#   systemctl enable --now cell@nuc2-cell5
+#   # or, by hand:  python -m server --config server/nuc2/cell5.toml
+#
+# The [zstage]/[hotplate]/[lamp] tables are what select this cell shape --
+# no --cell flag needed.
+
+[pump]
+port = "1A86:7523"     # SY-01B CH340 USB-serial (VID:PID)
+syringe_uL = 125
+init_force = 2
+
+[zstage]
+# ONE MKS SERVO57D on an FTDI USB2CAN adapter. Unlike cell1-3 there is no
+# X axis and no paired-Z group -- this is a single motor.
+# TBD: fill in this adapter's FTDI serial. Omitting it opens the first
+# enumerated FTDI device, which is only safe if it is the only one here.
+serial = "TBD-CELL5-Z"
+coord_invert = true    # +mm moves away from the 0x00 home limit
+home_dir = 0           # flip 0 <-> 1 to home off the opposite end
+
+[hotplate]
+# IKA RCT digital. Omit `port` to auto-detect by USB VID:PID
+# (hotplate_controller.find_rct_port).
+# port = "/dev/ttyUSB2"
+#
+# Cell-level ceiling on the setpoint, enforced before the driver is even
+# called: an orchestrated run cannot ask for more than this. Set it to the
+# lowest value the chemistry on this bench actually needs.
+max_celsius = 150.0
+
+[lamp]
+# IR lamp, switched through a Tapo plug over the LAN (python-kasa).
+# `target` is a device name or IP from external/SmartPlugController's
+# device_list.md. "all" would switch every plug on the bench -- name the
+# one plug instead.
+# Credentials live in external/SmartPlugController/secure.env, written by
+# the operator. If they are missing the cell still starts; only the lamp
+# endpoints return 409.
+target = "TBD-IR-LAMP"
+
+[server]
+host = "0.0.0.0"
+port = 17062           # cell5 -- confirm against SDLClaude ARCHITECTURE.md
+log_level = "info"

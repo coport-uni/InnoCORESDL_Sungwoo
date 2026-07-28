@@ -1,0 +1,24 @@
+# Orchestrator on NUC1 only -- exactly one process exists SDL-wide
+# (spec section 2). Start it with:
+#   docker compose -f deploy/docker-compose.orch.yml up -d --build
+services:
+  orchestrator:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.orch
+    image: innocoresdl-orchestrator:local
+    container_name: innocoresdl-orchestrator
+    restart: unless-stopped
+    ports:
+      - "17100:17100"
+    volumes:
+      # The address book. Copy orchestrator/config.toml.example first and
+      # fill in the real NUC IPs.
+      - ../orchestrator/config.toml:/app/orchestrator/config.toml:ro
+      # Scenarios are edited on the host; the container reads them.
+      - ../scenarios:/app/scenarios:ro
+      # Runlogs are the experiment record -- keep them outside the image.
+      - ../runs:/app/runs
+    # The cells live on the LAN (192.168.1.x), reachable from the default
+    # bridge network. If this NUC's cells are only bound to loopback,
+    # switch to `network_mode: host` and drop the `ports:` block.

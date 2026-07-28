@@ -34,6 +34,14 @@ class StatusResponse(BaseModel):
     stage_z_mm: float
     busy: bool
     error: str | None
+    # Cell D (cell5) only; None on cells without those devices. The
+    # heating/stirring flags are the last commanded state — the RCT
+    # digital protocol offers no readback.
+    hotplate_c: float | None = None
+    hotplate_target_c: float | None = None
+    heating: bool | None = None
+    stirring: bool | None = None
+    lamp_on: bool | None = None
 
 
 class ErrorResponse(BaseModel):
@@ -134,6 +142,89 @@ class LinearMoveRequest(BaseModel):
 
 class LinearResponse(BaseModel):
     y_mm: float
+
+
+# ── Z stage (single Z) — Cell D / cell5 ──────────────────────────────────────
+# A separate action set from the gantry: no X target, and no paired-Z
+# group interlock (one motor).
+
+
+class ZStageMoveRequest(BaseModel):
+    z_mm: float = Field(ge=0)
+    speed_pct: int = Field(default=20, ge=1, le=100)
+    accel_pct: int = Field(default=10, ge=1, le=100)
+
+
+class ZStageResponse(BaseModel):
+    z_mm: float
+
+
+# ── Hotplate (IKA RCT digital) — Cell D / cell5 ──────────────────────────────
+
+
+class HotplateStateResponse(BaseModel):
+    plate_c: float
+    probe_c: float
+    target_c: float
+    safety_c: float = Field(description="Device safety-circuit limit.")
+    rpm: float
+    target_rpm: float
+    heating: bool = Field(description="Last commanded state, not a readback.")
+    stirring: bool = Field(description="Last commanded state, not a readback.")
+    max_c: float = Field(description="This cell's configured °C ceiling.")
+
+
+class TemperatureRequest(BaseModel):
+    celsius: float = Field(
+        ge=0, description="Target plate temperature; capped by max_c."
+    )
+
+
+class TemperatureResponse(BaseModel):
+    target_c: float
+
+
+class HeaterRequest(BaseModel):
+    # NOT `on`: YAML 1.1 resolves a bare `on:` key to the boolean True,
+    # so a scenario could never address it (LearnedPatterns #8).
+    enabled: bool
+
+
+class HeaterResponse(BaseModel):
+    heating: bool
+    target_c: float
+
+
+class StirSpeedRequest(BaseModel):
+    rpm: float = Field(ge=0)
+
+
+class StirSpeedResponse(BaseModel):
+    target_rpm: float
+
+
+class StirrerRequest(BaseModel):
+    enabled: bool
+
+
+class StirrerResponse(BaseModel):
+    stirring: bool
+    target_rpm: float
+
+
+# ── Lamp (IR lamp on a Tapo plug) — Cell D / cell5 ───────────────────────────
+
+
+class LampRequest(BaseModel):
+    enabled: bool
+
+
+class LampResponse(BaseModel):
+    is_on: bool | None = Field(
+        description="None when the plug's state could not be read."
+    )
+    target: str = Field(description="Plug name/IP from the driver's list.")
+    devices: list[str] = Field(default_factory=list)
 
 
 # ── Safety ─────────────────────────────────────────────────────────────────

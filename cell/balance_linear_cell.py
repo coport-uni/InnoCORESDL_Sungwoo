@@ -54,6 +54,14 @@ def _no_gantry() -> WrongStateError:
     )
 
 
+def _absent(family: str) -> WrongStateError:
+    # Defensive stub for the action sets only Cell D (cell5) has: the
+    # single Z stage, the hotplate and the IR lamp.
+    return WrongStateError(
+        f"balance+linear cell has no {family}", command=family
+    )
+
+
 class BalanceLinearCell(Cell):
     """cell4 = MINAS A6 linear rail + Entris-II balance, behind ``Cell``."""
 
@@ -195,6 +203,35 @@ class BalanceLinearCell(Cell):
     # ── Gantry (none on a balance+linear cell) ──────────────────────────
     def home_gantry(self) -> tuple[float, float]:
         raise _no_gantry()
+
+    def home_zstage(self) -> float:
+        raise _absent("zstage")
+
+    def move_zstage(
+        self, z_mm: float, *, speed_pct: int, accel_pct: int
+    ) -> float:
+        raise _absent("zstage")
+
+    def read_hotplate(self) -> dict:
+        raise _absent("hotplate")
+
+    def set_hotplate_temperature(self, celsius: float) -> float:
+        raise _absent("hotplate")
+
+    def set_hotplate_heater(self, *, enabled: bool) -> dict:
+        raise _absent("hotplate")
+
+    def set_hotplate_speed(self, rpm: float) -> float:
+        raise _absent("hotplate")
+
+    def set_hotplate_stirrer(self, *, enabled: bool) -> dict:
+        raise _absent("hotplate")
+
+    def read_lamp(self) -> dict:
+        raise _absent("lamp")
+
+    def set_lamp(self, *, enabled: bool) -> dict:
+        raise _absent("lamp")
 
     def move_gantry(
         self, x_mm: float, z_mm: float, *, speed_pct: int, accel_pct: int

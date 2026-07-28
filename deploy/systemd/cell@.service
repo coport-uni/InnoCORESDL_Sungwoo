@@ -1,0 +1,41 @@
+# One template unit for EVERY L1 cell server on both NUCs (spec section 3).
+# The instance name selects the config file, so no NUC-specific unit and no
+# code branch exists:
+#
+#   systemctl enable --now cell@nuc1-cell1     -> server/nuc1/cell1.toml
+#   systemctl enable --now cell@nuc1-cell4     -> server/nuc1/cell4.toml
+#   systemctl enable --now cell@nuc2-cell2     -> server/nuc2/cell2.toml
+#
+# systemd expands %I as the instance name with '-' turned back into '/',
+# which is exactly the server/<nuc>/<cell>.toml layout.
+#
+# Install: cp deploy/systemd/cell@.service /etc/systemd/system/
+#          systemctl daemon-reload
+# Edit WorkingDirectory / ExecStart / User below to match the NUC.
+
+[Unit]
+Description=InnoCORESDL L1 cell server (%I)
+Documentation=file:/opt/InnoCORESDL_Sungwoo/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# The cell servers run on the HOST, not in Docker: they own USB serial
+# handles, and the container's /dev is a private tmpfs that goes stale
+# across re-enumeration (CLAUDE.md).
+WorkingDirectory=/opt/InnoCORESDL_Sungwoo
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/miniconda3/envs/sdl/bin/python -m server --config server/%I.toml
+User=sdl
+# Serial access: the user must be in dialout (CH340/FTDI/CDC nodes).
+SupplementaryGroups=dialout
+Restart=on-failure
+RestartSec=5
+# A cell owns physical hardware: never start a second copy of the same
+# instance, and give in-flight motion time to finish on stop.
+TimeoutStopSec=30
+KillSignal=SIGINT
+
+[Install]
+WantedBy=multi-user.target

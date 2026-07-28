@@ -14,6 +14,10 @@ cell shapes live here (the SDLClaude reference implementations):
 - **balance + linear cell** (cell4): MINAS A6 linear rail (`lmc`) + the
   **single** Entris-II balance (`entris_ii`) that shuttles under cell1–3 to
   weigh each dispense.
+- **pump + Z + thermal cell** (cell5, "Cell D"): syringe pump + **one** MKS
+  motor as a standalone Z axis + an IKA hotplate + an IR lamp on a Tapo
+  plug. Four devices, one server; its own `zstage` / `hotplate` / `lamp`
+  action sets, and the only cell whose `stop()` also kills heat and power.
 
 **Drivers as submodules.** Every hardware driver is its own upstream repo,
 tracked as a **git submodule** under `external/`. The four the cells use
@@ -75,6 +79,21 @@ hardware stage; composition = device → **cell** → Phase-system.
 | `post-write-debug-remind.sh` | PostToolUse (Write/Edit) | reminds to index new `claude_test/` files in `claude_test/README.md`. |
 | Stop prompt hook | Stop | verifies ToDo.md entry, `gh` issue, and ruff pass before finishing. |
 
+## L2 Orchestrator
+
+Above the cells sits the **L2 orchestrator** (`orchestrator/`), which runs
+scenario files across the cells of both NUCs. Its design document is
+`docs/L2_ORCHESTRATOR_SPEC.md`; the M0 adequacy audit of L1 is
+`docs/L1_AUDIT.md`. Three rules bind work there:
+
+1. **HTTP only.** L2 never imports a driver — a serial port has one owner
+   and that owner is the cell server (Folder-specific rule #2 below).
+2. **One orchestrator, one active run.** A second run submission is a 409.
+3. **No unattended motion.** The first motion-bearing step of a run waits
+   for an operator confirmation, and `POST /v1/runs/{id}/abort` broadcasts
+   the *software* e-stop — which, per `docs/L1_AUDIT.md` GAP-1, does
+   **not** stop cell4's linear rail.
+
 ## Files
 
 | Path | Purpose |
@@ -82,8 +101,13 @@ hardware stage; composition = device → **cell** → Phase-system.
 | `cell/` | the **cell layer** (package): the `Cell` interface + cell implementations. |
 | `cell/cell_protocol.py` | `Cell` protocol + `CellError` hierarchy the server maps to HTTP. |
 | `cell/pump_gantry_cell.py` | `PumpGantryCell` (cell1–3) — pump (`sy01b`) + XZ gantry (ESP32 `mks_motor`, paired-Z interlock), no balance. |
-| `cell/balance_linear_cell.py` | `BalanceLinearCell` — real cell4: MINAS A6 linear rail (`lmc`) + Entris-II balance, no pump. Run with `python -m server --config server/cell4.toml` (shape auto-detected from the `[linear]` table). |
-| `server/` | FastAPI **L1 `/v1` server** — thin HTTP bridge over the cell (mirrors `sy01b-server`). |
+| `cell/balance_linear_cell.py` | `BalanceLinearCell` — real cell4: MINAS A6 linear rail (`lmc`) + Entris-II balance, no pump. Run with `python -m server --config server/nuc1/cell4.toml` (shape auto-detected from the `[linear]` table). |
+| `cell/pump_z_thermal_cell.py` | `PumpZThermalCell` — Cell D (cell5): pump + single Z (`mks_motor`) + hotplate (`external/HotplateController`) + IR lamp on a Tapo plug (`external/SmartPlugController`). Shape auto-detected from the `[zstage]`/`[hotplate]`/`[lamp]` tables. |
+| `server/` | FastAPI **L1 `/v1` server** — thin HTTP bridge over the cell (mirrors `sy01b-server`). `server/nuc1/`, `server/nuc2/` hold the per-NUC cell config examples. |
+| `orchestrator/` | the **L2 orchestrator** (package): registry, cell client, scenario loader + dry-run validator, run engine, runlog, `/v1` API, CLI. |
+| `scenarios/` | scenario YAML files. `demo_linear_move.yaml` is the first real-hardware demo (spec §8.3). |
+| `deploy/` | `systemd/cell@.service` (one template unit for every cell on both NUCs), the orchestrator's Docker Compose + image, and `deploy/README.md` (NUC setup, first-run procedure). |
+| `docs/` | `L2_ORCHESTRATOR_SPEC.md` (the L2 design) and `L1_AUDIT.md` (the M0 audit + the bench smoke-test checklist). |
 | `external/` | All hardware driver repos as git **submodules** — see the Overview table above and `external/SUBMODULES.md`. Also holds `CommonClaude` (conventions). |
 | `.claude/` | Hook scripts + `settings.json` copied from `external/CommonClaude` (see "Hooks"). |
 | `.mcp.json` | Project-scope MCP servers required by CommonClaude §7: **serena** (semantic code nav), **context7** (library docs), **fetch** (web pages as Markdown). Needs `uvx` + `npx` on PATH. |
@@ -108,8 +132,13 @@ hardware stage; composition = device → **cell** → Phase-system.
 
 | Purpose | Command |
 |---|---|
-| Run a cell server | `cp server/cell1.toml.example server/cell1.toml` then `python -m server --config server/cell1.toml` |
-| Lint | `ruff check pump_gantry_cell.py balance_linear_cell.py server/` |
+| Run a cell server | `cp server/nuc1/cell1.toml.example server/nuc1/cell1.toml` then `python -m server --config server/nuc1/cell1.toml` |
+| Run the orchestrator | `cp orchestrator/config.toml.example orchestrator/config.toml` then `python -m orchestrator serve` |
+| Dry-run a scenario | `python -m orchestrator validate scenarios/demo_linear_move.yaml` |
+| Run a scenario, operator-gated | `python -m orchestrator run scenarios/demo_linear_move.yaml --step-mode` |
+| L1 smoke test (bench) | `python claude_test/smoke_l1.py --base-url http://127.0.0.1:17060 --suite linear` |
+| Orchestrator tests | `pytest claude_test` (no hardware; httpx `MockTransport`) |
+| Lint | `ruff check cell/ server/ orchestrator/ claude_test/` |
 | Format check | `ruff format --check .` |
 | List serial ports | `python -m serial.tools.list_ports -v` |
 

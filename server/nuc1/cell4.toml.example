@@ -1,0 +1,19 @@
+# NUC1 / balance + MINAS A6 linear rail. This is the cell the first L2
+# demo (scenarios/demo_linear_move.yaml) drives.
+# Copy to server/nuc1/cell4.toml (gitignored), then:
+#   systemctl enable --now cell@nuc1-cell4
+
+[linear]
+# Moxa UPort 1150 RS-485 adapter. The "VID:PID" form is resolved at open
+# time, so it survives ttyUSBn renumbering.
+port = "110A:1150"
+
+[balance]
+# Omit `port` to auto-detect the Sartorius balance by vendor ID 0x24BC.
+# The balance must already be in SBI mode with AUTO W/ (front panel).
+ambient = "very_unstable"
+
+[server]
+host = "0.0.0.0"
+port = 17060           # cell4 -- matches [cells.cell4] in the orchestrator
+log_level = "info"

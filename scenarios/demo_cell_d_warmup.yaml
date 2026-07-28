@@ -1,0 +1,119 @@
+# Cell D (cell5) bring-up demo: single Z + hotplate + IR lamp in one run.
+#
+# Field names were taken from server/schemas.py, not guessed:
+#   zstage/move        -> {z_mm, speed_pct, accel_pct}
+#   hotplate/temperature -> {celsius}
+#   hotplate/heater    -> {enabled}      NOT {on}: YAML 1.1 resolves a bare
+#   lamp/switch        -> {enabled}      `on:` key to the boolean True, so
+#                                        the field would be unreachable
+#                                        from a scenario (LearnedPatterns #8).
+#
+# THERE IS NO WAIT STEP in the scenario language (spec section 8.1). The
+# thermal hold is therefore the operator's, in --step-mode: the run pauses
+# after `heat_on`, you watch the plate reach temperature, then resume. Do
+# not run this scenario unattended -- it energizes a heater and a lamp.
+#
+# Run it as: dry run -> real step_mode -> real.
+#   python -m orchestrator validate scenarios/demo_cell_d_warmup.yaml
+#   python -m orchestrator run scenarios/demo_cell_d_warmup.yaml --step-mode
+#
+# Before the first run:
+#   1. Confirm the safe Z travel with the operator and set lift_mm.
+#   2. Confirm [hotplate] max_celsius in server/nuc2/cell5.toml is at or
+#      below what this bench's chemistry needs; the cell rejects anything
+#      above it with a 400 before touching the device.
+#   3. Clear anything flammable from around the IR lamp.
+
+name: cell_d_warmup
+description: >
+  Cell D bring-up: raise the Z stage, set the hotplate to a mild setpoint
+  and confirm it took, blink the IR lamp, then leave everything off and
+  the stage back home.
+
+params:
+  lift_mm: 10.0
+  warm_c: 30.0
+
+defaults:
+  on_fail: abort        # never retry a motion or a heater command blindly
+  timeout_s: 30.0
+
+steps:
+  - id: check_status
+    cell: cell5
+    action: status
+    method: GET
+    timeout_s: 5.0
+    save_as: pre
+
+  - id: home_z
+    cell: cell5
+    action: zstage/home
+    timeout_s: 60.0     # calibrate from the M0/A3 measurement
+
+  - id: lift
+    cell: cell5
+    action: zstage/move
+    body:
+      z_mm: "${params.lift_mm}"
+    timeout_s: 60.0
+    save_as: lifted
+
+  - id: verify_lift
+    assert: "${lifted.z_mm} >= ${params.lift_mm} - 0.1"
+
+  - id: set_setpoint
+    cell: cell5
+    action: hotplate/temperature
+    body:
+      celsius: "${params.warm_c}"
+    save_as: setpoint
+
+  - id: verify_setpoint
+    assert: "${setpoint.target_c} == ${params.warm_c}"
+
+  # The heater starts here. In --step-mode the run pauses after this step,
+  # which is where the operator watches the plate warm up.
+  - id: heat_on
+    cell: cell5
+    action: hotplate/heater
+    body:
+      enabled: true
+    save_as: heating
+
+  - id: read_hotplate
+    cell: cell5
+    action: hotplate/state
+    method: GET
+    save_as: hp
+
+  - id: verify_heating
+    assert: "${hp.heating} == True and ${hp.target_c} == ${params.warm_c}"
+
+  - id: heat_off
+    cell: cell5
+    action: hotplate/heater
+    body:
+      enabled: false
+
+  - id: lamp_on
+    cell: cell5
+    action: lamp/switch
+    body:
+      enabled: true
+    save_as: lamp
+
+  - id: verify_lamp
+    assert: "${lamp.is_on} == True"
+
+  - id: lamp_off
+    cell: cell5
+    action: lamp/switch
+    body:
+      enabled: false
+
+  # Leave the cell in a safe state: heater off, lamp off, stage home.
+  - id: park_z
+    cell: cell5
+    action: zstage/home
+    timeout_s: 60.0

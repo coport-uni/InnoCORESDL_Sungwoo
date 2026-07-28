@@ -1,0 +1,17 @@
+# L2 orchestrator image. No hardware access, no driver submodules -- the
+# orchestrator only speaks HTTP to the cell servers (spec section 5).
+# Build context is the repository root:
+#   docker compose -f deploy/docker-compose.orch.yml up -d --build
+FROM python:3.12-slim
+
+WORKDIR /app
+ENV PYTHONUNBUFFERED=1
+
+COPY deploy/requirements-orch.txt /app/deploy/requirements-orch.txt
+RUN pip install --no-cache-dir -r deploy/requirements-orch.txt
+
+COPY orchestrator/ /app/orchestrator/
+COPY scenarios/ /app/scenarios/
+
+# config.toml and runs/ are bind-mounted by the compose file.
+CMD ["python", "-m", "orchestrator", "--config", "/app/orchestrator/config.toml", "serve"]

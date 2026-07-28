@@ -73,8 +73,33 @@ def create_app(cell_factory: CellFactory | None = None) -> FastAPI:
                 "description": "XZ gantry (MKS SERVO57D): home and move.",
             },
             {
+                "name": "ZStage",
+                "description": (
+                    "Cell D's single Z axis (one MKS SERVO57D). Separate "
+                    "from the gantry: no X target, no paired-Z group."
+                ),
+            },
+            {
+                "name": "Hotplate",
+                "description": (
+                    "Cell D's IKA RCT digital: setpoint, heater, stirrer. "
+                    "Heating is unattended-motion's thermal twin — the "
+                    "operator stays at the bench."
+                ),
+            },
+            {
+                "name": "Lamp",
+                "description": (
+                    "Cell D's IR lamp, switched through its Tapo plug "
+                    "over the LAN."
+                ),
+            },
+            {
                 "name": "Safety",
-                "description": "Abort all motion now.",
+                "description": (
+                    "Abort now. On Cell D this also stops the heater, the "
+                    "stirrer and the lamp."
+                ),
             },
         ],
         lifespan=lifespan,
