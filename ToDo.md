@@ -329,3 +329,6 @@ was a TBD standalone item through spec v0.9.
       layered mermaid overview, bench topology with real IPs, the
       verification ladder, a run sequence diagram, and a scenario
       mini-tutorial. (English per CommonClaude language rule.)
+- [x] README: per-cell composition table added (cell1-5 -- NUC/port,
+      shape class, devices with driver names, bench status, and the
+      per-cell special properties).

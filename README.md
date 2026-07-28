@@ -56,6 +56,29 @@ graph TB
 the `[pump]` table and the cell serves the other three devices, answering
 HTTP 409 for pump requests.
 
+### What each cell contains
+
+A **cell** is one server owning one group of devices. Three shapes exist
+(`cell/` has one Python class per shape); cells sharing a shape differ
+only by config.
+
+| Cell | NUC · port | Shape (class) | Devices inside | Status |
+|---|---|---|---|---|
+| **cell1** (Cell A) | NUC1 · 17054 | pump + gantry (`PumpGantryCell`) | Runze SY-01B syringe pump (`sy01b`, CH340 serial) · XZ gantry: 1× X + 2× **synchronized** Z MKS SERVO57D motors (`mks_motor`, FTDI/CAN, paired-Z interlock) | built, no bench run |
+| **cell2** (Cell B) | NUC2 · 17056 | pump + gantry (`PumpGantryCell`) | identical clone of Cell A — different USB serials only | built, no bench run |
+| **cell3** (Cell C) | NUC2 · 17058 | pump + gantry (`PumpGantryCell`) | identical clone of Cell A | built, no bench run |
+| **cell4** | NUC1 · 17060 | balance + linear (`BalanceLinearCell`) | MINAS A6 linear rail (`LinearMotorController`, RS-485) · the Phase's **single** Entris-II balance (`entris_ii`, Sartorius CDC) that shuttles under cell1–3 to weigh each dispense | built, no bench run |
+| **cell5** (Cell 5) | NUC2 · 17062 | pump + Z + thermal (`PumpZThermalCell`) | syringe pump (*not fitted yet* — optional `[pump]` table) · **one** MKS SERVO57D as a standalone Z axis (`mks_motor`, FTDI `NTB3EP5R`) · IKA RCT digital hotplate (`HotplateController`, STM32 VCP, direct USB port) · IR lamp on a Tapo P110M plug (`SmartPlugController`, LAN `192.168.0.237`) | ✅ **bench-verified** |
+
+Special properties per cell worth remembering:
+
+- **cell1–3**: the two Z motors always move together through the
+  driver's paired-Z desync interlock — the highest-stakes subsystem.
+- **cell4**: holds the *only* balance in the Phase, and its `stop()` is
+  currently a no-op (GAP-1).
+- **cell5**: the only cell that **heats** — uniquely, its `stop()` also
+  kills the heater, the stirrer, and the lamp, not just motion.
+
 All hardware drivers are git submodules under `external/` — see
 [`external/SUBMODULES.md`](external/SUBMODULES.md).
 
