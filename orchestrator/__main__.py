@@ -53,6 +53,30 @@ def _parse_params(pairs: list[str] | None) -> dict[str, Any]:
     return params
 
 
+def _format_result(record: dict[str, Any]) -> str:
+    """Render what a step actually measured, for the console.
+
+    The runlog has always carried these numbers, but the terminal showed
+    only step names and durations -- so the operator watching a weighing
+    run could not see the weight. Reading it back out of run.jsonl
+    afterwards is no substitute: the whole point of standing at the
+    bench is to notice a wrong number while it is still happening.
+
+    Null fields are dropped rather than printed as ``None``: a cell's
+    status carries every shape's fields, and on cell4 most of them are
+    hotplate and lamp entries that will never have a value.
+    """
+    result = record.get("result")
+    if not isinstance(result, dict):
+        return ""
+    if record.get("kind") == "assert":
+        # The expression, already substituted, is the measurement here:
+        # "25.7385 - 25.7424 <= 0.05" says more than "passed".
+        return str(result.get("expression", ""))
+    parts = [f"{k}={v}" for k, v in result.items() if v is not None]
+    return ", ".join(parts)
+
+
 def _print_record(record: dict[str, Any]) -> None:
     if record.get("event") == "abort":
         print(f"  [abort] stop broadcast: {record.get('stop_broadcast')}")
@@ -63,6 +87,9 @@ def _print_record(record: dict[str, Any]) -> None:
     print(
         f"  [{mark}] {record['id']}  {where}/{action}  {record['duration_s']}s"
     )
+    measured = _format_result(record)
+    if measured:
+        print(f"        {measured}")
     if not record["ok"]:
         print(f"        {record['error']['message']}")
 
@@ -89,6 +116,11 @@ async def _drive(engine: Engine, run_id: str) -> int:
                     f"\n  !! next step '{gate}' moves hardware. Clear the "
                     "frame, keep the e-stop in reach."
                 )
+            # Printed after the hazard warning when both apply, so the
+            # last thing on screen is the thing to do, not the thing to
+            # beware of.
+            if run.pending_pause:
+                print(f"\n  >> {run.pending_pause}")
             answer = await _ask("  [enter]=continue, a=abort > ")
             if answer.strip().lower().startswith("a"):
                 await engine.abort(run_id)

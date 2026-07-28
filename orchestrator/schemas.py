@@ -119,6 +119,10 @@ class RunDetail(RunSummary):
     step_index: int = 0
     total_steps: int = 0
     pending_confirmation: str | None = None
+    #: The scenario's own instruction to the operator, when the run is
+    #: paused at a `pause:` step. Distinct from pending_confirmation,
+    #: which warns that the *machine* is about to move.
+    pending_pause: str | None = None
     vars: dict[str, Any] = Field(default_factory=dict)
     steps: list[dict[str, Any]] = Field(default_factory=list)
     issues: list[dict[str, Any]] = Field(default_factory=list)

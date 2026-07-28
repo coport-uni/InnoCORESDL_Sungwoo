@@ -86,10 +86,36 @@ All hardware drivers are git submodules under `external/` — see
 
 ## Status — what is actually proven
 
-**Cell 5 (cell5) is bench-verified end to end** on NUC2 (2026-07-28): the
-real hardware ran real scenarios through the full stack. The other cells
-(cell1–4) are built and tested against a simulator, but have not moved
-real hardware yet.
+**Two cells now run on real hardware.** Cell 5 on NUC2 and cell4 on NUC1
+were both brought up on 2026-07-28, each completing real scenarios through
+the full L1 + L2 stack. cell1–3 are built and simulator-tested; cell1's
+gantry is mid bring-up.
+
+| Layer | State |
+|---|---|
+| L1 cell5 (Z + hotplate + lamp) | **bench-verified on NUC2** — see the ladder below |
+| L1 cell4 (balance + linear rail) | **bench-verified on NUC1** — identity, status, tare, weigh, home, move |
+| L1 cell1–3 | code complete; cell1's gantry mid bring-up (LearnedPatterns #22–#25) |
+| L1 `/v1` server | 26 routes, serving cell4 and cell5 against real devices |
+| L2 orchestrator | registry, client, validator, engine (`wait_s`, `until:`), runlog, `/v1`, CLI — **71 tests**, plus real runs on both cells |
+| Deployment | systemd template + Docker Compose, **never deployed as a service** (bench runs used the venv directly) |
+
+### How cell4 was verified
+
+`demo_weigh_at_position.yaml` completed **15/15** (run
+`20260728T111725Z`): zero the balance, carry it 50 mm, weigh a vial at
+25.7424 g, return. What the run settled:
+
+| Question | Answer |
+|---|---|
+| Can cell4 weigh somewhere other than where it settles? | **Yes.** Carrying the balance 50 mm and back shifted a 25.7 g reading by **0.0039 g** |
+| How fast is a settled weight read? | ~1.2 s (stream 2.6 lines/s, consecutive-3 spread median 0.0005 g) |
+| How fast is a 50 mm move? | ~6 s |
+| Is the RS485 link reliable? | **No** — see the EMI note under Bench notes. Reads survive it; moves abort on it, deliberately |
+
+Every number there is a bench measurement. The 71 tests touch no
+hardware, which is the point: they cannot tell you any of this.
+
 
 | Layer | Built | Verified | Not yet |
 |---|---|---|---|
@@ -163,10 +189,40 @@ sequenceDiagram
 |---|---|
 | **GAP-9** | `POST /v1/stop` **cannot interrupt a command already in flight** — on any cell. It waits for the same lock the move holds; measured 4.2 s late on a 5 s move. L2's abort inherits this. (`until:` polls are the exception — they re-acquire the lock per read, so an abort cuts them off immediately, as the bench confirmed.) |
 | **GAP-1** | cell4's `stop()` is a no-op even when it does run. |
+| **No alarm visibility** | the MINAS driver cannot read or clear an amp alarm, so `diagnose()` reports `stage.ok: true` on an amp that has tripped and de-energised its servo. The front panel is the only alarm indicator ([#15](https://github.com/coport-uni/InnoCORESDL_Sungwoo/issues/15)). |
 
 **Consequence: the physical e-stop is the only stop.** Both gaps, with
 their measurements and proposed fixes, are in
 [`docs/L1_AUDIT.md`](docs/L1_AUDIT.md).
+
+### Two known faults deliberately left open
+
+Both are understood, reproduced and documented; neither is being fixed
+yet, and running the bench with them open is a decision rather than an
+oversight.
+
+**[#13](https://github.com/coport-uni/InnoCORESDL_Sungwoo/issues/13) — the
+amp jams its own RS485 link.** Deferred to a later bench session, because
+the fix is electrical (grounding and termination, see the note below) and
+not something software can close. Meanwhile the link is *usable*, not
+fixed: reads are absorbed by the driver's reconnect, and a move that
+straddles a drop is stopped and failed rather than resumed. So a run can
+still abort partway on a link drop. Re-run it; that is the abort rule
+working.
+
+**[#15](https://github.com/coport-uni/InnoCORESDL_Sungwoo/issues/15) — the
+driver cannot read an amp alarm.** Left open on purpose: developing the
+alarm read means *reproducing* an alarm, and the only alarm this bench
+knows how to raise is Err16.0 — driving the rail into its mechanical stop
+until the motor overloads. That is not a thing to do repeatedly to a servo
+for the sake of a nicer error message.
+
+The operator carries this one instead. **If moves stop having any effect
+while the amp still answers `/v1/diagnose` normally, read the amp's front
+panel** — that combination means an alarm, and software will keep
+reporting `stage.ok: true` throughout. Recovery is in the bench note
+below. If the alarm read is implemented later, decode the response against
+the manual rather than by provoking the amp.
 
 ---
 
@@ -256,13 +312,21 @@ python -m server --config server/nuc2/cell5.toml         # :17062
 # L2 — the orchestrator
 cp orchestrator/config.toml.example orchestrator/config.toml
 python -m orchestrator serve                             # :17100
-python -m orchestrator validate scenarios/demo_cell5_final.yaml  # no devices
-python -m orchestrator run      scenarios/demo_cell5_final.yaml --step-mode
+python -m orchestrator validate scenarios/demo_weigh_at_position.yaml  # no devices
+python -m orchestrator run      scenarios/demo_weigh_at_position.yaml  # cell4
+python -m orchestrator run      scenarios/demo_cell5_final.yaml        # cell5
 
 # checks that need no hardware
 pytest claude_test
 ruff check cell/ server/ orchestrator/ claude_test/
 ```
+
+Runs stop where a human is needed and nowhere else: once before the first
+motion step (`confirm_first_motion`, CLAUDE.md folder rule #3) and once at
+any step carrying a `pause:` — `demo_weigh_at_position.yaml` uses one to
+have the vial loaded. `--step-mode` still exists and stops after *every*
+step; prefer it only when debugging, since thirteen prompts of which one
+matters is how an operator stops reading them.
 
 Ports are per cell (SDLClaude `ARCHITECTURE.md`): cell1=17054,
 cell2=17056, cell3=17058, cell4=17060, cell5=17062, orchestrator=17100.
@@ -276,7 +340,7 @@ cell2=17056, cell3=17058, cell4=17060, cell5=17062, orchestrator=17100.
 | [`cell/`](cell/) | the cell layer: [`cell_protocol.py`](cell/cell_protocol.py) (interface + `CellError` hierarchy), [`pump_gantry_cell.py`](cell/pump_gantry_cell.py), [`balance_linear_cell.py`](cell/balance_linear_cell.py), [`pump_z_thermal_cell.py`](cell/pump_z_thermal_cell.py) |
 | [`server/`](server/) | the L1 `/v1` server — `create_app` + routes + schemas + error mapping. `nuc1/`, `nuc2/` hold the per-NUC config examples |
 | [`orchestrator/`](orchestrator/) | the L2 orchestrator: registry, cell client, scenario loader + dry-run validator, run engine, runlog, `/v1` API, CLI |
-| [`scenarios/`](scenarios/) | scenario files — `demo_linear_move.yaml`, `demo_cell5_warmup.yaml`, and the bench-verified Cell 5 set: `demo_cell5_lamp_blink.yaml`, `demo_cell5_hotplate_30c.yaml`, `demo_cell5_z_cycles.yaml`, `demo_cell5_lamp_heat_40c.yaml`, `demo_cell5_final.yaml` |
+| [`scenarios/`](scenarios/) | scenario files — the bench-verified cell4 pair `demo_linear_move.yaml` / `demo_weigh_at_position.yaml`, `demo_cell5_warmup.yaml`, and the bench-verified Cell 5 set: `demo_cell5_lamp_blink.yaml`, `demo_cell5_hotplate_30c.yaml`, `demo_cell5_z_cycles.yaml`, `demo_cell5_lamp_heat_40c.yaml`, `demo_cell5_final.yaml` |
 | [`deploy/`](deploy/) | systemd template unit for the cells, Compose for the orchestrator, NUC setup guide |
 | [`claude_test/`](claude_test/) | tests + the two bench tools (`preflight.py`, `smoke_l1.py`) |
 | [`docs/`](docs/) | the L2 spec, the M0 audit, the bring-up runbook |
@@ -306,17 +370,30 @@ pump (add the `[pump]` table back when it arrives). The runbook is
 
 | Milestone | State |
 |---|---|
-| M0 — L1 adequacy audit | code review done; cell5 physical checks **done**, cell1–4 pending; 9 gaps recorded |
+| M0 — L1 adequacy audit | code review done; **cell4 and cell5 physical checks done**, cell1–3 pending; 9 gaps recorded |
 | M1 / M2 — registry + dry-run validator | done |
-| M4 / M5 — engine, runlog, failure policies, pause/resume/abort | done; abort's stop broadcast exercised on the real cell5 |
-| M6 — systemd + Docker + real `demo_linear_move` | artifacts written, **never deployed** |
-| M7 — web scenario tab | not started; `web/` lives in git history |
+| M4 / M5 — engine, runlog, failure policies, pause/resume/abort | done; exercised by real cell4 **and cell5** runs |
+| M6 — systemd + Docker + real demo scenarios | **cell4's two demos and cell5's four all run on hardware**; systemd/Compose artifacts still never deployed |
+| M7 — web scenario tab | not started; `web/` was removed with the other pre-L2 work and lives in git history |
 
-Open questions, all recorded as gaps: **GAP-9 / GAP-1** (make the
-software stop actually stop something), **GAP-8** (the per-cell lock
-cannot model two cells sharing one physical workspace), and the two
-robot arms (no L1 cell yet; `external/FR5Controller` is not packaged).
-Milestone detail:
+Open questions that shape the next phase, all recorded as gaps:
+
+- **GAP-9 / GAP-1** — make the software stop actually stop something. Needs
+  an L1 change plus driver work; user approval required.
+- **#13 (RS485/EMI)** — deferred to a later bench session; the fix is
+  electrical, and the software already limits the damage (reads reconnect,
+  moves abort).
+- **#15 (amp alarm read)** — deferred deliberately, because building it
+  means repeatedly overloading a servo to reproduce the alarm. Documented
+  as an operator check instead.
+- **GAP-8** — the L2 lock is per cell, so two cells sharing one physical
+  workspace can still collide inside a `parallel` block. This must be solved
+  before a robot arm reaches into another cell's frame.
+- **Robots** — the two arms have no L1 cell yet. `ADDING_A_CELL.md` says they
+  fit the cell format as an `arm` action set of discrete named trajectories;
+  the blocker is that `external/FR5Controller` is not packaged.
+
+Milestone detail is in
 [`docs/L2_ORCHESTRATOR_SPEC.md`](docs/L2_ORCHESTRATOR_SPEC.md) §11.
 
 ---
@@ -334,8 +411,13 @@ See [`LearnedPatterns.md`](LearnedPatterns.md) #1.
 
 ### Balance prerequisites (front panel, menu-only)
 
-`DAT.REC = SBI`, `COM.OUTP = AUTO W/`, `STAB.RNG = V.FAST`; USB-C SBI
-defaults 9600 / odd / 8 / 1. A `0x15` (NAK) reply means the balance is in
+`DAT.REC = SBI`, `COM.OUTP = AUTO.W/O`, `STAB.RNG = V.FAST`; USB-C SBI
+defaults 9600 / odd / 8 / 1. (`AUTO W/` — *with* stability — only speaks
+once the balance calls itself settled, which on this bench it never did:
+20 s of listening captured zero lines. `AUTO.W/O` streams unconditionally
+and the driver judges settling, as above.) The PC lead is an ordered
+accessory, `YCC-USB-C-A`; a charge-only cable produces **no kernel events
+at all**, which is its own diagnosis (LearnedPatterns #11). A `0x15` (NAK) reply means the balance is in
 xBPI mode — wrong interface menu. The ambient filter comes from the cell
 config, not the panel.
 
@@ -369,6 +451,54 @@ Hard-won bench rules from the 2026-07-28 bring-up (details in
   `device_list.md` — the cell synthesises the entry, so a re-DHCPed
   plug never needs an edit under `external/`.
 
+### The rail must not park on 0 mm (critical)
+
+cell4's 0 mm encoder origin sits **on the mechanical end stop**, and the
+closed loop coasts 1.5–1.8 mm past its target. Homing to 0 therefore
+drives the carriage into the stop and holds it there until the amp trips
+**Err16.0** (motor overload) and de-energises the servo — after which every
+move displaces 0 mm while the amp still answers serial normally.
+
+This is the alarm referred to under "known faults left open": while it is
+latched, `/v1/diagnose` keeps answering `stage.ok: true` and every move
+reports a stall, so the front panel is the only place the truth appears.
+
+The rail parks at `home_mm` (default **5.0 mm**) in the cell config, and
+both scenarios use a matching `home_mm` param. Keep the two in step, and
+keep the clearance well above the coast distance. Recovery is: pull the
+rail clear of the stop **by hand first** (the servo is off, so it moves
+freely), *then* clear the alarm — clearing while still pressed re-trips it.
+See [`LearnedPatterns.md`](LearnedPatterns.md) #27 and issue
+[#15](https://github.com/coport-uni/InnoCORESDL_Sungwoo/issues/15).
+
+### The servo amp jams its own RS485 link
+
+The MINAS amp couples conducted noise back through the RS485 pair, which
+knocks the Moxa UPort off USB every few seconds. Measured: amp off → 0
+re-enumerations per 40 s; amp on → 15; amp on with the RS485 cable
+unplugged → 0. It is **conducted, not radiated**, so a shielded USB cable
+and ferrites on the USB side are the wrong purchase — the fix is on the
+RS485 side (SG run between the ends, 120 Ω termination once per end,
+shield grounded at one end only), and only then an isolated adapter.
+
+The driver absorbs this for **reads** — it reopens the port and 959/959
+position reads landed across 18 re-enumerations. It deliberately does
+**not** absorb it for moves: a move that straddles a reconnect is stopped
+and failed, because the alternative is a rail travelling on stale position
+data with no software stop. So while the link is bad, moves keep aborting;
+that is the design, not a regression.
+See [`LearnedPatterns.md`](LearnedPatterns.md) #20, #26 and issue
+[#13](https://github.com/coport-uni/InnoCORESDL_Sungwoo/issues/13).
+
+### Balance settling is judged in software
+
+The bench runs `COM.OUTP = AUTO.W/O` — the balance streams whether or not
+it calls itself stable — and the driver accepts a value once three
+consecutive readings agree within 0.002 g. That tolerance is measured, not
+guessed: consecutive-3 spread runs median 0.0005 g, p90 0.0009 g. A
+healthy settle costs ~1.2 s against a 60 s budget, so **hitting the
+timeout means the stream went silent, not that the balance was slow.**
+
 ### Field names must survive YAML
 
 L2 scenarios are YAML, and YAML 1.1 resolves a bare `on:` **key** to a
@@ -384,7 +514,7 @@ Python ≥ 3.12. The documented shared conda env **`sdl`** does not exist
 on NUC2 — the bench runs there use a repo-local **`.venv`** instead
 (created with `python3.12 -m venv --without-pip .venv` + get-pip.py,
 because `python3-venv` is not installed and conda is blocked on a ToS
-prompt; LearnedPatterns #10). The drivers come from the `external/`
+prompt; LearnedPatterns #28). The drivers come from the `external/`
 submodules as editable installs, so a fresh checkout needs both:
 
 ```bash

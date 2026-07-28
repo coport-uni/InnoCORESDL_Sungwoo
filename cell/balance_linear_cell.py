@@ -21,10 +21,18 @@ from entris_ii import PrecisionScaleController
 from .cell_protocol import (
     AMBIENT_LEVELS,
     Cell,
+    DeviceFaultError,
     InvalidArgError,
+    TransportError,
     WrongStateError,
 )
-from LinearMotorController import LinearMotorController
+from LinearMotorController import (
+    LinearMotorController,
+    LinkDroppedError,
+    MotionStopError,
+    MoveResult,
+    SpeedCommandError,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +42,30 @@ class BalanceLinearConfig:
     linear_port: str = "110A:1150"  # MINAS A6 over RS485 via Moxa UPort 1150
     scale_port: str | None = None  # None → auto-detect by Sartorius VID
     ambient: str | None = None
+    #: Where `linear/home` parks the rail, in mm. **Not 0.** On this
+    #: bench the 0 mm origin sits on the mechanical end stop, and the
+    #: closed loop coasts 1.5-1.8 mm past its target, so homing to 0
+    #: drives the carriage into the stop and holds it there until the
+    #: amp trips Err16.0 (motor overload) and de-energises the servo —
+    #: which is exactly what happened on 2026-07-28, after which every
+    #: move displaced 0 mm while the amp still answered serial normally.
+    #: Keep this clear of the stop by more than the coast distance.
+    home_mm: float = 5.0
+
+
+#: Budget for one settled weight read. A healthy read on this bench
+#: converges in 1.2-3.6 s, so this is far more than the measurement
+#: needs — it is sized for the bench being *disturbed*, where the
+#: balance keeps rejecting its own readings as unsettled. 30 s was not
+#: enough: `confirm_zero` hit it exactly (30.003 s) on a pan that was
+#: empty and freshly tared.
+#:
+#: Still deliberately below the tightest `balance/weight` step timeout in
+#: the scenarios (75 s) so the driver's timeout fires first — its message
+#: names the likely cause ("is COM.OUTP set to AUTO.W/O?"), where a step
+#: timeout would only say the call was slow. Raise both together or the
+#: ordering inverts and the useful message is lost.
+SETTLE_TIMEOUT_S = 60.0
 
 
 def _no_pump() -> WrongStateError:
@@ -92,23 +124,47 @@ class BalanceLinearCell(Cell):
 
     # ── Discovery ───────────────────────────────────────────────────────
     def diagnose(self) -> dict:
+        # Query each device exactly once and reuse the values below. The
+        # earlier version asked for the balance model and the amp's software
+        # version twice each (once for the per-device block, once for
+        # "versions"), and the *second* read of a pair came back None on the
+        # real amp -- which then failed HealthResponse validation, since
+        # /v1/health serves driver_versions straight out of the cached
+        # diagnose. Halving the round-trips also shortens the window in
+        # which the balance's AUTO W/ auto-push can race an ID reply
+        # (LearnedPatterns #13).
+        balance_model = self._scale.get_model_number()
+        balance_serial = self._scale.get_serial_number()
+        linear_version = self._lin.read_software_version()
+        linear_model = self._lin.read_model_name()
+        # `ok` is derived, never asserted. These four fields used to be
+        # hardcoded True, so diagnose() answered "healthy, ok_to_initialize"
+        # for an amp that had just returned None to *every* read -- the exact
+        # substitution LearnedPatterns #15 removed from the motion path, still
+        # sitting in the pre-flight check that is supposed to catch it. A
+        # device that cannot say what it is has not been reached, and this is
+        # the last gate before an operator commands a rail that has no
+        # software stop (docs/L1_AUDIT.md GAP-1).
+        balance_ok = balance_model is not None and balance_serial is not None
+        stage_ok = linear_model is not None and linear_version is not None
         return {
             # No pump on this cell; ok=True keeps the cell from reading faulted.
             "pump": {"present": False, "ok": True},
             "balance": {
-                "model": self._scale.get_model_number(),
-                "serial_number": self._scale.get_serial_number(),
-                "ok": True,
+                "model": balance_model,
+                "serial_number": balance_serial,
+                "ok": balance_ok,
             },
             "stage": {  # the "stage" axis here is the linear rail
-                "model": self._lin.read_model_name(),
-                "version": self._lin.read_software_version(),
-                "ok": True,
+                "model": linear_model,
+                "version": linear_version,
+                "ok": stage_ok,
             },
-            "ok_to_initialize": True,
+            # The pump is absent by design, so it is not a precondition.
+            "ok_to_initialize": balance_ok and stage_ok,
             "versions": {
-                "balance": self._scale.get_model_number(),
-                "linear": self._lin.read_software_version(),
+                "balance": balance_model,
+                "linear": linear_version,
             },
         }
 
@@ -118,7 +174,12 @@ class BalanceLinearCell(Cell):
             "weight_g": self._last_weight_g,  # cached; refresh via read_weight
             "valve": "-",  # no valve on a weigh cell
             "plunger_uL": 0.0,
-            "stage_x_mm": float(pos) if pos is not None else 0.0,
+            # None (a failed RS485 read) is reported as null, never as 0.0:
+            # "I could not read the position" and "the rail is at the origin"
+            # are opposite facts, and 0.0 is the one that makes a home assert
+            # pass (LearnedPatterns #15). status() is a probe, so unlike the
+            # motion methods it reports the gap rather than raising.
+            "stage_x_mm": float(pos) if pos is not None else None,
             "stage_z_mm": 0.0,
             "busy": False,
             "error": None,
@@ -145,14 +206,23 @@ class BalanceLinearCell(Cell):
         return self._last_weight_g
 
     def read_weight(self) -> tuple[float, bool]:
-        # Settled read through the balance's stable-weight filter (AUTO W/).
-        # Flush first: the auto-push stream buffers values FIFO, so without
-        # this read_stable_weight returns a STALE pre-load-change reading (the
-        # old 0 g) sitting at the front of the buffer instead of the freshly
-        # settled weight now on the pan. Cache it so status() needn't block.
+        # Settling is judged here, not by the balance. This bench vibrates
+        # enough that the balance's own stability criterion was never met:
+        # under COM.OUTP = AUTO W/ it pushes only after it calls itself
+        # stable, so it simply went silent and every read timed out having
+        # received nothing. The panel is now on AUTO.W/O, which streams
+        # regardless, and read_settled_weight accepts a value once
+        # consecutive readings agree. Measured on this bench: 1.2-3.6 s to
+        # converge, against a 30 s timeout that was previously failing.
+        #
+        # Flush first: the stream buffers FIFO, so without this the read
+        # starts on values captured before the load changed.
         self._scale.flush_pending_reads()
-        reading = self._scale.read_stable_weight()
+        reading = self._scale.read_settled_weight(timeout=SETTLE_TIMEOUT_S)
         self._last_weight_g = float(reading.value)
+        # `stable` means "agreed with its neighbours to within the driver's
+        # tolerance", which is the only stability claim anyone can make on
+        # this bench -- not the balance's own verdict.
         return self._last_weight_g, True
 
     def set_ambient(self, level: str) -> str:
@@ -190,15 +260,73 @@ class BalanceLinearCell(Cell):
     def home_linear(self) -> float:
         # No discrete homing on the RS485 driver; the encoder origin is 0 mm,
         # reached by an absolute move via the driver's PID closed loop.
-        final = self._lin.move_to_mm(0.0)
-        return float(final) if final is not None else 0.0
+        # Parks at `home_mm`, NOT at the 0 mm origin: on this bench 0 is on
+        # the mechanical stop, and homing there is what tripped Err16.0
+        # (see BalanceLinearConfig.home_mm). "Home" here means the defined
+        # safe rest position, which is the only useful meaning when the
+        # encoder origin is not a place the carriage can sit.
+        return self._absolute_move(self._cfg.home_mm, "linear/home")
 
     def move_linear(self, y_mm: float) -> float:
         # Absolute Y target in mm. The RS485 driver's move_to_mm runs a
         # PID-driven software closed loop (P-tuned) to ±0.1 mm; the PID owns the
         # per-iteration speed, so there is no useful per-move speed/accel here.
-        final = self._lin.move_to_mm(y_mm)
-        return float(final) if final is not None else y_mm
+        return self._absolute_move(y_mm, "linear/move")
+
+    def _absolute_move(self, target_mm: float, command: str) -> float:
+        """Drive the rail to an absolute target and confirm it arrived."""
+        try:
+            result = self._lin.move_to_mm(target_mm)
+        except MotionStopError as exc:
+            # The amp never acknowledged a stop. The rail may still be
+            # moving and no software path can halt it, so this must reach
+            # the operator verbatim rather than as a generic 500.
+            raise DeviceFaultError(str(exc), command=command) from exc
+        except SpeedCommandError as exc:
+            # The amp never took the speed command, so the rail never
+            # started and is still where it was. A transport problem
+            # rather than an amp fault, and worth its own branch because
+            # the operator action differs: nothing is moving, so there is
+            # no e-stop decision to make -- just a retry.
+            raise TransportError(str(exc), command=command) from exc
+        except LinkDroppedError as exc:
+            # The USB link vanished mid-move and the rail was stopped.
+            # The driver refuses to resume across a reconnect, so this is
+            # a failed move with the rail parked somewhere unknown --
+            # a transport problem, not an amp fault, and never a success.
+            raise TransportError(str(exc), command=command) from exc
+        return self._settled_mm(result, command)
+
+    @staticmethod
+    def _settled_mm(result: MoveResult | None, command: str) -> float:
+        """Return the rail's position, or fail loudly if it did not arrive.
+
+        Two distinct failures, neither of which may be reported as a
+        successful move (LearnedPatterns #15 and #17):
+
+        * ``None`` — the RS485 exchange failed, so the position is simply
+          unknown. This used to substitute a plausible number (0.0 for
+          home, the requested target for a move), fabricating exactly the
+          value a scenario's ``verify_*`` assert checks against.
+        * ``converged=False`` — the amp answered and the position is real,
+          but the closed loop gave up short of the target. A 2026-07-28 run
+          commanded 0.0 mm, stopped at 0.676 mm, and the cell returned
+          ``200 OK`` because the driver reported arrival and surrender with
+          the same bare float.
+        """
+        if result is None:
+            raise TransportError(
+                "linear amp did not answer the position read; the rail's "
+                "position is unknown — do not trust the last reported value",
+                command=command,
+            )
+        if not result.converged:
+            raise DeviceFaultError(
+                f"linear rail did not reach its target ({result.reason}); "
+                f"it stopped at {result.position_mm} mm",
+                command=command,
+            )
+        return float(result.position_mm)
 
     # ── Gantry (none on a balance+linear cell) ──────────────────────────
     def home_gantry(self) -> tuple[float, float]:

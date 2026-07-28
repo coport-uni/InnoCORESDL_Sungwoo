@@ -129,6 +129,7 @@ class Run:
     issues: list[ValidationIssue] = field(default_factory=list)
     error: str | None = None
     pending_confirmation: str | None = None
+    pending_pause: str | None = None
     motion_confirmed: bool = False
     stop_broadcast: dict[str, str] | None = None
     created_utc: str = field(default_factory=utc_now)
@@ -168,6 +169,7 @@ class Run:
             "step_index": self.index,
             "total_steps": len(self.scenario.steps),
             "pending_confirmation": self.pending_confirmation,
+            "pending_pause": self.pending_pause,
             "vars": self.vars,
             "steps": self.records,
             "issues": [i.as_dict() for i in self.issues],
@@ -467,6 +469,14 @@ class Engine:
         if needs_confirm:
             run.pending_confirmation = step.label(run.index)
             run.pause_requested = True
+        # A scenario-declared operator pause. Kept as its own field
+        # rather than folded into pending_confirmation: the two say
+        # opposite things to whoever is standing there. One warns that
+        # the machine is about to move, the other asks them to reach
+        # into it.
+        if step.pause is not None:
+            run.pending_pause = step.pause
+            run.pause_requested = True
         if not run.pause_requested:
             return True
         run.state = RunState.PAUSED
@@ -477,6 +487,7 @@ class Engine:
         if needs_confirm:
             run.motion_confirmed = True
         run.pending_confirmation = None
+        run.pending_pause = None
         run.pause_requested = False
         run.state = RunState.RUNNING
         return True

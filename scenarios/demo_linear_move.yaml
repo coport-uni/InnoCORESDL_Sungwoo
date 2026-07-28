@@ -31,7 +31,20 @@ description: >
 
 params:
   target_mm: 50.0
-  tolerance_mm: 0.1     # the driver's closed loop converges to +-0.1 mm
+  # 2.0 mm, matching the driver's default. This is not slack in the
+  # assert -- it is the value the closed loop is driven to, and it must
+  # not be tighter than what move_to_mm accepts or every run fails on a
+  # rail the driver considers arrived. It is set above the measured
+  # coast (1.5-1.8 mm at speed 25) so the loop converges on the first
+  # coarse move instead of chattering with small corrections, which is
+  # where every bench failure happened.
+  tolerance_mm: 2.0
+  # Where the rail rests, and NOT 0. The 0 mm encoder origin sits on the
+  # mechanical stop; with the loop coasting 1.5-1.8 mm past its target, a
+  # return to 0 pushes the carriage into the stop and holds it there
+  # until the amp trips Err16.0 (motor overload). Must match `home_mm` in
+  # the cell's config.
+  home_mm: 5.0
 
 defaults:
   on_fail: abort        # a motion step must never be retried blindly
@@ -42,7 +55,11 @@ steps:
     cell: cell4
     action: status
     method: GET
-    timeout_s: 5.0
+    # 15 s, not 5 s: a status read reaches the amp over RS485, where a
+    # slow-but-successful exchange measured 2078 ms and the driver may
+    # retry it three times. 5 s looked generous against a 27 ms median
+    # and cost a run its first step.
+    timeout_s: 15.0
     save_as: pre
 
   - id: home
@@ -52,7 +69,7 @@ steps:
     save_as: homed
 
   - id: verify_home
-    assert: "${homed.y_mm} <= ${params.tolerance_mm}"
+    assert: "${homed.y_mm} >= ${params.home_mm} - ${params.tolerance_mm} and ${homed.y_mm} <= ${params.home_mm} + ${params.tolerance_mm}"
 
   - id: move_out
     cell: cell4
@@ -69,7 +86,11 @@ steps:
     cell: cell4
     action: status
     method: GET
-    timeout_s: 5.0
+    # 15 s, not 5 s: a status read reaches the amp over RS485, where a
+    # slow-but-successful exchange measured 2078 ms and the driver may
+    # retry it three times. 5 s looked generous against a 27 ms median
+    # and cost a run its first step.
+    timeout_s: 15.0
     save_as: at_target_status
 
   # cell4's status reports the linear rail in stage_x_mm, not y_mm.
@@ -80,9 +101,9 @@ steps:
     cell: cell4
     action: linear/move
     body:
-      y_mm: 0.0
+      y_mm: "${params.home_mm}"
     timeout_s: 60.0     # calibrate from M0/A3
     save_as: post
 
   - id: verify_back_home
-    assert: "${post.y_mm} <= ${params.tolerance_mm}"
+    assert: "${post.y_mm} >= ${params.home_mm} - ${params.tolerance_mm} and ${post.y_mm} <= ${params.home_mm} + ${params.tolerance_mm}"

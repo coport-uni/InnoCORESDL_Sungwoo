@@ -37,6 +37,14 @@ HTTP_SERVER_ERROR = 500
 #: Simulated travel of the linear rail per move, in mm/s of wall clock.
 FAKE_MOVE_DELAY_S = 0.0
 
+#: Where `linear/home` parks the rail. Mirrors
+#: `BalanceLinearConfig.home_mm`, and is deliberately **not 0**: on the
+#: real bench the 0 mm origin sits on the mechanical stop, and homing
+#: there drove the carriage into it until the amp tripped Err16.0. A fake
+#: that homes to 0 would let a scenario asserting `y_mm <= tolerance`
+#: pass in tests and destroy the hardware on the bench.
+HOME_MM = 5.0
+
 
 def _ref(name: str) -> dict[str, Any]:
     return {"$ref": f"#/components/schemas/{name}"}
@@ -240,6 +248,11 @@ class FakeL1:
         self.plate_c: dict[str, float] = dict.fromkeys(shapes, 21.5)
         self.heating: dict[str, bool] = dict.fromkeys(shapes, False)
         self.lamp_on: dict[str, bool] = dict.fromkeys(shapes, False)
+        #: What the pan is carrying, in grams. Default is an empty,
+        #: freshly tared pan. A test that exercises a scenario with an
+        #: operator step sets this *while the run is paused* -- which is
+        #: what the operator physically does at that pause.
+        self.pan_g = 0.005
         self.failures: dict[tuple[str, str], list[Callable[[], Any]]] = {}
 
     # ── failure injection ──────────────────────────────────────────────
@@ -342,8 +355,8 @@ class FakeL1:
         if action == "stop":
             return httpx.Response(HTTP_OK, json={"stopped": True})
         if action == "linear/home":
-            self.position_mm[cell] = 0.0
-            return httpx.Response(HTTP_OK, json={"y_mm": 0.0})
+            self.position_mm[cell] = HOME_MM
+            return httpx.Response(HTTP_OK, json={"y_mm": HOME_MM})
         if action == "linear/move":
             self.position_mm[cell] = float(body["y_mm"])
             return httpx.Response(
@@ -360,7 +373,7 @@ class FakeL1:
             return httpx.Response(HTTP_OK, json={"weight_g": 0.0})
         if action == "balance/weight":
             return httpx.Response(
-                HTTP_OK, json={"weight_g": 0.005, "stable": True}
+                HTTP_OK, json={"weight_g": self.pan_g, "stable": True}
             )
         if action.startswith("pump/"):
             return httpx.Response(HTTP_OK, json={"plunger_uL": 0.0})

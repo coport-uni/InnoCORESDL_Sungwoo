@@ -19,19 +19,22 @@ from typing import Any, Callable
 import pytest
 from fastapi.testclient import TestClient
 
-from conftest import FakeL1, REPO_ROOT, openapi_document
+from conftest import FakeL1, HOME_MM, REPO_ROOT, openapi_document
 from orchestrator.app import create_app
 from orchestrator.engine import (
     Engine,
     RunState,
     ScenarioInvalid,
     RunConflictError,
+    TERMINAL_STATES,
 )
 from orchestrator.registry import OrchestratorConfig, Registry
 from orchestrator.runlog import META_FILE, SCENARIO_FILE, STEPS_FILE, VARS_FILE
 from orchestrator.scenario import (
     AssertSyntaxError,
+    ScenarioError,
     eval_assert,
+    load_scenario_text,
     operation,
     request_schema,
 )
@@ -181,7 +184,8 @@ async def test_demo_run_completes_and_writes_runlog(
     assert len(run.records) == len(run.scenario.steps)
     assert all(r["ok"] for r in run.records)
     # The rail actually went out and came back on the simulated cell.
-    assert fake_l1.position_mm["cell4"] == 0.0
+    # The rail parks at the safe home, not on the 0 mm stop.
+    assert fake_l1.position_mm["cell4"] == HOME_MM
     assert run.vars["at_target"]["y_mm"] == run.params["target_mm"]
 
     log_dir = Path(run.log.dir)
@@ -208,7 +212,7 @@ async def test_params_override_reaches_the_body(
         for _c, _m, path, body in fake_l1.calls
         if path == "/v1/linear/move"
     ]
-    assert moves == [12.5, 0.0]
+    assert moves == [12.5, HOME_MM]
 
 
 async def test_parallel_block_uses_distinct_cells(engine: Engine) -> None:
@@ -227,7 +231,9 @@ async def test_assert_failure_fails_the_run(engine: Engine) -> None:
     text = scenario_yaml(
         "  - id: home\n    cell: cell4\n    action: linear/home\n"
         "    save_as: h\n"
-        '  - id: check\n    assert: "${h.y_mm} > 1.0"\n'
+        # Compared against a position the rail cannot reach, so this
+        # tests the assert machinery and not the fake's home value.
+        '  - id: check\n    assert: "${h.y_mm} > 1000.0"\n'
     )
     run = await engine.create_run(text)
     await engine.wait(run.run_id)
@@ -404,6 +410,106 @@ async def test_first_motion_step_waits_for_confirmation(
     await engine.wait(run.run_id)
     assert run.state is RunState.COMPLETED
     assert run.pending_confirmation is None
+
+
+# ── Scenario-declared operator pause ───────────────────────────────────────
+
+WEIGH = REPO_ROOT / "scenarios" / "demo_weigh_at_position.yaml"
+
+#: The step demo_weigh_at_position.yaml marks for the operator.
+PAUSE_STEP = "weigh"
+
+#: A vial inside the scenario's min_vial_g..max_vial_g bracket. Loading
+#: it is what the operator does at the pause, so the tests do it there.
+VIAL_G = 25.7424
+
+
+async def test_pause_step_holds_the_run_without_step_mode(
+    engine: Engine, fake_l1: FakeL1
+) -> None:
+    """The point of `pause:`: one prompt, not one per step."""
+    run = await engine.create_run(WEIGH.read_text(encoding="utf-8"))
+    await wait_for(lambda: run.state is RunState.PAUSED)
+
+    assert run.pending_pause is not None
+    assert "vial" in run.pending_pause
+    # It held *before* the marked step, not after it.
+    assert PAUSE_STEP not in [r["id"] for r in run.records]
+    # And it is the only stop: everything up to it already ran.
+    assert "move_to_weigh" in [r["id"] for r in run.records]
+
+    fake_l1.pan_g = VIAL_G  # the operator loads the vial, here
+    await engine.resume(run.run_id)
+    await engine.wait(run.run_id)
+    assert run.state is RunState.COMPLETED
+    assert run.pending_pause is None
+
+
+async def test_pause_is_the_only_stop_in_the_whole_run(
+    engine: Engine, fake_l1: FakeL1
+) -> None:
+    """Without step mode the run must pause exactly once."""
+    run = await engine.create_run(WEIGH.read_text(encoding="utf-8"))
+    pauses = 0
+    while run.state not in TERMINAL_STATES:
+        if run.state is RunState.PAUSED:
+            pauses += 1
+            fake_l1.pan_g = VIAL_G
+            await engine.resume(run.run_id)
+        await asyncio.sleep(0)
+    assert run.state is RunState.COMPLETED
+    assert pauses == 1
+
+
+async def test_pause_and_motion_gate_are_reported_separately(
+    config: OrchestratorConfig,
+    registry: Registry,
+    client: Any,
+    fake_l1: FakeL1,
+) -> None:
+    """They say opposite things -- "it is about to move" versus "reach
+    into it" -- so one field must not stand in for the other."""
+    guarded = OrchestratorConfig(
+        log_dir=config.log_dir,
+        retry_delay_s=0.0,
+        confirm_first_motion=True,
+    )
+    engine = Engine(guarded, registry, client)
+    run = await engine.create_run(WEIGH.read_text(encoding="utf-8"))
+
+    # First stop: the motion gate, with no operator instruction.
+    await wait_for(lambda: run.state is RunState.PAUSED)
+    assert run.pending_confirmation == "home"
+    assert run.pending_pause is None
+    await engine.confirm(run.run_id)
+
+    # Second stop: the operator instruction, with no motion warning.
+    await wait_for(lambda: run.state is RunState.PAUSED)
+    assert run.pending_pause is not None
+    assert run.pending_confirmation is None
+    fake_l1.pan_g = VIAL_G
+    await engine.resume(run.run_id)
+    await engine.wait(run.run_id)
+    assert run.state is RunState.COMPLETED
+
+
+def test_pause_on_a_parallel_child_is_rejected() -> None:
+    """The gate runs before the block, so a child pause would never
+    fire. Refusing it at load time beats skipping the one place an
+    operator was meant to intervene."""
+    text = """
+name: bad_pause
+steps:
+  - id: block
+    parallel:
+      - id: a
+        cell: cell4
+        action: status
+        method: GET
+        pause: reach into the machine here
+"""
+    with pytest.raises(ScenarioError):
+        load_scenario_text(text)
 
 
 # ── Cell 5 (cell5): pump + single Z + hotplate + IR lamp ───────────────────
