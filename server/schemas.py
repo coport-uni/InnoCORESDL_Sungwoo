@@ -133,7 +133,12 @@ class GantryMoveRequest(BaseModel):
     x_mm: float = Field(ge=0)
     z_mm: float = Field(ge=0)
     speed_pct: int = Field(default=20, ge=1, le=100)
-    accel_pct: int = Field(default=10, ge=1, le=100)
+    # ge=0, not ge=1: the driver maps 0-100% onto the MKS accel byte 0-255,
+    # where 0 means "no acceleration ramp" — a real, supported setting, and
+    # the one BOTH upstream reference scripts use (bridge.py and the
+    # bench-validated CVMeasure.py run MOVE_ACCEL_PCT = 0). ge=1 rejected it
+    # with a 422 on the first real gantry move.
+    accel_pct: int = Field(default=10, ge=0, le=100)
 
 
 class GantryResponse(BaseModel):
@@ -160,7 +165,7 @@ class LinearResponse(BaseModel):
 class ZStageMoveRequest(BaseModel):
     z_mm: float = Field(ge=0)
     speed_pct: int = Field(default=20, ge=1, le=100)
-    accel_pct: int = Field(default=10, ge=1, le=100)
+    accel_pct: int = Field(default=10, ge=0, le=100)  # see GantryMoveRequest
 
 
 class ZStageResponse(BaseModel):

@@ -1548,3 +1548,103 @@ the *verification*, not just the outcome, survives.
       access denied): fork PR #2 merged with the Cell 5 bench ToDo
       entry (issue #1); submodule URL repointed to the fork in
       .gitmodules + SUBMODULES.md; pin bumped 872df98 -> f5c8089.
+
+## 2026-07-28 — cell1 XZ gantry: bench-verified, 4/4 runs
+
+Closes the bring-up opened earlier today. cell1 now runs its XZ gantry
+through the full L1 + L2 stack, **without its syringe pump**.
+
+### Result
+
+| Run | Scenario | Steps | Result |
+|---|---|---|---|
+| `20260728T115546Z` | `demo_gantry_step` | 23 (8 calls + 15 asserts) | ✅ completed |
+| `20260728T115738Z` | `demo_gantry_stair` | 31 (10 calls + 21 asserts) | ✅ completed |
+| `20260728T120806Z` | `demo_gantry_stair` | 31 | ✅ completed |
+| `20260728T120935Z` | `demo_gantry_stair` | 31 | ✅ completed |
+
+**116 steps, zero failures.** The stair ran three times deliberately — one
+run cannot tell you whether a tolerance is right (see "the correction").
+
+### Measured (all from `runs/*/vars.json`, not estimated)
+
+| Quantity | Value |
+|---|---|
+| Homing (Z pair, then X) | 5.64–5.74 s |
+| X residual after homing | **0.0006 mm, identical across all 3 stair runs** |
+| Move to (50,50) / (100,100) / (150,150) | 3.4 s / 5.2 s / 7.1 s |
+| Return 150→origin | 7.05 s |
+| Worst residual from target (20 waypoints) | **0.145 mm** |
+| Worst 50 mm increment error | **0.094 mm** |
+| Worst paired-Z spread | **0.020 mm** (0.003 mm typical, incl. at 150 mm depth) |
+| X parked position after return | consistently **−0.10 mm** (past the origin) |
+
+Move duration scales with travel, as it must: each stair waypoint retracts
+Z fully before traversing X, so the frame covers more ground each step.
+
+### The correction that matters
+
+`ARRIVAL_TOLERANCE_MM` was first justified as "worst residual 0.038 mm,
+~13x margin" — measured from **one** manual 50 mm move. Twenty waypoints
+across four runs put the worst at **0.145 mm**, so the real margin is
+**~3.5x**, not 13x. The tolerance value (0.5 mm) still stands and did not
+change; the reasoning behind it was wrong by four times. Corrected in
+`cell/pump_gantry_cell.py` and both scenarios. LearnedPatterns #33.
+
+### Wrong turns, in the order they happened
+
+1. **Documented X adapter serial did not exist on this bench.**
+   `NTAM63XD` → `NTAMU6TO`. `open_xz` raises on a missing serial, so the
+   server would have died at startup. The two Z serials were correct,
+   which is exactly what one swapped adapter looks like. #22
+2. **`preflight.py` reported the adapters as "not attached"** while
+   `lsusb` showed all three. A permission failure (`ftdi_sio` bound +
+   root-only `/dev/bus/usb`), not a missing device — it reads FTDI
+   through libusb while the pump and balance go through pyserial, and
+   only the libusb path was blocked. #23
+3. **The gantry reported the position it was *asked* for.** `move_gantry`
+   returned the commanded target and `diagnose()` hardcoded
+   `stage.ok = True`, so an unpowered gantry answered `200 OK` with
+   `x_mm: 50.0`. Found by reading the driver, not from a failure:
+   `MKSMotor.move_to` *prints* `[ERROR]` and returns instead of raising,
+   and `move_sync` discards the return value. #24
+4. **The dry run passed twice, then the first real move was a 422.**
+   `accel_pct: 0` against a wrong `ge=1` — and 0 is what both upstream
+   reference scripts use. The bound was in the OpenAPI document the
+   validator had already parsed; nothing looked at it. Fixed the schema
+   **and** taught the validator to read bounds. #25
+5. **The bounds checker's own first version flagged every valid field.**
+   `(10).__lt__(1.0)` returns `NotImplemented`, which is truthy. Caught
+   only by running it against a body known to be good. #25
+
+### Resolved
+
+- **X's homing direction.** Three conventions disagreed
+  (`CVMeasure.py` / `bridge.py` / this cell). This cell's
+  `home_dir_x=0x00` + `x_coord_invert=true` is correct on this bench —
+  X reached 50 mm rather than driving into its limit. `bridge.py` is the
+  odd one out and looks untested for absolute X moves.
+- **Travel.** 150 mm on both axes is proven on this frame. It is *not*
+  the frame's limit, which still nobody has measured.
+
+### Still open
+
+- [ ] **X parks ~0.10 mm past the origin** (negative) on every return,
+      very repeatably, then `/v1/status` reads it back at +0.04 mm. Inside
+      tolerance and the limit switch is right there, so it is harmless
+      today. Worth understanding before anything depends on X = 0 exactly.
+- [ ] **The pump is still off cell1.** Restore the `[pump]` table
+      (`server/nuc1/cell1.toml.example` shows it) once its USB link is
+      trusted; its flapping is a separate fault, chased in its own entry.
+- [ ] **Frame travel beyond 150 mm is unmeasured.** The driver's
+      `_max_travel_mm = 400` is a software clamp, not a measurement.
+- [ ] **cell2 / cell3 are the same shape and still unrun.** They should
+      need only their own adapter serials — which, per #22, must be read
+      off the bus rather than copied from any doc.
+- [x] GitHub issue (CommonClaude §4) — **issue #14** already covered this
+      bring-up (opened earlier today, before the runs), so no duplicate was
+      filed. Commented with the 4-run verification, the resolved X homing
+      direction, the `_check_bounds` follow-up (which supersedes the
+      issue's own "the dry run cannot catch this" claim) and the tolerance
+      correction, then **closed it** — matching #10's precedent for cell4.
+      The remaining bullets above are follow-ups, not part of the bring-up.

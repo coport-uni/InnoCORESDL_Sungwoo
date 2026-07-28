@@ -1,0 +1,268 @@
+# cell1 XZ gantry stair: origin -> (50,50) -> (100,100) -> (150,150) -> origin.
+#
+# The L2 form of the driver's own `CVMeasure.py`, which walks the same
+# equal-increment stair with absolute moves and is the one motion pattern
+# on this gantry with a hardware-validated precedent.
+#
+# THE PATH IS NOT DIAGONAL -- READ THIS BEFORE PICTURING THE MOTION.
+#   `PumpGantryCell.move_gantry` never moves both axes at once. Whenever
+#   the X target changes it runs up -> X -> down, so each waypoint below
+#   is three moves, not one:
+#
+#     (0,0)     -> (50,50)    Z 0->0 (already up), X 0->50,   Z 0->50
+#     (50,50)   -> (100,100)  Z 50->0 (RETRACTS), X 50->100,  Z 0->100
+#     (100,100) -> (150,150)  Z 100->0 (RETRACTS), X 100->150, Z 0->150
+#     (150,150) -> (0,0)      Z 150->0 (RETRACTS), X 150->0,   Z 0->0
+#
+#   So Z fully retracts between every step and the head never traverses X
+#   while lowered. That is the safety property; it also means the frame
+#   travels considerably further than the 212 mm a straight diagonal
+#   would suggest.
+#
+# WHAT THIS VERIFIES
+#   `gantry/move` returns the ENCODER READBACK, not the requested target,
+#   and raises if an axis did not arrive or if the paired Z motors ended
+#   apart (cell/pump_gantry_cell.py `_confirm`). The asserts below add the
+#   part the cell cannot check for itself: that BOTH axes advanced one
+#   full 50 mm increment at each step, measured against the previous
+#   waypoint's readings rather than against the request.
+#
+# BENCH STATUS: completed 3/3 on 2026-07-28 (runs 20260728T115738Z,
+# T120806Z, T120935Z), 31/31 steps each, zero failures. 150 mm on both
+# axes is therefore proven travel on THIS frame -- but it is still not
+# the frame's limit, which nobody has measured.
+#
+# BEFORE RUNNING IT AGAIN -- this goes THREE TIMES further than
+# demo_gantry_step.yaml:
+#   1. TRAVEL. Confirm BOTH axes still have `max_mm` (150 mm) of free
+#      travel from home and nothing new is mounted in the way. The driver
+#      clamps at MKSMotor._max_travel_mm = 400 mm, which is a software
+#      limit, not a measurement of this frame.
+#   2. Z+ IS DOWNWARD. The last waypoint LOWERS THE HEAD 150 mm. Clear
+#      the deck. This is the step to be sure about.
+#   3. E-STOP in hand. /v1/stop hard-stops the gantry group (F7 to all
+#      three motors) but is served under the same lock as the move in
+#      flight, so it queues behind it (docs/L1_AUDIT.md GAP-9). The
+#      physical stop is the only immediate one.
+#   4. PAIRED Z. Z_A and Z_B are mechanically coupled; if they desync the
+#      frame racks. Worst spread measured 0.020 mm across all four runs,
+#      including at 150 mm depth -- 25x inside Z_DESYNC_LIMIT_MM.
+#   5. Run it in order, and run demo_gantry_step.yaml first:
+#        python -m orchestrator validate scenarios/demo_gantry_stair.yaml
+#        python -m orchestrator run scenarios/demo_gantry_stair.yaml --step-mode
+#        python -m orchestrator run scenarios/demo_gantry_stair.yaml
+
+name: demo_gantry_stair
+description: >
+  cell1's XZ gantry stair. Homes, then steps both axes together through
+  (50,50), (100,100) and (150,150) in equal 50 mm increments and returns
+  to the origin, checking both encoders at every waypoint. Single cell,
+  no pump, no balance.
+
+params:
+  step_mm: 50.0
+  w1_mm: 50.0
+  w2_mm: 100.0
+  w3_mm: 150.0
+  # The furthest either axis is allowed from home on this run. Kept as
+  # its own name so the pre-flight asserts read against one number.
+  max_mm: 150.0
+  # An axis is "there" if the encoder is within this of the target. Must
+  # match the cell's ARRIVAL_TOLERANCE_MM (0.5 mm) -- tighter and a move
+  # the cell accepted fails the assert after it; they change together.
+  # Measured across four completed runs on 2026-07-28 (20 waypoints, to
+  # 150 mm): worst residual 0.145 mm, worst increment error 0.094 mm.
+  # ~3.5x margin. The asserts below compare a DIFFERENCE of two readings,
+  # so both errors add -- which is why the increment figure bounds them.
+  tolerance_mm: 0.5
+  # Slow and gentle. Matches MOVE_SPEED_PCT / MOVE_ACCEL_PCT in the
+  # upstream bridge.py and CVMeasure.py, so this moves the frame exactly
+  # as the driver's own reference scripts do. accel 0 is the MKS "no
+  # ramp" byte, a real setting -- see LearnedPatterns #25.
+  speed_pct: 10
+  accel_pct: 0
+
+defaults:
+  on_fail: abort        # a motion step must never be retried blindly
+  timeout_s: 60.0
+
+steps:
+  # ── Pre-flight: is the gantry actually reachable? ──────────────────
+  - id: check_diagnose
+    cell: cell1
+    action: diagnose
+    method: GET
+    timeout_s: 15.0
+    save_as: diag
+
+  # diagnose() reads all three encoders, so stage.ok false means a motor
+  # is unpowered or off the CAN bus. Catching that here costs one HTTP
+  # call; catching it after `home` costs a homing run into an axis that
+  # was never listening.
+  - id: verify_gantry_reachable
+    assert: "${diag.stage.ok} == true"
+
+  # Guards the config, not the hardware: if a [pump] table ever comes
+  # back, this run is no longer the pumpless shape it claims to be.
+  - id: verify_no_pump_expected
+    assert: "${diag.pump.present} == false"
+
+  # ── Home: the origin every increment is measured from ──────────────
+  - id: home
+    cell: cell1
+    action: gantry/home
+    # Both Z then X, each a full seek to its switch. Measured 5.5 s from
+    # an already-homed start; kept well above that because the seek time
+    # scales with how far the axis is from its switch, which after a
+    # power-up or a hand-moved frame can be the full travel.
+    timeout_s: 180.0
+    save_as: w0
+
+  - id: verify_home_x
+    assert: "${w0.x_mm} <= ${params.tolerance_mm} and ${w0.x_mm} >= 0 - ${params.tolerance_mm}"
+
+  - id: verify_home_z
+    assert: "${w0.z_mm} <= ${params.tolerance_mm} and ${w0.z_mm} >= 0 - ${params.tolerance_mm}"
+
+  # ── Waypoint 1: (50, 50) ───────────────────────────────────────────
+  # Three moves inside this one call: X 0->50, then Z 0->50.
+  - id: to_w1
+    cell: cell1
+    action: gantry/move
+    body:
+      x_mm: "${params.w1_mm}"
+      z_mm: "${params.w1_mm}"
+      speed_pct: "${params.speed_pct}"
+      accel_pct: "${params.accel_pct}"
+    timeout_s: 120.0    # up + X + down, three moves under one timeout
+    save_as: w1
+
+  # The increment, not the endpoint: measured-now minus measured-at-home
+  # must be one full step on each axis. An axis that was already there,
+  # or one that never moved, fails this where an endpoint check passes.
+  - id: verify_w1_x_advanced
+    assert: "${w1.x_mm} - ${w0.x_mm} >= ${params.step_mm} - ${params.tolerance_mm} and ${w1.x_mm} - ${w0.x_mm} <= ${params.step_mm} + ${params.tolerance_mm}"
+
+  - id: verify_w1_z_advanced
+    assert: "${w1.z_mm} - ${w0.z_mm} >= ${params.step_mm} - ${params.tolerance_mm} and ${w1.z_mm} - ${w0.z_mm} <= ${params.step_mm} + ${params.tolerance_mm}"
+
+  # An independent witness: /v1/status re-reads the encoders rather than
+  # echoing what gantry/move just returned. If these two ever disagree,
+  # one is serving a cached number and neither can be trusted. `error`
+  # is null only while both Z motors agree, so this is also the
+  # per-waypoint desync check as the depth grows.
+  - id: read_back_w1
+    cell: cell1
+    action: status
+    method: GET
+    timeout_s: 15.0
+    save_as: at_w1
+
+  - id: verify_status_agrees_w1
+    assert: "${at_w1.stage_x_mm} >= ${params.w1_mm} - ${params.tolerance_mm} and ${at_w1.stage_z_mm} >= ${params.w1_mm} - ${params.tolerance_mm}"
+
+  - id: verify_no_z_desync_w1
+    assert: "${at_w1.error} == null"
+
+  # ── Waypoint 2: (100, 100) ─────────────────────────────────────────
+  # Z retracts 50 -> 0 before X traverses, then descends to 100.
+  - id: to_w2
+    cell: cell1
+    action: gantry/move
+    body:
+      x_mm: "${params.w2_mm}"
+      z_mm: "${params.w2_mm}"
+      speed_pct: "${params.speed_pct}"
+      accel_pct: "${params.accel_pct}"
+    timeout_s: 120.0
+    save_as: w2
+
+  - id: verify_w2_x_advanced
+    assert: "${w2.x_mm} - ${w1.x_mm} >= ${params.step_mm} - ${params.tolerance_mm} and ${w2.x_mm} - ${w1.x_mm} <= ${params.step_mm} + ${params.tolerance_mm}"
+
+  - id: verify_w2_z_advanced
+    assert: "${w2.z_mm} - ${w1.z_mm} >= ${params.step_mm} - ${params.tolerance_mm} and ${w2.z_mm} - ${w1.z_mm} <= ${params.step_mm} + ${params.tolerance_mm}"
+
+  - id: read_back_w2
+    cell: cell1
+    action: status
+    method: GET
+    timeout_s: 15.0
+    save_as: at_w2
+
+  - id: verify_status_agrees_w2
+    assert: "${at_w2.stage_x_mm} >= ${params.w2_mm} - ${params.tolerance_mm} and ${at_w2.stage_z_mm} >= ${params.w2_mm} - ${params.tolerance_mm}"
+
+  - id: verify_no_z_desync_w2
+    assert: "${at_w2.error} == null"
+
+  # ── Waypoint 3: (150, 150) — the deepest point of the run ──────────
+  - id: to_w3
+    cell: cell1
+    action: gantry/move
+    body:
+      x_mm: "${params.w3_mm}"
+      z_mm: "${params.w3_mm}"
+      speed_pct: "${params.speed_pct}"
+      accel_pct: "${params.accel_pct}"
+    timeout_s: 120.0
+    save_as: w3
+
+  - id: verify_w3_x_advanced
+    assert: "${w3.x_mm} - ${w2.x_mm} >= ${params.step_mm} - ${params.tolerance_mm} and ${w3.x_mm} - ${w2.x_mm} <= ${params.step_mm} + ${params.tolerance_mm}"
+
+  - id: verify_w3_z_advanced
+    assert: "${w3.z_mm} - ${w2.z_mm} >= ${params.step_mm} - ${params.tolerance_mm} and ${w3.z_mm} - ${w2.z_mm} <= ${params.step_mm} + ${params.tolerance_mm}"
+
+  # Absolute bound, not an increment: three good steps could still add up
+  # somewhere unintended if the origin drifted. This pins the far corner.
+  - id: verify_w3_within_travel_budget
+    assert: "${w3.x_mm} <= ${params.max_mm} + ${params.tolerance_mm} and ${w3.z_mm} <= ${params.max_mm} + ${params.tolerance_mm}"
+
+  - id: read_back_w3
+    cell: cell1
+    action: status
+    method: GET
+    timeout_s: 15.0
+    save_as: at_w3
+
+  - id: verify_status_agrees_w3
+    assert: "${at_w3.stage_x_mm} >= ${params.w3_mm} - ${params.tolerance_mm} and ${at_w3.stage_z_mm} >= ${params.w3_mm} - ${params.tolerance_mm}"
+
+  # The desync check that matters most: deepest point, longest Z travel.
+  - id: verify_no_z_desync_w3
+    assert: "${at_w3.error} == null"
+
+  # ── Return to the origin in one move ───────────────────────────────
+  # Z retracts 150 -> 0 first, so X traverses fully raised.
+  - id: to_origin
+    cell: cell1
+    action: gantry/move
+    body:
+      x_mm: 0.0
+      z_mm: 0.0
+      speed_pct: "${params.speed_pct}"
+      accel_pct: "${params.accel_pct}"
+    timeout_s: 120.0
+    save_as: parked
+
+  - id: verify_parked_x
+    assert: "${parked.x_mm} <= ${params.tolerance_mm} and ${parked.x_mm} >= 0 - ${params.tolerance_mm}"
+
+  - id: verify_parked_z
+    assert: "${parked.z_mm} <= ${params.tolerance_mm} and ${parked.z_mm} >= 0 - ${params.tolerance_mm}"
+
+  # Closes the loop: the frame came back to the same origin it homed to,
+  # so the three outbound steps did not accumulate a position error.
+  - id: read_back_origin
+    cell: cell1
+    action: status
+    method: GET
+    timeout_s: 15.0
+    save_as: at_origin
+
+  - id: verify_returned_to_home_origin
+    assert: "${at_origin.stage_x_mm} - ${w0.x_mm} <= ${params.tolerance_mm} and ${at_origin.stage_z_mm} - ${w0.z_mm} <= ${params.tolerance_mm}"
+
+  - id: verify_no_z_desync_at_origin
+    assert: "${at_origin.error} == null"

@@ -561,6 +561,38 @@ def check_body(
     return problems
 
 
+def _check_bounds(key: str, schema: dict[str, Any], value: float) -> list[str]:
+    """Enforce the numeric range an OpenAPI property declares.
+
+    Without this the dry run checked only that a number *was* a number.
+    On 2026-07-28 a scenario passed validation twice — offline and against
+    the live cell — and its first real move came back 422 for
+    ``accel_pct: 0`` against a ``minimum: 1``. The bound was in the same
+    document the validator had already fetched and parsed; nothing looked
+    at it. A dry run whose whole purpose is "would this run?" must read
+    the constraints, not just the field names (LearnedPatterns #25).
+    """
+    problems: list[str] = []
+    # Plain operators, NOT value.__lt__ etc: an OpenAPI bound is a float
+    # while the value is often an int, and `(10).__lt__(1.0)` returns
+    # NotImplemented rather than False — which is truthy, so every valid
+    # integer field would have been reported as violating both of its
+    # bounds. Caught by checking this function against a body known good.
+    checks = (
+        ("minimum", "at least", lambda v, limit: v < limit),
+        ("maximum", "at most", lambda v, limit: v > limit),
+        ("exclusiveMinimum", "greater than", lambda v, limit: v <= limit),
+        ("exclusiveMaximum", "less than", lambda v, limit: v >= limit),
+    )
+    for name, phrase, violates in checks:
+        limit = schema.get(name)
+        if limit is not None and violates(value, limit):
+            problems.append(
+                f"field {key!r} must be {phrase} {limit}, got {value!r}"
+            )
+    return problems
+
+
 def _check_type(
     document: dict[str, Any], key: str, prop: Any, value: Any
 ) -> list[str]:
@@ -572,11 +604,11 @@ def _check_type(
     if json_type == "number":
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             return [f"field {key!r} must be a number, got {value!r}"]
-        return []
+        return _check_bounds(key, schema, value)
     if json_type == "integer":
         if isinstance(value, bool) or not isinstance(value, int):
             return [f"field {key!r} must be an integer, got {value!r}"]
-        return []
+        return _check_bounds(key, schema, value)
     expected = _JSON_TYPES.get(str(json_type)) if json_type else None
     if expected and not isinstance(value, expected):
         return [f"field {key!r} must be a {json_type}, got {value!r}"]
