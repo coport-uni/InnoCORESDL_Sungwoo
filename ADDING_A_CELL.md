@@ -38,6 +38,9 @@ into **two layers** (see SDLClaude `ARCHITECTURE.md` → "Cell contract"):
 | **Action set** (per family) | Pump | `initialize()`, `move_valve()`, `aspirate()`, `dispense()`, `cycle()` |
 | **Action set** (per family) | Gantry | `home_gantry()`, `move_gantry(x, z, *, speed_pct, accel_pct)` |
 | **Action set** (per family) | Linear | `home_linear()`, `move_linear(y_mm)` |
+| **Action set** (per family) | ZStage | `home_zstage()`, `move_zstage(z_mm, *, speed_pct, accel_pct)` |
+| **Action set** (per family) | Hotplate | `read_hotplate()`, `set_hotplate_temperature(c)`, `set_hotplate_heater(*, enabled)`, `set_hotplate_speed(rpm)`, `set_hotplate_stirrer(*, enabled)` |
+| **Action set** (per family) | Lamp | `read_lamp()`, `set_lamp(*, enabled)` |
 
 Rules:
 - **Always implement the Substrate** (discovery + lifecycle) — that's what the
@@ -66,7 +69,24 @@ Rules:
   one-time setup, return the instance. Hold drivers as attributes (`has-a`);
   translate name/unit/order in the method bodies (Adapter pattern).
 - Intra-cell imports are relative (`from .cell_protocol import ...`); driver
-  imports are absolute, by *package* name (`from sy01b import ...`).
+  imports are absolute, by *package* name (`from sy01b import ...`) — except
+  the two path-imported repos (`external.HotplateController...`,
+  `external.SmartPlugController...`), which are not packaged yet.
+- **Name fields so a YAML scenario can address them.** L2 scenarios are
+  YAML, and YAML 1.1 turns a bare `on:` key into a boolean — so a field
+  named `on` is unreachable. Use `enabled` (see `LearnedPatterns.md` #8);
+  the same goes for `off`, `yes`, `no`, `y`, `n`.
+- **If the cell can heat or energize something, `stop()` must kill that
+  too**, not just motion. `PumpZThermalCell.stop()` is the reference: it
+  attempts motor, pump, heater, stirrer and lamp, and reports whatever did
+  not stop instead of giving up at the first failure.
+
+**Worked example — Cell D (cell5).** Four devices in one cell (pump +
+single Z + hotplate + IR lamp), three brand-new action sets, added in one
+pass: `cell/pump_z_thermal_cell.py`, the `zstage`/`hotplate`/`lamp` routes
+and schemas, `_load_pump_z_thermal()` + `--cell pump_z_thermal`,
+`server/nuc2/cell5.toml.example`. Note what did *not* change: the L2
+orchestrator, which picked the new routes up from the cell's OpenAPI.
 
 ### 3. Raise the right `CellError` — it maps to HTTP automatically
 `server/errors.py` maps each subclass to a status code, so just raise the

@@ -64,6 +64,13 @@ def _no_linear() -> WrongStateError:
     )
 
 
+def _absent(family: str) -> WrongStateError:
+    # Defensive stub for the action sets only Cell D (cell5) has: the
+    # single Z stage, the hotplate and the IR lamp. Same contract as the
+    # stubs above — a stray call gets 409, not an AttributeError.
+    return WrongStateError(f"pump+gantry cell has no {family}", command=family)
+
+
 class PumpGantryCell(Cell):
     """cell1 = syringe pump + XZ gantry, behind :class:`cell_protocol.Cell`."""
 
@@ -250,6 +257,36 @@ class PumpGantryCell(Cell):
 
     def move_linear(self, y_mm: float) -> float:
         raise _no_linear()
+
+    # ── Cell D action sets (none on a pump+gantry cell) ─────────────────
+    def home_zstage(self) -> float:
+        raise _absent("zstage")
+
+    def move_zstage(
+        self, z_mm: float, *, speed_pct: int, accel_pct: int
+    ) -> float:
+        raise _absent("zstage")
+
+    def read_hotplate(self) -> dict:
+        raise _absent("hotplate")
+
+    def set_hotplate_temperature(self, celsius: float) -> float:
+        raise _absent("hotplate")
+
+    def set_hotplate_heater(self, *, enabled: bool) -> dict:
+        raise _absent("hotplate")
+
+    def set_hotplate_speed(self, rpm: float) -> float:
+        raise _absent("hotplate")
+
+    def set_hotplate_stirrer(self, *, enabled: bool) -> dict:
+        raise _absent("hotplate")
+
+    def read_lamp(self) -> dict:
+        raise _absent("lamp")
+
+    def set_lamp(self, *, enabled: bool) -> dict:
+        raise _absent("lamp")
 
     # ── Safety / lifecycle ──────────────────────────────────────────────
     def stop(self) -> None:

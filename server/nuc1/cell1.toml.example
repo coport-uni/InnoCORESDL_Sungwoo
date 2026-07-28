@@ -1,0 +1,21 @@
+# NUC1 / Cell A -- pump + XZ gantry (X axis 1, Z axes 2 driven in sync).
+# Copy to server/nuc1/cell1.toml (gitignored), then:
+#   systemctl enable --now cell@nuc1-cell1
+#   # or, by hand:  python -m server --config server/nuc1/cell1.toml
+
+[pump]
+port = "1A86:7523"     # SY-01B CH340 USB-serial (VID:PID)
+syringe_uL = 125
+init_force = 2
+
+[stage]
+# FTDI serial of the X adapter; the other two adapters are the paired Z,
+# auto-assigned and always driven together (mks_motor move_sync).
+serial_x = "NTAM63XD"
+z_coord_invert = true
+x_coord_invert = true
+
+[server]
+host = "0.0.0.0"
+port = 17054           # cell1 -- matches [cells.cell1] in the orchestrator
+log_level = "info"

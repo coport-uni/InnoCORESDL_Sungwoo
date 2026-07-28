@@ -1,0 +1,62 @@
+# L2 orchestrator config. Copy to orchestrator/config.toml (gitignored).
+#   python -m orchestrator --config orchestrator/config.toml serve
+#
+# This file is the ONLY address book (spec section 2): no IP or port is
+# hardcoded in code. Both NUCs clone the same repository; only this file
+# and the systemd enable list differ between them (spec section 3).
+
+[orchestrator]
+host = "0.0.0.0"
+port = 17100                 # spec section 2; check SDLClaude ARCHITECTURE.md
+log_dir = "runs"             # runlog root -> runs/{run_id}/ (spec section 10)
+status_poll_s = 1.0          # cell status polling period
+step_timeout_s = 30.0        # per-step default; a scenario may override
+connect_timeout_s = 5.0      # TCP connect budget per cell call
+retry_delay_s = 1.0          # wait between attempts of `on_fail: retry`
+
+# Ask the operator before the run's first hardware-acting step -- one
+# that moves, heats, or energizes something (CLAUDE.md Folder-specific
+# rules #3). Leave this on for bench work.
+confirm_first_motion = true
+
+# Broadcast POST /v1/stop to every cell when a step fails.
+# WARNING: this cannot currently stop anything that is already moving --
+# L1 serves /v1/stop under the same lock the in-flight command holds, so
+# it queues behind it (docs/L1_AUDIT.md GAP-9); and cell4's stop() is a
+# no-op even when reached (GAP-1). The physical e-stop is the only stop.
+stop_on_failure = true
+
+# Action prefixes counted as "acts on hardware" for confirm_first_motion.
+# Cell D's hotplate and IR lamp are in here on purpose: a heater or a lamp
+# coming on unattended is the same class of hazard as a motor starting.
+# GET actions are never gated (the L1 convention is that every GET is a
+# read-only probe), so hotplate/state and lamp/state stay free.
+hazard_prefixes = [
+    "gantry/", "linear/", "zstage/", "stage/",
+    "pump/", "hotplate/", "lamp/",
+]
+
+# --- Cells ----------------------------------------------------------------
+# Keys here are the names scenarios use in `cell:`. Ports follow the
+# SDLClaude ARCHITECTURE.md scheme; the IPs below are PLACEHOLDERS -- fill
+# in the real NUC addresses before the first bench run (spec section 12.10).
+
+[cells.cell1]                # Cell A -- pump + X1/Z2 gantry (NUC1)
+base_url = "http://192.168.1.10:17054"
+nuc = "nuc1"
+
+[cells.cell4]                # balance + MINAS A6 linear rail (NUC1)
+base_url = "http://192.168.1.10:17060"
+nuc = "nuc1"
+
+[cells.cell2]                # Cell B -- clone of Cell A (NUC2)
+base_url = "http://192.168.1.20:17056"
+nuc = "nuc2"
+
+[cells.cell3]                # Cell C -- clone of Cell A (NUC2)
+base_url = "http://192.168.1.20:17058"
+nuc = "nuc2"
+
+[cells.cell5]                # Cell D -- pump + single Z + hotplate + lamp
+base_url = "http://192.168.1.20:17062"   # confirm 17062 vs ARCHITECTURE.md
+nuc = "nuc2"

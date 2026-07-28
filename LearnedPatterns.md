@@ -121,3 +121,119 @@ format below. Newest entries at the bottom.
   instantly at 0 — that's a direction-config bug, not a hardware fault.
   Keep all gantry axes on one convention (home at `0x00` + `coord_invert`)
   so +mm always means "into the working travel."
+
+## 5. The L2 spec's example scenario used field names L1 does not have
+
+- **Problem**: Building the L2 orchestrator from
+  `docs/L2_ORCHESTRATOR_SPEC.md`, the section 8.1 examples call
+  `pump/dispense` with `{volume_uL: …}`, `gantry/move` with `{x: …, z: …}`,
+  and read a mass as `${measured.grams}`. Copied verbatim into a scenario,
+  every one of those steps would have failed at the bench — after the
+  hardware had already moved through the earlier steps.
+- **Cause**: The spec is a design document written ahead of the code. L1's
+  actual contract is `VolumeRequest.target_uL`, `GantryMoveRequest.x_mm` /
+  `z_mm`, and `WeightReadResponse.weight_g` (`server/schemas.py`). A design
+  doc's example payloads are illustrations, not an interface.
+- **Fix**: The scenario validator resolves every action path and body field
+  against the cell's live `GET /openapi.json` instead of a table baked into
+  L2 (`orchestrator/scenario.py`), so a wrong field name is a dry-run error
+  before anything moves; `scenarios/demo_linear_move.yaml` was written from
+  `server/routes.py` + `server/schemas.py`, and the spec was corrected to
+  match (v0.9), not the other way round.
+- **Rule**: The code is the interface; the spec is intent. When they
+  disagree, fix the spec. Never take endpoint paths, field names, or units
+  from a design document — read the route and the request model, and let
+  the dry run catch what you miss.
+
+## 6. cell4 reports the linear rail's position as `stage_x_mm`, not `y_mm`
+
+- **Problem**: A scenario that moves the rail with `linear/move` (which
+  answers `{y_mm: …}`) and then verifies the position with `GET /v1/status`
+  found no `y_mm` field anywhere in the status body.
+- **Cause**: `StatusResponse` is shared by both cell shapes and only has
+  `stage_x_mm` / `stage_z_mm`. `BalanceLinearCell.status()` therefore
+  reports the rail's mm position in **`stage_x_mm`**
+  (`cell/balance_linear_cell.py:113`) — the same physical axis is `y_mm` on
+  the way in and `stage_x_mm` on the way out.
+- **Fix**: Assert on the `linear/move` response (`y_mm`) for the move
+  itself, and on `stage_x_mm` when cross-checking through `status`.
+  `scenarios/demo_linear_move.yaml` does both, and says why inline.
+- **Rule**: A shared response model can rename an axis across cell shapes.
+  Check the field a *given cell* fills in, not the one the request used.
+
+## 7. `POST /v1/stop` does not stop the linear rail (software e-stop gap)
+
+- **Problem**: The L2 abort path broadcasts `POST /v1/stop` to every cell as
+  a software e-stop. On cell4 the rail keeps moving.
+- **Cause**: `BalanceLinearCell.stop()` is an intentional no-op
+  (`cell/balance_linear_cell.py:205`) — the MINAS RS485 standard protocol
+  driver exposes no asynchronous halt, so stopping was left to the bench
+  interlock. The gantry cells do the opposite: `stop()` calls
+  `MKSMotor.stop_group_hard(...)`, a real hard stop.
+- **Fix**: Recorded as GAP-1 in `docs/L1_AUDIT.md` (M0/A4) and stated at
+  every place that promises a stop: the engine's `abort` docstring, the
+  config comment, and the demo scenario header. Closing it means extending
+  L1 through the `ADDING_A_CELL.md` procedure with user approval.
+- **Rule**: "Broadcast stop to all cells" is only as strong as each cell's
+  `stop()`. Before trusting a software e-stop, read every implementation —
+  and never let a cell whose stop is a no-op run unattended.
+
+## 8. A JSON field named `on` is unreachable from a YAML scenario
+
+- **Problem**: Cell D's heater and lamp routes were written as
+  `POST /v1/hotplate/heater {"on": true}` — the obvious spelling. The
+  scenario step
+  ```yaml
+      body:
+        on: true
+  ```
+  failed dry-run validation with `steps.6.body.1.[key]: Input should be a
+  valid string`, and the JSON itself explained nothing.
+- **Cause**: YAML 1.1 (what PyYAML implements) resolves the bare scalars
+  `on`/`off`/`yes`/`no`/`y`/`n` to booleans — **including when they are
+  mapping keys**. `yaml.safe_load("on: true")` returns `{True: True}`, so
+  the step body arrived with a boolean key and never matched the schema.
+  Quoting (`"on": true`) works, but a field whose only correct spelling is
+  the quoted one is a trap for whoever writes the next scenario.
+- **Fix**: Renamed the field to `enabled` in `HeaterRequest`,
+  `StirrerRequest` and `LampRequest` (`server/schemas.py`) and in the cell
+  methods, so the natural YAML spelling is the correct one. A related trap
+  in the same area: `assert` expressions are a Python subset, so an
+  interpolated boolean must render as `True`/`False`, not `true`/`false` —
+  `orchestrator/scenario.py` now emits Python literals *and* accepts
+  `true`/`false`/`null` as names, so either spelling works in an assert.
+- **Rule**: The scenario language is YAML, so an API field name must
+  survive YAML's scalar resolution. Avoid `on`, `off`, `yes`, `no`, `y`,
+  `n`, `true`, `false`, `null` as field names — and remember the rule
+  applies to keys, not just values.
+
+## 9. `POST /v1/stop` waits for the lock the move is holding — so it never interrupts anything
+
+- **Problem**: The L2 abort path broadcasts `POST /v1/stop` to every cell
+  and calls it a software e-stop. Writing the bench probe for it (A4), the
+  question came up: does that request actually reach the driver while an
+  axis is moving?
+- **Cause**: It does not. Every state-changing route in `server/routes.py`
+  holds `app.state.lock` for the whole device interaction — **including
+  `/v1/stop`**. An `asyncio.Lock` is FIFO, so the stop request simply
+  queues behind the move it was meant to interrupt. Measured with the real
+  L1 app over a stub cell whose move takes 5 s (no hardware): move ran
+  0.18→5.18 s, the stop was requested at 1.00 s, and `cell.stop()` executed
+  at **5.18 s** — after the motion had already completed on its own. The
+  HTTP call itself blocked for 4.2 s.
+  This is independent of, and worse than, LearnedPatterns #7: even the
+  cells whose `stop()` is a genuine hard stop (`stop_group_hard` on the
+  gantry) never get to run it in time.
+- **Fix**: Recorded as GAP-9 in `docs/L1_AUDIT.md` with the measurement,
+  and `claude_test/smoke_l1.py --suite stop` now times the stop against the
+  move and reports `preempted=False` automatically. The real fix is an L1
+  change needing user approval: serve `/v1/stop` lock-free (as
+  `/v1/health` already is) **and** give each driver a priority path for its
+  stop command — firing an MKS `F7` on an FTDI handle another thread is
+  mid-command on is not safe just because the HTTP layer stopped waiting.
+  Until then the physical e-stop is the only stop, on every cell.
+- **Rule**: A safety endpoint must not share the mutex with the operation
+  it aborts. When you add a "stop"/"abort"/"cancel" route, check what it
+  waits on before you believe it — and prove it with a timestamped probe
+  against a deliberately slow operation, which costs nothing and needs no
+  hardware.

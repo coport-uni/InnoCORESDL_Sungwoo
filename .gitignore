@@ -12,6 +12,11 @@ env/
 
 # Server: real bench config (the .example is committed)
 server/*.toml
+server/*/*.toml
+
+# Orchestrator: real address book + run records (examples are committed)
+orchestrator/config.toml
+runs/
 
 # Editor / OS
 .vscode/

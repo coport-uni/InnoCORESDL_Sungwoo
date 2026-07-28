@@ -1,0 +1,88 @@
+# First real-hardware L2 demo (spec section 8.3): the orchestrator drives
+# cell4's MINAS A6 linear rail out and back over HTTP /v1 only.
+#
+# Action paths and body fields below were checked against the L1 code, not
+# copied from the spec draft: server/routes.py exposes POST /v1/linear/home
+# and POST /v1/linear/move, and LinearMoveRequest's field is `y_mm`.
+# NOTE the asymmetry that GET /v1/status reports the rail position in
+# `stage_x_mm` (StatusResponse has no y field) while linear/move answers
+# with `y_mm` -- see LearnedPatterns.md #6.
+#
+# Before the first run:
+#   1. Confirm the safe travel range with the operator and set target_mm.
+#      50.0 is a placeholder (spec section 8.3).
+#   2. Calibrate the timeouts from the M0/A3 measurement in
+#      docs/L1_AUDIT.md -- move_to_mm is a converging closed loop, so its
+#      settling time is measured, not assumed.
+#   3. SAFETY: nothing in software can stop this rail once it is moving.
+#      /v1/stop queues behind the in-flight command (GAP-9) AND
+#      BalanceLinearCell.stop() is a no-op (GAP-1). The physical
+#      interlock is the only stop. Do not run this scenario unattended.
+#   4. Run it as: dry run -> real step_mode -> real.
+#        python -m orchestrator validate scenarios/demo_linear_move.yaml
+#        python -m orchestrator run scenarios/demo_linear_move.yaml --step-mode
+#        python -m orchestrator run scenarios/demo_linear_move.yaml
+
+name: demo_linear_move
+description: >
+  L2's first real-hardware demo. The orchestrator homes cell4's linear
+  rail, moves it to target_mm, verifies the reported position, and brings
+  it back to 0 mm. Single cell, no balance, no lock contention.
+
+params:
+  target_mm: 50.0
+  tolerance_mm: 0.1     # the driver's closed loop converges to +-0.1 mm
+
+defaults:
+  on_fail: abort        # a motion step must never be retried blindly
+  timeout_s: 30.0
+
+steps:
+  - id: check_status
+    cell: cell4
+    action: status
+    method: GET
+    timeout_s: 5.0
+    save_as: pre
+
+  - id: home
+    cell: cell4
+    action: linear/home
+    timeout_s: 60.0     # calibrate from M0/A3
+    save_as: homed
+
+  - id: verify_home
+    assert: "${homed.y_mm} <= ${params.tolerance_mm}"
+
+  - id: move_out
+    cell: cell4
+    action: linear/move
+    body:
+      y_mm: "${params.target_mm}"
+    timeout_s: 60.0     # calibrate from M0/A3
+    save_as: at_target
+
+  - id: verify_out
+    assert: "${at_target.y_mm} >= ${params.target_mm} - ${params.tolerance_mm}"
+
+  - id: read_back
+    cell: cell4
+    action: status
+    method: GET
+    timeout_s: 5.0
+    save_as: at_target_status
+
+  # cell4's status reports the linear rail in stage_x_mm, not y_mm.
+  - id: verify_status_agrees
+    assert: "${at_target_status.stage_x_mm} >= ${params.target_mm} - ${params.tolerance_mm}"
+
+  - id: move_back
+    cell: cell4
+    action: linear/move
+    body:
+      y_mm: 0.0
+    timeout_s: 60.0     # calibrate from M0/A3
+    save_as: post
+
+  - id: verify_back_home
+    assert: "${post.y_mm} <= ${params.tolerance_mm}"

@@ -21,20 +21,33 @@ from server.schemas import (
     CycleResponse,
     DiagnoseResponse,
     HealthResponse,
+    HeaterRequest,
+    HeaterResponse,
+    HotplateStateResponse,
     InitializeRequest,
     InitializeResponse,
+    LampRequest,
+    LampResponse,
     PlungerResponse,
     GantryMoveRequest,
     GantryResponse,
     LinearMoveRequest,
     LinearResponse,
     StatusResponse,
+    StirSpeedRequest,
+    StirSpeedResponse,
+    StirrerRequest,
+    StirrerResponse,
     StopResponse,
+    TemperatureRequest,
+    TemperatureResponse,
     ValveRequest,
     ValveResponse,
     VolumeRequest,
     WeightReadResponse,
     WeightResponse,
+    ZStageMoveRequest,
+    ZStageResponse,
 )
 
 router = APIRouter(prefix="/v1")
@@ -306,6 +319,156 @@ async def linear_move(
     return LinearResponse(y_mm=y_mm)
 
 
+# ── Z stage (single Z) — Cell D / cell5 ─────────────────────────────────────
+
+
+@router.post(
+    "/zstage/home",
+    response_model=ZStageResponse,
+    tags=["ZStage"],
+    summary="Home the single Z axis to its origin limit",
+)
+async def zstage_home(request: Request) -> ZStageResponse:
+    cell = _cell(request)
+    async with request.app.state.lock:
+        z_mm = await run_in_threadpool(cell.home_zstage)
+    return ZStageResponse(z_mm=z_mm)
+
+
+@router.post(
+    "/zstage/move",
+    response_model=ZStageResponse,
+    tags=["ZStage"],
+    summary="Move the single Z axis to an absolute mm target",
+)
+async def zstage_move(
+    request: Request, body: ZStageMoveRequest
+) -> ZStageResponse:
+    cell = _cell(request)
+    async with request.app.state.lock:
+        z_mm = await run_in_threadpool(
+            lambda: cell.move_zstage(
+                body.z_mm,
+                speed_pct=body.speed_pct,
+                accel_pct=body.accel_pct,
+            )
+        )
+    return ZStageResponse(z_mm=z_mm)
+
+
+# ── Hotplate — Cell D / cell5 ───────────────────────────────────────────────
+
+
+@router.get(
+    "/hotplate/state",
+    response_model=HotplateStateResponse,
+    tags=["Hotplate"],
+    summary="Temperatures, stirrer speed, and the commanded on/off state",
+)
+async def hotplate_state(request: Request) -> HotplateStateResponse:
+    cell = _cell(request)
+    async with request.app.state.lock:
+        state = await run_in_threadpool(cell.read_hotplate)
+    return HotplateStateResponse(**state)
+
+
+@router.post(
+    "/hotplate/temperature",
+    response_model=TemperatureResponse,
+    tags=["Hotplate"],
+    summary="Set the target plate temperature (does not start the heater)",
+)
+async def hotplate_temperature(
+    request: Request, body: TemperatureRequest
+) -> TemperatureResponse:
+    cell = _cell(request)
+    async with request.app.state.lock:
+        target_c = await run_in_threadpool(
+            cell.set_hotplate_temperature, body.celsius
+        )
+    return TemperatureResponse(target_c=target_c)
+
+
+@router.post(
+    "/hotplate/heater",
+    response_model=HeaterResponse,
+    tags=["Hotplate"],
+    summary="Start or stop heating — never leave the bench while it heats",
+)
+async def hotplate_heater(
+    request: Request, body: HeaterRequest
+) -> HeaterResponse:
+    cell = _cell(request)
+    async with request.app.state.lock:
+        state = await run_in_threadpool(
+            lambda: cell.set_hotplate_heater(enabled=body.enabled)
+        )
+    return HeaterResponse(**state)
+
+
+@router.post(
+    "/hotplate/speed",
+    response_model=StirSpeedResponse,
+    tags=["Hotplate"],
+    summary="Set the stirrer target speed (does not start the stirrer)",
+)
+async def hotplate_speed(
+    request: Request, body: StirSpeedRequest
+) -> StirSpeedResponse:
+    cell = _cell(request)
+    async with request.app.state.lock:
+        target_rpm = await run_in_threadpool(cell.set_hotplate_speed, body.rpm)
+    return StirSpeedResponse(target_rpm=target_rpm)
+
+
+@router.post(
+    "/hotplate/stirrer",
+    response_model=StirrerResponse,
+    tags=["Hotplate"],
+    summary="Start or stop the stirrer",
+)
+async def hotplate_stirrer(
+    request: Request, body: StirrerRequest
+) -> StirrerResponse:
+    cell = _cell(request)
+    async with request.app.state.lock:
+        state = await run_in_threadpool(
+            lambda: cell.set_hotplate_stirrer(enabled=body.enabled)
+        )
+    return StirrerResponse(**state)
+
+
+# ── Lamp (IR lamp on a Tapo plug) — Cell D / cell5 ──────────────────────────
+
+
+@router.get(
+    "/lamp/state",
+    response_model=LampResponse,
+    tags=["Lamp"],
+    summary="Read the plug's on/off state over the LAN",
+)
+async def lamp_state(request: Request) -> LampResponse:
+    cell = _cell(request)
+    async with request.app.state.lock:
+        state = await run_in_threadpool(cell.read_lamp)
+    return LampResponse(**state)
+
+
+@router.post(
+    "/lamp/switch",
+    response_model=LampResponse,
+    tags=["Lamp"],
+    summary="Switch the IR lamp on or off",
+)
+async def lamp_switch(request: Request, body: LampRequest) -> LampResponse:
+    cell = _cell(request)
+    async with request.app.state.lock:
+        state = await run_in_threadpool(
+            lambda: cell.set_lamp(enabled=body.enabled)
+        )
+    return LampResponse(**state)
+
+
 # ── Safety ─────────────────────────────────────────────────────────────────
 
 
@@ -313,7 +476,7 @@ async def linear_move(
     "/stop",
     response_model=StopResponse,
     tags=["Safety"],
-    summary="Abort all motion now",
+    summary="Abort all motion now (Cell D also kills heater, stirrer, lamp)",
 )
 async def stop(request: Request) -> StopResponse:
     cell = _cell(request)

@@ -21,6 +21,13 @@ pyftdi>=0.55     # XZ gantry (mks_motor) over FTDI USB2CAN
 fastapi>=0.115        # /v1 app + pydantic schemas
 uvicorn>=0.30         # ASGI server (python -m server)
 
-# ── Demo scenario (demo_scenario/) ─────────────────────────────────────────
+# ── L2 orchestrator (orchestrator/) ────────────────────────────────────────
+# The orchestrator talks to the cells over HTTP only, so it needs no
+# driver. Its container installs deploy/requirements-orch.txt instead.
+httpx>=0.27           # cell /v1 client (MockTransport in claude_test/)
+pyyaml>=6.0           # scenario files
+
+# ── Cell D / cell5 devices (path-imported from external/) ──────────────────
+# Needed by cell/pump_z_thermal_cell.py. The other cells do not import them.
 ika>=2.0              # hotplate (external/HotplateController) IKA RCT digital
 python-kasa>=0.7      # smart plug (external/SmartPlugController) Tapo P110M

@@ -1,0 +1,21 @@
+# NUC2 / Cell C -- hardware clone of Cell A (spec section 2). No new cell
+# class: the only difference from cell1 is this file.
+# Copy to server/nuc2/cell3.toml (gitignored), then:
+#   systemctl enable --now cell@nuc2-cell3
+
+[pump]
+# TBD: if two CH340 pumps share 1A86:7523 on this NUC, use the /dev path
+# pinned by a udev rule instead of the VID:PID (see deploy/README.md).
+port = "1A86:7523"
+syringe_uL = 125
+init_force = 2
+
+[stage]
+serial_x = "TBD-CELL3-X"   # TBD: FTDI serial of this cell's X adapter
+z_coord_invert = true
+x_coord_invert = true
+
+[server]
+host = "0.0.0.0"
+port = 17058           # cell3 -- matches [cells.cell3] in the orchestrator
+log_level = "info"

@@ -121,3 +121,124 @@ Strategy (C) for the import rewire above: each `external/` repo ships a
       `E,W,I,N` flags 41 pre-existing issues, mostly `N803`/`N815` on
       `/v1` field names).
 - [x] Register a GitHub issue via `gh issue create` -- issue #2.
+
+## 2026-07-27 — L2 Orchestrator: reflect `docs/L2_ORCHESTRATOR_SPEC.md`
+
+Scope: build the orchestrator so the real-hardware verification path
+(spec §9: dry run → real step_mode → real) is ready to execute the day
+the devices are connected. No hardware was available for this work.
+
+- [x] `docs/L1_AUDIT.md` (M0): A1–A8 judged from the L1 source, equipment
+      mapping recorded, 4.2 smoke-test rows opened as `pending`, and six
+      gaps listed (GAP-1 … GAP-6).
+- [x] **GAP-1 found**: `BalanceLinearCell.stop()` is a no-op, so
+      `POST /v1/stop` cannot halt the linear rail — the software e-stop is
+      ineffective on the exact cell the first demo drives. Stated in the
+      engine's `abort` docstring, the config, the demo scenario and
+      LearnedPatterns #7. Needs user approval + `ADDING_A_CELL.md` to fix.
+- [x] `orchestrator/` package (M1, M2, M4, M5): registry/config, httpx
+      client, scenario models + `${...}` interpolation + safe `assert`
+      evaluation, OpenAPI-driven dry-run validator, run state machine with
+      per-cell locks, runlog, `/v1` FastAPI surface, `python -m
+      orchestrator serve|validate|run` CLI.
+- [x] `scenarios/demo_linear_move.yaml` — written from `server/routes.py`
+      and `server/schemas.py`, not from the spec's draft examples
+      (LearnedPatterns #5).
+- [x] Deployment (M6 groundwork): `deploy/systemd/cell@.service` (one
+      template unit, instance name selects the config),
+      `deploy/docker-compose.orch.yml` + `Dockerfile.orch` +
+      `requirements-orch.txt`, `deploy/README.md`, and the per-NUC configs
+      `server/nuc1/`, `server/nuc2/`.
+- [x] `claude_test/`: 27 tests over httpx `MockTransport` (M2/M4/M5
+      acceptance) — all passing — plus `smoke_l1.py`, the
+      operator-gated M0 smoke-test runner.
+- [x] `docs/L2_ORCHESTRATOR_SPEC.md` → v0.9: the §8.1/§8.3 examples were
+      corrected to the real L1 field names.
+- [x] `ruff check` + `ruff format --check` pass on `orchestrator/` and
+      `claude_test/`.
+- [x] Register a GitHub issue via `gh issue create` — issue #4.
+- [ ] **Bench verification — nothing here has touched hardware.** When the
+      devices are connected: fill in the real NUC IPs and USB identifiers,
+      run `claude_test/smoke_l1.py` per cell under operator supervision,
+      write the measurements into `docs/L1_AUDIT.md`, calibrate the
+      scenario timeouts from them, then run `demo_linear_move` as dry run →
+      `--step-mode` → automatic.
+- [x] GAP-2 closed in code — see the Cell D entry below.
+- [ ] M7: the web scenario tab (`web/` is deleted in this working tree).
+
+## 2026-07-27 — Cell D (cell5): pump + single Z + hotplate + IR lamp
+
+Composition confirmed by the user: syringe pump + 1 MKS motor (standalone
+Z) + 1 hotplate + 1 Tapo plug. The hotplate is newly part of Cell D — it
+was a TBD standalone item through spec v0.9.
+
+- [x] Restored `server/` (user approved) — the new routes live there.
+- [x] `cell/cell_protocol.py`: three new action sets (`zstage`,
+      `hotplate`, `lamp`); the other two cells got defensive `_absent()`
+      stubs so a misdirected call is a 409, not an AttributeError.
+- [x] `cell/pump_z_thermal_cell.py` (`PumpZThermalCell`). Z motion uses
+      the driver's group helpers with a **one-motor group** (that is what
+      absorbs the limit-drop quirk; the paired-Z desync interlock is what
+      does not apply). `stop()` kills motor + pump + heater + stirrer +
+      lamp, attempting all five even if one fails.
+- [x] `server/`: schemas + routes for the three action sets, optional
+      Cell D fields on `StatusResponse`, `_load_pump_z_thermal()`, shape
+      auto-detection from `[zstage]`/`[hotplate]`/`[lamp]`, and
+      `--cell pump_z_thermal`.
+- [x] `server/nuc2/cell5.toml.example` with a cell-level `max_celsius`
+      ceiling checked before the driver is called.
+- [x] Renamed the heater/lamp field `on` → `enabled`: YAML 1.1 resolves a
+      bare `on:` **key** to a boolean, so a scenario could never address
+      it (LearnedPatterns #8). Assert expressions now accept both the
+      Python and the JSON spellings of the literals.
+- [x] L2: `motion_prefixes` → `hazard_prefixes` (+ `zstage/`, `hotplate/`,
+      `lamp/`), and the confirmation gate is now method-aware so read-only
+      GETs are never gated. A heater starting unattended is gated like a
+      motor starting unattended.
+- [x] `scenarios/demo_cell_d_warmup.yaml`; `claude_test/smoke_l1.py` gained
+      `zstage` / `hotplate` / `lamp` suites.
+- [x] Tests: 32 pass, including a drift guard that compares the fake L1's
+      routes **and request fields** against the real `create_app()` OpenAPI.
+- [x] Verified end-to-end against the real L1 app driving a stub Cell D:
+      validate → 14-step run with the operator gate → cell left safe
+      (heater off, lamp off, Z home). **No hardware involved.**
+- [x] Docs: spec v1.1, `docs/L1_AUDIT.md` (A1/A8/GAP-2/GAP-8 + smoke rows
+      S5–S7, S10), CLAUDE.md, README, ADDING_A_CELL, deploy/README.
+- [x] Register a GitHub issue via `gh issue create` — issue #5.
+- [ ] **Bench bring-up (nothing here touched hardware):** fill in the Z
+      motor's FTDI serial, the hotplate port (or rely on VID:PID
+      auto-detect), the plug name + `secure.env`, and confirm port 17062
+      against ARCHITECTURE.md. Then `smoke_l1.py --suite lamp --suite
+      hotplate --suite zstage` under operator supervision.
+- [ ] GAP-8 (new): the L2 lock is per cell, so two different cells sharing
+      one physical workspace can still collide in a `parallel` block. Needs
+      a `workspace` concept before a robot arm reaches into a cell's frame.
+
+## 2026-07-28 — README, bench runbook, and the tools to execute it
+
+- [x] `README.md` rewritten around **status**: what is built, what was
+      verified without hardware, what has never run. Added the `/v1` action
+      set table, the roadmap (M0–M7 with real states), and the two safety
+      gaps up front.
+- [x] `docs/L1_BRINGUP.md` — the bench runbook: safety rules that override
+      everything, the TBD-collection step, per-cell start/identity/smoke
+      procedure, the two contract probes, recording, and the hand-off to L2.
+- [x] `claude_test/preflight.py` — read-only pre-flight: enumerates attached
+      devices, resolves every config address, flags `TBD-…`, checks port
+      collisions. Runs off-bench and reports what is missing.
+- [x] `claude_test/smoke_l1.py` — added `--suite stop` (A4) and
+      `--suite concurrency` (A7) with `--motion`, closing the two audit
+      items that had no script.
+- [x] **GAP-9 found while writing the stop probe** and measured off-bench:
+      `POST /v1/stop` takes the same `app.state.lock` as the in-flight
+      command, so it cannot preempt anything — on any cell. Move ran
+      0.18→5.18 s, stop requested at 1.00 s, `cell.stop()` executed at
+      5.18 s. Recorded in `docs/L1_AUDIT.md` (A4 rewritten, GAP-9, S9),
+      `LearnedPatterns.md` #9, and every place that promised a software
+      e-stop (engine `abort` docstring, orchestrator config, `/v1` API
+      description, both demo scenarios, README).
+- [x] Register a GitHub issue via `gh issue create` — issue #6.
+- [ ] **Fix GAP-9** — needs user approval: serve `/v1/stop` lock-free like
+      `/v1/health`, and give each driver a priority path for its stop
+      command. The second half is upstream driver work.
+- [ ] Bench bring-up itself (see `docs/L1_BRINGUP.md`).
