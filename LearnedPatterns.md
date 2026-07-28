@@ -1094,3 +1094,67 @@ format below. Newest entries at the bottom.
   regulated process value read back from the regulator itself — always
   allow the device's own reporting granularity + control band as
   tolerance.
+
+## 33. One measurement set a tolerance four times tighter than reality
+
+- **Problem**: `ARRIVAL_TOLERANCE_MM` — the check that decides whether a
+  gantry move actually arrived — was calibrated from a single manual
+  50 mm move that came back **0.038 mm** from target. The constant was set
+  to 0.5 mm and documented as "~13x the observed worst", which reads like
+  a comfortable margin. Four completed scenario runs later, across 20
+  waypoints reaching 150 mm, the worst residual was **0.145 mm**. The real
+  margin was **3.5x**. Nothing failed — but the number in the comment was
+  wrong by a factor of four, and anyone tightening the tolerance on the
+  strength of that comment would have started failing good moves.
+- **Cause**: One sample cannot show spread, and this axis has spread that
+  only appears with repetition. Running the *same* scenario three times
+  produced X residuals of 0.043, 0.145 and 0.046 mm at the same waypoint —
+  a 3x difference between runs of identical commands. The first
+  measurement happened to land near the bottom of that range. Worse, the
+  single measurement was taken at 50 mm, and the residual grows with
+  travel; the stair to 150 mm was where the larger numbers lived.
+- **Fix**: Recalibrated from `runs/*/vars.json` across all four runs and
+  corrected the justification in `cell/pump_gantry_cell.py` and both
+  scenarios. The *value* did not change — 0.5 mm was already right, by
+  luck rather than by evidence. What changed is that it is now defensible.
+  Also recorded the more useful of the two statistics: the **increment**
+  error (worst 0.094 mm) is tighter and more stable than the **absolute**
+  residual (0.145 mm), because a persistent offset cancels when you
+  subtract consecutive readings — run 2 carried a +0.145 mm X offset from
+  one waypoint to the next while its step-to-step increment stayed within
+  0.001 mm of 50.
+- **Rule**: A tolerance derived from one measurement is a guess wearing a
+  number. Repeat the *same* run at least three times before writing a
+  margin into a comment, and take the measurements at the extreme of the
+  range you intend to allow, not at the convenient end. When the value
+  turns out fine anyway, still fix the reasoning — the next person will
+  tighten the constant based on what the comment claims, not on what the
+  hardware did. And prefer the statistic that survives a constant offset:
+  if what you care about is "did it move 50 mm", measure the difference,
+  not the position.
+
+## 34. Two readings that agreed exactly would have been the bug, not the proof
+
+- **Problem**: Each scenario waypoint reads the gantry position twice —
+  once from `gantry/move`'s own response, once from a separate
+  `GET /v1/status` — and the two disagree by up to **0.145 mm**. That
+  looks like an inconsistency to be explained away.
+- **Cause**: It is the servo closing its remaining error. `gantry/move`
+  reads the encoder the moment `_wait()` returns; `status` reads it a
+  fraction of a second later, by which time the loop has settled. A
+  measured 50.048 mm followed by 49.9994 mm is two honest reads of a
+  moving quantity.
+- **Fix**: Nothing — but the disagreement was recognised as *evidence*,
+  and kept. Earlier the same day this cell had a bug where `move_gantry`
+  returned the commanded target and `status` served the same cached value
+  (#24). Under that bug these two reads would have agreed **exactly**, to
+  every decimal, at every waypoint. So exact agreement between two
+  supposedly independent sources is the thing to be suspicious of; a small
+  physical disagreement is what independence looks like.
+- **Rule**: When a design deliberately reads the same fact by two paths,
+  decide in advance what agreement should look like — and remember that
+  *perfect* agreement usually means the two paths are the same path. Two
+  sensors of a physical quantity should differ by something on the order
+  of the noise; if they never do, look for the shared cache before
+  congratulating yourself. Cross-checks only have value where the two
+  sides can actually disagree.

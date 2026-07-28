@@ -34,14 +34,14 @@ Measured bench addresses (2026-07-28): **NUC1 = 192.168.0.126**,
 ```mermaid
 graph TB
     subgraph NUC1["🖥 NUC1 — synthesis (192.168.0.126)"]
-        C1["cell1 · Cell A (:17054)<br/>pump + XZ gantry<br/>(1 X + 2 synced Z motors)"]
+        C1["cell1 · Cell A (:17054)<br/>pump + XZ gantry<br/>(1 X + 2 synced Z motors)<br/>⚠ gantry verified · pump missing"]
         C4["cell4 (:17060)<br/>MINAS A6 linear rail +<br/>the Phase's single balance<br/>✅ bench-verified"]
     end
 
     subgraph NUC2["🖥 NUC2 — analysis (192.168.0.120)"]
         C2["cell2 · Cell B (:17056)<br/>clone of Cell A"]
         C3["cell3 · Cell C (:17058)<br/>clone of Cell A"]
-        C5["cell5 · Cell 5 (:17062)<br/>pump* + single Z motor +<br/>IKA hotplate + IR lamp<br/>✅ bench-verified"]
+        C5["cell5 · Cell 5 (:17062)<br/>pump* + single Z motor +<br/>IKA hotplate + IR lamp<br/>⚠ Z/hotplate/lamp verified · pump missing"]
     end
 
     ORCH["🧠 Orchestrator (:17100)<br/>one process, anywhere on the LAN"]
@@ -64,11 +64,11 @@ only by config.
 
 | Cell | NUC · port | Shape (class) | Devices inside | Status |
 |---|---|---|---|---|
-| **cell1** (Cell A) | NUC1 · 17054 | pump + gantry (`PumpGantryCell`) | Runze SY-01B syringe pump (`sy01b`, CH340 serial) · XZ gantry: 1× X + 2× **synchronized** Z MKS SERVO57D motors (`mks_motor`, FTDI/CAN, paired-Z interlock) | built, no bench run |
+| **cell1** (Cell A) | NUC1 · 17054 | pump + gantry (`PumpGantryCell`) | Runze SY-01B syringe pump (*not on the bench* — optional `[pump]` table) · XZ gantry: 1× X (FTDI `NTAMU6TO`) + 2× **synchronized** Z MKS SERVO57D motors (`A10PUO5V` / `A10PUO5W`, `mks_motor`, FTDI/CAN, paired-Z interlock) | ⚠ **gantry bench-verified; cell incomplete — no pump** |
 | **cell2** (Cell B) | NUC2 · 17056 | pump + gantry (`PumpGantryCell`) | identical clone of Cell A — different USB serials only | built, no bench run |
 | **cell3** (Cell C) | NUC2 · 17058 | pump + gantry (`PumpGantryCell`) | identical clone of Cell A | built, no bench run |
 | **cell4** | NUC1 · 17060 | balance + linear (`BalanceLinearCell`) | MINAS A6 linear rail (`LinearMotorController`, RS-485) · the Phase's **single** Entris-II balance (`entris_ii`, Sartorius CDC) that shuttles under cell1–3 to weigh each dispense | ✅ **bench-verified** |
-| **cell5** (Cell 5) | NUC2 · 17062 | pump + Z + thermal (`PumpZThermalCell`) | syringe pump (*not fitted yet* — optional `[pump]` table) · **one** MKS SERVO57D as a standalone Z axis (`mks_motor`, FTDI `NTB3EP5R`) · IKA RCT digital hotplate (`HotplateController`, STM32 VCP, direct USB port) · IR lamp on a Tapo P110M plug (`SmartPlugController`, LAN `192.168.0.237`) | ✅ **bench-verified** |
+| **cell5** (Cell 5) | NUC2 · 17062 | pump + Z + thermal (`PumpZThermalCell`) | syringe pump (*not fitted yet* — optional `[pump]` table) · **one** MKS SERVO57D as a standalone Z axis (`mks_motor`, FTDI `NTB3EP5R`) · IKA RCT digital hotplate (`HotplateController`, STM32 VCP, direct USB port) · IR lamp on a Tapo P110M plug (`SmartPlugController`, LAN `192.168.0.237`) | ⚠ **Z + hotplate + lamp bench-verified; cell incomplete — no pump** |
 
 Special properties per cell worth remembering:
 
@@ -86,18 +86,26 @@ All hardware drivers are git submodules under `external/` — see
 
 ## Status — what is actually proven
 
-**Two cells now run on real hardware.** Cell 5 on NUC2 and cell4 on NUC1
-were both brought up on 2026-07-28, each completing real scenarios through
-the full L1 + L2 stack. cell1–3 are built and simulator-tested; cell1's
-gantry is mid bring-up.
+**One cell is complete; two more run everything they physically have.**
+All three were brought up on 2026-07-28, each completing real scenarios
+through the full L1 + L2 stack.
+
+**Only cell4 is a finished cell** — its shape has no pump by design, so
+nothing is missing from it. cell1 and cell5 both define a syringe pump
+that is **not on the bench**. What is proven there is every device they
+actually have: cell1's XZ gantry, and cell5's Z axis, hotplate and lamp.
+Neither cell is verified *as a cell*, and their pump paths have never run
+on hardware. cell2–3 are built and unrun; they are clones of cell1 and
+need only their own adapter serials.
 
 | Layer | State |
 |---|---|
-| L1 cell5 (Z + hotplate + lamp) | **bench-verified on NUC2** — see the ladder below |
-| L1 cell4 (balance + linear rail) | **bench-verified on NUC1** — identity, status, tare, weigh, home, move |
-| L1 cell1–3 | code complete; cell1's gantry mid bring-up (LearnedPatterns #22–#25) |
-| L1 `/v1` server | 26 routes, serving cell4 and cell5 against real devices |
-| L2 orchestrator | registry, client, validator, engine (`wait_s`, `until:`), runlog, `/v1`, CLI — **71 tests**, plus real runs on both cells |
+| L1 cell5 (Z + hotplate + lamp) | those three devices **bench-verified on NUC2** — see the ladder below. **Pump not fitted: cell incomplete** |
+| L1 cell4 (balance + linear rail) | **complete and bench-verified on NUC1** — identity, status, tare, weigh, home, move. The only cell with no missing device |
+| L1 cell1 (XZ gantry) | gantry **bench-verified on NUC1** — 4/4 runs, 116 steps, 0 failures. **Pump not fitted: cell incomplete** |
+| L1 cell2–3 | code complete, no bench run (clones of cell1) |
+| L1 `/v1` server | 26 routes, serving cell1, cell4 and cell5 against real devices |
+| L2 orchestrator | registry, client, validator, engine (`wait_s`, `until:`), runlog, `/v1`, CLI — **79 tests**, plus real runs on three cells |
 | Deployment | systemd template + Docker Compose, **never deployed as a service** (bench runs used the venv directly) |
 
 ### How cell4 was verified
@@ -113,11 +121,86 @@ gantry is mid bring-up.
 | How fast is a 50 mm move? | ~6 s |
 | Is the RS485 link reliable? | **No** — see the EMI note under Bench notes. Reads survive it; moves abort on it, deliberately |
 
-Every number there is a bench measurement. The 71 tests touch no
+Every number there is a bench measurement. The 79 tests touch no
 hardware, which is the point: they cannot tell you any of this.
 
+### How cell1's gantry was verified (the gantry only — cell1 has no pump)
 
-### How Cell 5 was verified
+The same ladder as Cell 5, with two extra rungs the gantry needed — the
+adapters had to be made reachable at all, and each motion *class* was
+driven by hand before any scenario was allowed to chain them:
+
+```mermaid
+flowchart LR
+    A["1 · Make it reachable<br/>udev rule: unbind ftdi_sio,<br/>open /dev/bus/usb"] -->
+    B["2 · Identity<br/>preflight: 3/3 adapters,<br/>X = NTAMU6TO"] -->
+    C["3 · L1 read-only<br/>diagnose, status,<br/>409 on pump + linear"] -->
+    D["4 · One move at a time<br/>by hand over curl:<br/>home, X out/back, Z down/up"] -->
+    E["5 · Dry run<br/>validate: zero<br/>devices touched"] -->
+    F["6 · L2 step-mode<br/>operator confirms<br/>each step"]
+```
+
+Rung 4 mattered most. Homing was commanded before anything else, then a
+single 50 mm X move — that one move was the test of whether X's
+`coord_invert` was right, because the wrong sign drives the axis into its
+own limit switch instead of away from it. Only after each motion class had
+been watched individually was L2 allowed to run them in sequence.
+
+Two scenarios, **four runs, 116 steps, zero failures** — the stair run
+three times on purpose, because one run cannot calibrate a tolerance.
+
+| Run | Scenario | Steps | Result |
+|---|---|---|---|
+| `20260728T115546Z` | `demo_gantry_step` — X out/back 50 mm, then Z | 23 | ✅ |
+| `20260728T115738Z` | `demo_gantry_stair` — origin → (50,50) → (100,100) → (150,150) → origin | 31 | ✅ |
+| `20260728T120806Z` | `demo_gantry_stair` (repeat) | 31 | ✅ |
+| `20260728T120935Z` | `demo_gantry_stair` (repeat) | 31 | ✅ |
+
+| Question | Answer |
+|---|---|
+| Does a commanded 50 mm actually travel 50 mm? | **Yes** — worst increment error **0.094 mm** over 20 waypoints |
+| How close does an axis land? | worst residual **0.145 mm** immediately after the move; `/v1/status` reads the same waypoint within **0.001 mm** once the servo settles |
+| Do the paired Z motors stay together? | **Yes** — worst spread **0.020 mm**, including at 150 mm depth |
+| How repeatable is homing? | X lands on **0.0006 mm every time**, identical across all three runs |
+| How long? | home 5.7 s; the three stair waypoints 3.4 / 5.2 / 7.1 s (duration scales with travel, since Z fully retracts before each X traverse) |
+
+**The gantry path is never diagonal.** `move_gantry` runs up → X → down
+whenever the X target changes, so Z retracts fully between waypoints and
+the head never traverses X while lowered.
+
+**A `200 OK` from `gantry/move` means the encoder was read**, not that a
+command was accepted — the cell confirms every move by reading the axis
+back and raises if it did not arrive, could not be read, or if the Z pair
+ended apart. That check exists because the opposite was true earlier the
+same day: the cell returned the position it had been *asked* for, so an
+unpowered gantry would have answered `200 OK` with `x_mm: 50.0`
+(LearnedPatterns #24).
+
+**What the scenarios assert is the distance travelled, not the endpoint.**
+Each check subtracts the previous waypoint's encoder reading from the
+current one and requires the difference to be 50 mm. An axis that was
+already at the target — or one that never moved at all — passes an
+endpoint check and fails this one. It is also the more stable measurement:
+one run carried a persistent +0.145 mm X offset between waypoints while
+its step-to-step increment stayed within 0.001 mm of 50, because a
+constant offset cancels under subtraction (LearnedPatterns #33).
+
+Every waypoint is read **twice** — once from `gantry/move`'s response,
+once from a separate `GET /v1/status` — and the two differ by up to
+0.145 mm as the servo settles between them. That disagreement is the
+point: under the bug above, both would have returned the same cached
+number and agreed to every decimal. Exact agreement between two supposedly
+independent reads is the thing to distrust (LearnedPatterns #34).
+
+Four defects surfaced during this bring-up, none of them from a failed
+run: a documented adapter serial that was not on the bench (#22), a
+pre-flight that reported a permission error as a missing device (#23), the
+fabricated position above (#24), and a schema bound that rejected the
+acceleration value both upstream reference scripts use — which also
+exposed that the dry run never checked numeric bounds at all (#25). The
+full account is [issue #14](https://github.com/coport-uni/InnoCORESDL_Sungwoo/issues/14).
+
+### How Cell 5's three fitted devices were verified (no pump)
 
 Verification climbed a ladder — each rung earns the next. Nothing moves
 until a human at the bench says so:
@@ -333,7 +416,7 @@ cell2=17056, cell3=17058, cell4=17060, cell5=17062, orchestrator=17100.
 | [`cell/`](cell/) | the cell layer: [`cell_protocol.py`](cell/cell_protocol.py) (interface + `CellError` hierarchy), [`pump_gantry_cell.py`](cell/pump_gantry_cell.py), [`balance_linear_cell.py`](cell/balance_linear_cell.py), [`pump_z_thermal_cell.py`](cell/pump_z_thermal_cell.py) |
 | [`server/`](server/) | the L1 `/v1` server — `create_app` + routes + schemas + error mapping. `nuc1/`, `nuc2/` hold the per-NUC config examples |
 | [`orchestrator/`](orchestrator/) | the L2 orchestrator: registry, cell client, scenario loader + dry-run validator, run engine, runlog, `/v1` API, CLI |
-| [`scenarios/`](scenarios/) | scenario files — the bench-verified cell4 pair `demo_linear_move.yaml` / `demo_weigh_at_position.yaml`, `demo_cell5_warmup.yaml`, and the bench-verified Cell 5 set: `demo_cell5_lamp_blink.yaml`, `demo_cell5_hotplate_30c.yaml`, `demo_cell5_z_cycles.yaml`, `demo_cell5_lamp_heat_40c.yaml`, `demo_cell5_final.yaml` |
+| [`scenarios/`](scenarios/) | scenario files — the bench-run cell1 gantry pair `demo_gantry_step.yaml` / `demo_gantry_stair.yaml`, the bench-verified cell4 pair `demo_linear_move.yaml` / `demo_weigh_at_position.yaml`, `demo_cell5_warmup.yaml`, and the bench-verified Cell 5 set: `demo_cell5_lamp_blink.yaml`, `demo_cell5_hotplate_30c.yaml`, `demo_cell5_z_cycles.yaml`, `demo_cell5_lamp_heat_40c.yaml`, `demo_cell5_final.yaml` |
 | [`deploy/`](deploy/) | systemd template unit for the cells, Compose for the orchestrator, NUC setup guide |
 | [`claude_test/`](claude_test/) | tests + the two bench tools (`preflight.py`, `smoke_l1.py`) |
 | [`docs/`](docs/) | the L2 spec, the M0 audit, the bring-up runbook |
@@ -343,9 +426,15 @@ cell2=17056, cell3=17058, cell4=17060, cell5=17062, orchestrator=17100.
 
 ## Next: connecting the rest of the hardware
 
-**cell5 is done** (see Status); this applies to the remaining cells —
-cell2/cell3 on NUC2, cell1/cell4 on NUC1 — plus cell5's missing syringe
-pump (add the `[pump]` table back when it arrives). The runbook is
+**cell4 is done; cell1 and cell5 run every device they have but are
+still missing their syringe pumps** (see Status). What remains:
+cell2/cell3 on NUC2 — clones of cell1, needing only their own FTDI
+adapter serials — and fitting the two pumps, which is the step that would
+make cell1 and cell5 complete cells rather than partially-populated ones.
+Restore the `[pump]` table when a pump arrives; the pump paths are coded
+and unit-tested but have never touched hardware in either cell. Read
+adapter serials off the bus, never from a doc (LearnedPatterns #22). The
+runbook is
 [`docs/L1_BRINGUP.md`](docs/L1_BRINGUP.md). In short:
 
 1. **Collect what is still unknown** — `python claude_test/preflight.py`
@@ -363,10 +452,10 @@ pump (add the `[pump]` table back when it arrives). The runbook is
 
 | Milestone | State |
 |---|---|
-| M0 — L1 adequacy audit | code review done; **cell4 and cell5 physical checks done**, cell1–3 pending; 9 gaps recorded |
+| M0 — L1 adequacy audit | code review done; **cell4 complete, cell1 + cell5 checked for every fitted device** (both still pump-less), cell2–3 pending; 9 gaps recorded |
 | M1 / M2 — registry + dry-run validator | done |
 | M4 / M5 — engine, runlog, failure policies, pause/resume/abort | done; exercised by real cell4 **and cell5** runs |
-| M6 — systemd + Docker + real demo scenarios | **cell4's two demos and cell5's four all run on hardware**; systemd/Compose artifacts still never deployed |
+| M6 — systemd + Docker + real demo scenarios | **cell1's two demos, cell4's two and cell5's four all run on hardware** — none of them exercises a pump, since neither pump-bearing cell has one; systemd/Compose artifacts still never deployed |
 | M7 — web scenario tab | not started; `web/` was removed with the other pre-L2 work and lives in git history |
 
 Open questions that shape the next phase, all recorded as gaps:
@@ -443,6 +532,39 @@ Hard-won bench rules from the 2026-07-28 bring-up (details in
 - A lamp `target` may be a bare IP unknown to the submodule's
   `device_list.md` — the cell synthesises the entry, so a re-DHCPed
   plug never needs an edit under `external/`.
+
+### The XZ gantry needs a udev rule before it will open at all
+
+`mks_motor` drives the USB2CAN adapters through **pyftdi/libusb**, but the
+kernel auto-binds `ftdi_sio` to every FTDI chip on plug and `/dev/bus/usb`
+nodes are root-only. Until the rule is installed, enumeration fails with
+*"The device has no langid (permission issue…)"* and the cell cannot open
+the gantry. The driver's `release_ftdi_sio()` cannot fix it from an
+unprivileged process — unbinding needs root. Once per NUC
+(`external/ESP32S3BOX3MotorController/SETUP_UBUNTU.md` §1):
+
+```bash
+sudo tee /etc/udev/rules.d/99-ftdi-usb2can.rules >/dev/null <<'EOF'
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", \
+    MODE="0666", \
+    RUN+="/bin/sh -c 'echo $kernel > /sys/bus/usb/drivers/ftdi_sio/unbind 2>/dev/null'"
+EOF
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+**`preflight.py` reports these adapters as "not attached" while
+`ftdi_sio` still holds them** — that is the same permission failure, not a
+missing adapter, and it is why the pump and balance resolve in the same
+run while the gantry does not (they go through pyserial, which only needs
+`dialout`). See [`LearnedPatterns.md`](LearnedPatterns.md) #23.
+
+Adapter serials must be read off the bus, not copied from documentation:
+this bench's X was documented as `NTAM63XD` and is actually `NTAMU6TO`,
+while both Z serials in the docs were correct — which is exactly what one
+swapped adapter looks like. `open_xz` raises on a serial it cannot find,
+so the server dies at startup. Read them with
+`external/ESP32S3BOX3MotorController/CAN2USBAdapterDeviceRecognition.py`.
+See [`LearnedPatterns.md`](LearnedPatterns.md) #22.
 
 ### The rail must not park on 0 mm (critical)
 

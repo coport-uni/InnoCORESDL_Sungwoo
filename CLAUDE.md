@@ -156,9 +156,34 @@ auto-detect by the Sartorius vendor ID.
 |---|---|---|
 | Balance (Entris-II BCE224I) | `24BC:0010` | USB-C, Sartorius CDC → `ttyACM*`; omit `scale_port` to auto-detect. Must be passed into the container (`lsusb` shows `24bc:0010`). |
 | Pump (SY-01B) | `1A86:7523` | CH340 USB-serial → `ttyUSB*`; `pump.port = "1A86:7523"`. |
-| XZ motors (3× MKS SERVO57D) | `0403:6001` | FTDI USB2CAN adapters, addressed by **serial**: X = `NTAM63XD`, the other two (`A10PUO5V`, `A10PUO5W`) are the paired Z. Driven via pyftdi (`mks_motor` from **`external/ESP32S3BOX3MotorController`**, the sole XZ gantry reference — *not* `MKSServo57DCANController`, which lacks the group-interlock API). |
+| XZ motors (3× MKS SERVO57D) | `0403:6001` | FTDI USB2CAN adapters, addressed by **serial**: X = `NTAMU6TO`, the other two (`A10PUO5V`, `A10PUO5W`) are the paired Z. Driven via pyftdi (`mks_motor` from **`external/ESP32S3BOX3MotorController`**, the sole XZ gantry reference — *not* `MKSServo57DCANController`, which lacks the group-interlock API). Needs the udev rule below — pyftdi speaks libusb, so `ftdi_sio` must not hold the adapters. |
 | MINAS A6 linear rail | `110A:1150` | Moxa UPort 1150 RS-485 adapter is the linear's serial link (NOT a TI USB3410, NOT the balance). `linear_port = "110A:1150"` resolved at runtime from the VID:PID. |
 | ESP32-S3 | `303A:1001` | Other project; unrelated. |
+
+### XZ gantry prerequisite: keep `ftdi_sio` off the adapters (host, one-time)
+
+`mks_motor` drives the USB2CAN adapters through **pyftdi/libusb**, but the
+kernel auto-binds `ftdi_sio` to every FTDI chip on plug and the
+`/dev/bus/usb` nodes are root-only. Until the udev rule is installed,
+`Ftdi.list_devices()` fails with *"The device has no langid (permission
+issue…)"* and the cell cannot open the gantry at all. `release_ftdi_sio()`
+cannot fix this from inside an unprivileged process — it needs root to
+write the `unbind` file. Install once per NUC
+(`external/ESP32S3BOX3MotorController/SETUP_UBUNTU.md` §1):
+
+```bash
+sudo tee /etc/udev/rules.d/99-ftdi-usb2can.rules >/dev/null <<'EOF'
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", \
+    MODE="0666", \
+    RUN+="/bin/sh -c 'echo $kernel > /sys/bus/usb/drivers/ftdi_sio/unbind 2>/dev/null'"
+EOF
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+Note `claude_test/preflight.py` reports these adapters as **not attached**
+while `ftdi_sio` still holds them — that is the same permission failure,
+not a missing adapter. The pump and balance are unaffected (CH340 and CDC
+go through pyserial, which is happy with the `dialout` group).
 
 ### Valve port gotcha (critical)
 
