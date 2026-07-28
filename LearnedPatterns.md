@@ -552,3 +552,47 @@ format below. Newest entries at the bottom.
   with and without it (max 2020 ms vs 2084 ms, 4/40 vs 3/40 slow) and
   found retries made no difference. Measure before blaming your own last
   change.
+
+## 19. Shortening a timeout to "10x the median" cut the success rate in half
+
+- **Problem**: The RS485 read retry (#16) raised reliability without
+  bounding latency: three attempts on the port's 2 s timeout is over six
+  seconds, and the first scenario run to reach the balance died on its
+  **first** step — `cell4 GET status timed out after 5.0s`, preceded by
+  three `No EOT response from amplifier`. The obvious fix was to shorten
+  each attempt. A whole exchange normally costs ~27 ms, so 300 ms looked
+  like ten times the honest cost.
+- **Cause**: The obvious fix was wrong, and only measurement showed it.
+  Over 60 reads each on the real amp:
+
+  | budget | success | median |
+  |---|---|---|
+  | 2.0 s | **60/60** | 27 ms |
+  | 0.3 s | **28/60** | 1002 ms |
+
+  A 1002 ms median at a 0.3 s budget means nearly every read burned all
+  three attempts. Aborting a handshake part-way leaves this half-duplex
+  bus mid-transaction, and the next attempt fails on the wreckage of the
+  last — so a tight budget is self-reinforcing rather than
+  self-correcting. The median said "27 ms is typical"; it said nothing
+  about what a *slow but recoverable* exchange costs, which is the only
+  number a timeout is actually about.
+- **Fix**: Reverted to 2.0 s and recorded the table beside the constant.
+  Kept the plumbing — the budget is now explicit, documented and
+  tunable, with the port timeout restored in a `finally`. The real
+  mismatch was in the scenarios: `status` steps carried `timeout_s: 5.0`,
+  too tight for a read that reaches an amp over RS485, so those went to
+  15 s. And the six-second case that started all this was a **dying USB
+  adapter**, not normal operation; with a healthy one the measured worst
+  case is 2078 ms, one slow attempt followed by a good one.
+- **Rule**: A timeout is a claim about the tail, so never set one from
+  the median. Before tightening one, measure the success rate at the new
+  value — and on a protocol with handshakes or shared media, expect an
+  aborted attempt to *cause* the next failure rather than merely
+  preceding it.
+- **On my own reasoning**: this is the second time in one session that
+  arithmetic about this driver survived until it met the hardware
+  (see #18's correction). Both times the change was defensible on paper
+  and wrong on the bench. When a fix cannot be measured yet — the
+  adapter was faulted when this one was written — that is worth saying
+  out loud rather than shipping the arithmetic and calling it verified.

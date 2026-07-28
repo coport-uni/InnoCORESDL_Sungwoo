@@ -42,7 +42,11 @@ steps:
     cell: cell4
     action: status
     method: GET
-    timeout_s: 5.0
+    # 15 s, not 5 s: a status read reaches the amp over RS485, where a
+    # slow-but-successful exchange measured 2078 ms and the driver may
+    # retry it three times. 5 s looked generous against a 27 ms median
+    # and cost a run its first step.
+    timeout_s: 15.0
     save_as: pre
 
   - id: home
@@ -69,7 +73,11 @@ steps:
     cell: cell4
     action: status
     method: GET
-    timeout_s: 5.0
+    # 15 s, not 5 s: a status read reaches the amp over RS485, where a
+    # slow-but-successful exchange measured 2078 ms and the driver may
+    # retry it three times. 5 s looked generous against a 27 ms median
+    # and cost a run its first step.
+    timeout_s: 15.0
     save_as: at_target_status
 
   # cell4's status reports the linear rail in stage_x_mm, not y_mm.
