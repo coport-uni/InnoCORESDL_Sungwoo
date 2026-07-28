@@ -1397,14 +1397,30 @@ the *verification*, not just the outcome, survives.
   — none of which touch hardware, which is exactly why every claim above
   is a bench measurement and not a test result.
 
+### Deferred by decision, not by omission (operator, 2026-07-28)
+
+- [x] **Issue #13 (RS485/EMI) — deferred to a later bench session.** The
+      fix is electrical (SG between the ends, 120R termination once per
+      end, shield grounded at one end only) and software cannot close
+      it. What software does do is bounded and deliberate: reads
+      reconnect, moves abort across a drop rather than resume. A run can
+      still fail partway on a link drop; re-running it is the answer,
+      and that abort is the rule working. Recorded in README under
+      "Two known faults deliberately left open".
+- [x] **Issue #15 (amp alarm read) — deferred deliberately.** Building
+      it means *reproducing* an alarm, and the only alarm this bench
+      knows how to raise is Err16.0: drive the rail into its stop until
+      the motor overloads. Not worth doing repeatedly to a servo for a
+      better error message. The operator carries it instead — **moves
+      having no effect while `/v1/diagnose` still answers normally means
+      read the front panel**, since software reports `stage.ok: true`
+      throughout. In README, same section. If it is built later, decode
+      the response against the manual rather than by provoking the amp.
+
 ### Still open
 
-- **Issue #13** — the servo amp couples conducted noise into its own
-  RS485 link. Software absorbs it for reads; moves still abort across a
-  drop, by design. The wiring fix (SG, 120R termination once per end,
-  shield grounded at one end only) has not been done.
-- **Issue #15** — the driver cannot read or clear an amp alarm, so
-  `diagnose()` still cannot tell an alarmed amp from a healthy one.
+- The two items above are open in the tracker on purpose; "open" is the
+  accurate state for deferred work, so neither issue was closed.
 - `max_drift_g` (0.05) is still a guess against a single 0.0039 g
   measurement. Repeat the run 2–3 times and set it from the spread.
 - Confirm the real clearance from 5 mm to the stop; raise `home_mm` if

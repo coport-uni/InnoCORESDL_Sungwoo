@@ -56,6 +56,35 @@ hardware, which is the point: they cannot tell you any of this.
 **Consequence: the physical e-stop is the only stop.** Both gaps, with their
 measurements and proposed fixes, are in [`docs/L1_AUDIT.md`](docs/L1_AUDIT.md).
 
+### Two known faults deliberately left open
+
+Both are understood, reproduced and documented; neither is being fixed
+yet, and running the bench with them open is a decision rather than an
+oversight.
+
+**[#13](https://github.com/coport-uni/InnoCORESDL_Sungwoo/issues/13) — the
+amp jams its own RS485 link.** Deferred to a later bench session, because
+the fix is electrical (grounding and termination, see the note below) and
+not something software can close. Meanwhile the link is *usable*, not
+fixed: reads are absorbed by the driver's reconnect, and a move that
+straddles a drop is stopped and failed rather than resumed. So a run can
+still abort partway on a link drop. Re-run it; that is the abort rule
+working.
+
+**[#15](https://github.com/coport-uni/InnoCORESDL_Sungwoo/issues/15) — the
+driver cannot read an amp alarm.** Left open on purpose: developing the
+alarm read means *reproducing* an alarm, and the only alarm this bench
+knows how to raise is Err16.0 — driving the rail into its mechanical stop
+until the motor overloads. That is not a thing to do repeatedly to a servo
+for the sake of a nicer error message.
+
+The operator carries this one instead. **If moves stop having any effect
+while the amp still answers `/v1/diagnose` normally, read the amp's front
+panel** — that combination means an alarm, and software will keep
+reporting `stage.ok: true` throughout. Recovery is in the bench note
+below. If the alarm read is implemented later, decode the response against
+the manual rather than by provoking the amp.
+
 ---
 
 ## Layout
@@ -164,6 +193,12 @@ Open questions that shape the next phase, all recorded as gaps:
 
 - **GAP-9 / GAP-1** — make the software stop actually stop something. Needs
   an L1 change plus driver work; user approval required.
+- **#13 (RS485/EMI)** — deferred to a later bench session; the fix is
+  electrical, and the software already limits the damage (reads reconnect,
+  moves abort).
+- **#15 (amp alarm read)** — deferred deliberately, because building it
+  means repeatedly overloading a servo to reproduce the alarm. Documented
+  as an operator check instead.
 - **GAP-8** — the L2 lock is per cell, so two cells sharing one physical
   workspace can still collide inside a `parallel` block. This must be solved
   before a robot arm reaches into another cell's frame.
@@ -214,6 +249,10 @@ closed loop coasts 1.5–1.8 mm past its target. Homing to 0 therefore
 drives the carriage into the stop and holds it there until the amp trips
 **Err16.0** (motor overload) and de-energises the servo — after which every
 move displaces 0 mm while the amp still answers serial normally.
+
+This is the alarm referred to under "known faults left open": while it is
+latched, `/v1/diagnose` keeps answering `stage.ok: true` and every move
+reports a stall, so the front panel is the only place the truth appears.
 
 The rail parks at `home_mm` (default **5.0 mm**) in the cell config, and
 both scenarios use a matching `home_mm` param. Keep the two in step, and
