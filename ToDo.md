@@ -338,3 +338,22 @@ was a TBD standalone item through spec v0.9.
       d2c4b3d). Merged branches deleted local+remote; submodule left on
       the pinned 2f3b8d6 (an ancestor of upstream main, identical
       content, so no pin-bump commit is needed).
+
+## 2026-07-28 — Device repos updated with today's bench work
+
+- [x] HotplateController: PR #10 merged (docs/nuc2-bench-notes) — the
+      direct-USB-port rule, the full-drain wedge recovery, and the
+      whole-degree readback tolerance recorded in README Troubleshooting
+      + a bench-findings section; ToDo entry for the #8 verification.
+      (Serial hardening itself merged earlier as PR #8.)
+- [x] SmartPlugController: PR #15 merged (chore/nuc2-bench-2026-07-28) —
+      device_list.md plug1 corrected to 192.168.0.237, LearnedPatterns
+      §E4 (DHCP-drift rule), ToDo entry for the bench verification.
+- [ ] ESP32S3BOX3MotorController: push DENIED (repo belongs to
+      kkhyunhho; coport-uni has no write access). The intended ToDo
+      entry (single-motor group path bench-verified; CAN silent after
+      adapter USB power loss until the motor driver is re-powered) is
+      recorded here instead — ask kkhyunhho for access or a fork to
+      land it upstream.
+- [x] Submodule pins bumped: HotplateController -> 1c2bc8b,
+      SmartPlugController -> 00ef6c6.
