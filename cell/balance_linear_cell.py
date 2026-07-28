@@ -21,10 +21,16 @@ from entris_ii import PrecisionScaleController
 from .cell_protocol import (
     AMBIENT_LEVELS,
     Cell,
+    DeviceFaultError,
     InvalidArgError,
+    TransportError,
     WrongStateError,
 )
-from LinearMotorController import LinearMotorController
+from LinearMotorController import (
+    LinearMotorController,
+    MotionStopError,
+    MoveResult,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,23 +98,34 @@ class BalanceLinearCell(Cell):
 
     # ── Discovery ───────────────────────────────────────────────────────
     def diagnose(self) -> dict:
+        # Query each device exactly once and reuse the values below. The
+        # earlier version asked for the balance model and the amp's software
+        # version twice each (once for the per-device block, once for
+        # "versions"), and the *second* read of a pair came back None on the
+        # real amp -- which then failed HealthResponse validation, since
+        # /v1/health serves driver_versions straight out of the cached
+        # diagnose. Halving the round-trips also shortens the window in
+        # which the balance's AUTO W/ auto-push can race an ID reply
+        # (LearnedPatterns #13).
+        balance_model = self._scale.get_model_number()
+        linear_version = self._lin.read_software_version()
         return {
             # No pump on this cell; ok=True keeps the cell from reading faulted.
             "pump": {"present": False, "ok": True},
             "balance": {
-                "model": self._scale.get_model_number(),
+                "model": balance_model,
                 "serial_number": self._scale.get_serial_number(),
                 "ok": True,
             },
             "stage": {  # the "stage" axis here is the linear rail
                 "model": self._lin.read_model_name(),
-                "version": self._lin.read_software_version(),
+                "version": linear_version,
                 "ok": True,
             },
             "ok_to_initialize": True,
             "versions": {
-                "balance": self._scale.get_model_number(),
-                "linear": self._lin.read_software_version(),
+                "balance": balance_model,
+                "linear": linear_version,
             },
         }
 
@@ -118,7 +135,12 @@ class BalanceLinearCell(Cell):
             "weight_g": self._last_weight_g,  # cached; refresh via read_weight
             "valve": "-",  # no valve on a weigh cell
             "plunger_uL": 0.0,
-            "stage_x_mm": float(pos) if pos is not None else 0.0,
+            # None (a failed RS485 read) is reported as null, never as 0.0:
+            # "I could not read the position" and "the rail is at the origin"
+            # are opposite facts, and 0.0 is the one that makes a home assert
+            # pass (LearnedPatterns #15). status() is a probe, so unlike the
+            # motion methods it reports the gap rather than raising.
+            "stage_x_mm": float(pos) if pos is not None else None,
             "stage_z_mm": 0.0,
             "busy": False,
             "error": None,
@@ -190,15 +212,55 @@ class BalanceLinearCell(Cell):
     def home_linear(self) -> float:
         # No discrete homing on the RS485 driver; the encoder origin is 0 mm,
         # reached by an absolute move via the driver's PID closed loop.
-        final = self._lin.move_to_mm(0.0)
-        return float(final) if final is not None else 0.0
+        return self._absolute_move(0.0, "linear/home")
 
     def move_linear(self, y_mm: float) -> float:
         # Absolute Y target in mm. The RS485 driver's move_to_mm runs a
         # PID-driven software closed loop (P-tuned) to ±0.1 mm; the PID owns the
         # per-iteration speed, so there is no useful per-move speed/accel here.
-        final = self._lin.move_to_mm(y_mm)
-        return float(final) if final is not None else y_mm
+        return self._absolute_move(y_mm, "linear/move")
+
+    def _absolute_move(self, target_mm: float, command: str) -> float:
+        """Drive the rail to an absolute target and confirm it arrived."""
+        try:
+            result = self._lin.move_to_mm(target_mm)
+        except MotionStopError as exc:
+            # The amp never acknowledged a stop. The rail may still be
+            # moving and no software path can halt it, so this must reach
+            # the operator verbatim rather than as a generic 500.
+            raise DeviceFaultError(str(exc), command=command) from exc
+        return self._settled_mm(result, command)
+
+    @staticmethod
+    def _settled_mm(result: MoveResult | None, command: str) -> float:
+        """Return the rail's position, or fail loudly if it did not arrive.
+
+        Two distinct failures, neither of which may be reported as a
+        successful move (LearnedPatterns #15 and #17):
+
+        * ``None`` — the RS485 exchange failed, so the position is simply
+          unknown. This used to substitute a plausible number (0.0 for
+          home, the requested target for a move), fabricating exactly the
+          value a scenario's ``verify_*`` assert checks against.
+        * ``converged=False`` — the amp answered and the position is real,
+          but the closed loop gave up short of the target. A 2026-07-28 run
+          commanded 0.0 mm, stopped at 0.676 mm, and the cell returned
+          ``200 OK`` because the driver reported arrival and surrender with
+          the same bare float.
+        """
+        if result is None:
+            raise TransportError(
+                "linear amp did not answer the position read; the rail's "
+                "position is unknown — do not trust the last reported value",
+                command=command,
+            )
+        if not result.converged:
+            raise DeviceFaultError(
+                f"linear rail did not reach its target ({result.reason}); "
+                f"it stopped at {result.position_mm} mm",
+                command=command,
+            )
+        return float(result.position_mm)
 
     # ── Gantry (none on a balance+linear cell) ──────────────────────────
     def home_gantry(self) -> tuple[float, float]:

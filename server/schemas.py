@@ -16,7 +16,12 @@ class HealthResponse(BaseModel):
     pump_ok: bool | None
     balance_ok: bool | None
     stage_ok: bool | None
-    driver_versions: dict[str, str]
+    # Values are nullable because a driver may fail to report its version:
+    # the MINAS amp's read_software_version() intermittently returns None
+    # (measured ~1 call in 5 on the bench). This is the *liveness* probe, so
+    # an unreadable version must not turn a healthy cell into a 500 — it is
+    # reported as null and the cell still says cell_up.
+    driver_versions: dict[str, str | None]
 
 
 class DiagnoseResponse(BaseModel):
@@ -30,8 +35,11 @@ class StatusResponse(BaseModel):
     weight_g: float
     valve: str = Field(description="Current valve position label, e.g. '1'.")
     plunger_uL: float
-    stage_x_mm: float
-    stage_z_mm: float
+    # Nullable: a cell reports null when it could not read the axis rather
+    # than inventing a position. On cell4 stage_x_mm carries the linear
+    # rail, whose RS485 read can fail (LearnedPatterns #15).
+    stage_x_mm: float | None
+    stage_z_mm: float | None
     busy: bool
     error: str | None
     # Cell D (cell5) only; None on cells without those devices. The
