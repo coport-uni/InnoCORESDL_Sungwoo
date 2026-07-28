@@ -720,59 +720,6 @@ format below. Newest entries at the bottom.
   before adding automatic reconnect, ask what the hardware is doing while
   the software is reconnecting.
 
-## 22. Made the link survivable for reads, and deliberately left motion fragile
-
-- **Problem**: The rail's USB adapter re-enumerates every few seconds
-  (#20: the amp couples noise into its own RS485 link). The wiring fix
-  needs bench work that had not happened, and the bench still needed to
-  make progress. Two symptoms: the cell server failed to start on **3 of
-  4** consecutive attempts, and once running, one drop killed it
-  permanently — a 150 s soak returned **0 of 30** positions, every read
-  costing the full 6.1 s retry budget.
-- **Cause**: Two different things, which is why one fix would not have
-  done. Startup failed because `resolve_port()` raises when it looks
-  during an enumeration gap — a *transient absence* read as a missing
-  device. Reads failed forever because the open fd outlives the deleted
-  node (#21), so no amount of retrying on that fd could work.
-- **Fix**: `_open_serial()` waits out the gap (20 x 0.5 s) and, if the
-  adapter really never returns, raises with the last underlying error
-  attached — "absent" and "present but unopenable" send an operator to
-  different places. `_exchange()` catches the OS-level error, reopens by
-  re-resolving the VID:PID, and reports that attempt as no-reply so the
-  existing retry loop absorbs it. Measured on the still-faulted bench,
-  150 s of `/v1/status` across 18 kernel re-enumerations:
-
-  | | reads | positions | null | median |
-  |---|---|---|---|---|
-  | before | 30 | **0** | 30 | 6112 ms |
-  | after | 959 | **959** | **0** | **30 ms** |
-
-  14 reconnects happened inside that window. The median is back to the
-  healthy-bench figure (27 ms); only the max, 4145 ms, shows a read that
-  spanned a reconnect.
-
-  **And then the part that was left fragile on purpose.** `move_to_mm`
-  refuses to continue across a reconnect: `link_generation` is sampled
-  after the first read and checked after every move and every position
-  read, and on a change the rail is stopped and the move *fails* —
-  `LinkDroppedError` if the stop landed, `MotionStopError` if it did
-  not. So while the link is bad, moves keep aborting. That is the
-  intended behaviour, not a shortfall.
-- **Rule**: Resilience is a per-operation judgement, not a property of a
-  connection. Reopening is right for a read, whose worst case is a stale
-  number, and wrong for a move, whose worst case is a rail travelling
-  with a latched speed command and nobody able to see it. Decide it by
-  what the hardware does during the gap, not by whether reconnecting is
-  technically possible.
-- **On my own reasoning**: I refused this work twice, on the grounds
-  that auto-reconnect would mask a fault, and only built it when asked
-  directly. The refusal was too broad. "Do not paper over the fault" was
-  right about motion and wrong about reads, and treating the link as one
-  thing hid that a 20-line change would have made the bench usable hours
-  earlier. The correct answer was never all-or-nothing; it was to ask
-  which operations are safe to retry, which is the same question
-  `_send_and_receive` already answers for writes a few lines away.
-
 ## 22. The documented adapter serial was for an adapter that is not on this bench
 
 - **Problem**: Bringing cell1's XZ gantry up for the first time,
@@ -874,3 +821,172 @@ format below. Newest entries at the bottom.
   path would have given you. The general rule holds: a cell may only
   report a position it has measured. The dead-reckoned value is the
   request, and a check that compares the request to itself always passes.
+
+## 25. The dry run passed, then the first real move was rejected as a 422
+
+- **Problem**: `demo_gantry_step.yaml` validated clean twice — offline
+  against the L1 OpenAPI, and again with the real
+  `python -m orchestrator validate` against the live cell1 server, both
+  reporting `ok (23 steps)`. The first actual `gantry/move` then came
+  back **HTTP 422** before touching the hardware:
+
+  ```
+  {"type":"greater_than_equal","loc":["body","accel_pct"],
+   "msg":"Input should be greater than or equal to 1","input":0}
+  ```
+- **Cause**: Two independent faults that only met at run time.
+  1. `GantryMoveRequest.accel_pct` was declared `ge=1`. But the driver
+     maps 0–100 % onto the MKS acceleration byte 0–255, where **0 is a
+     real setting** meaning "no acceleration ramp" — and it is the value
+     *both* upstream reference scripts use (`bridge.py` and the
+     bench-validated `CVMeasure.py` set `MOVE_ACCEL_PCT = 0`). The schema
+     forbade the one value the driver's own validated code passes.
+  2. The dry run cannot see it. `validate_scenario` resolves each action
+     against the cell's OpenAPI and checks the request body's **field
+     names**; it never applies the field **constraints**, even though
+     they are right there in the same document. So a body with a correct
+     name and an out-of-range value validates.
+- **Fix**: Two parts, because there were two faults.
+  1. Corrected the schema to `ge=0` on `GantryMoveRequest` and, for the
+     same reason, `ZStageMoveRequest` (cell5, same driver, identical
+     defect waiting). The scenario was left alone: it was right, and
+     matching the reference scripts' acceleration was deliberate.
+  2. Taught the dry run to read the bounds — `_check_bounds` in
+     `orchestrator/scenario.py` now enforces `minimum` / `maximum` /
+     `exclusiveMinimum` / `exclusiveMaximum` alongside the type check.
+     Fixing only the schema would have left the next scenario to find its
+     own out-of-range value the same way, on the bench, with the frame
+     powered.
+
+  Writing that check produced a small lesson of its own: the first version
+  used `value.__lt__(limit)`, and since an OpenAPI bound is a float while
+  the value is usually an int, `(10).__lt__(1.0)` returns `NotImplemented`
+  — which is **truthy**, so every valid integer field was reported as
+  violating both of its bounds. It was caught only by running the new
+  check against a body already known to be good. A validator is worth
+  nothing until it has been shown to pass what should pass; testing it
+  solely on the bug it was written for proves half of it.
+- **Rule**: "The dry run passed" is a statement about the shape of a
+  request, not its contents — it answers "does this action exist and are
+  these the right field names", and stops there. Value constraints are
+  checked for the first time by the real server, on the real bench, with
+  the frame powered. When a scenario's numbers come from somewhere
+  (a driver's reference script, a spec, an operator), verify them against
+  the *schema* as well as the driver before the run. And when a validator
+  and a server disagree about the same document, suspect the validator is
+  reading less of it than you assumed.
+- **On which side was wrong**: the instinct on a 422 is to change the
+  request until the server accepts it — here that would have meant
+  `accel_pct: 1`, silently moving the gantry with a ramp the reference
+  runs never used, and leaving the schema wrong for cell5 too. The
+  driver, not the API, is the authority on what a device accepts.
+
+## 26. Made the link survivable for reads, and deliberately left motion fragile
+
+- **Problem**: The rail's USB adapter re-enumerates every few seconds
+  (#20: the amp couples noise into its own RS485 link). The wiring fix
+  needs bench work that had not happened, and the bench still needed to
+  make progress. Two symptoms: the cell server failed to start on **3 of
+  4** consecutive attempts, and once running, one drop killed it
+  permanently — a 150 s soak returned **0 of 30** positions, every read
+  costing the full 6.1 s retry budget.
+- **Cause**: Two different things, which is why one fix would not have
+  done. Startup failed because `resolve_port()` raises when it looks
+  during an enumeration gap — a *transient absence* read as a missing
+  device. Reads failed forever because the open fd outlives the deleted
+  node (#21), so no amount of retrying on that fd could work.
+- **Fix**: `_open_serial()` waits out the gap (20 x 0.5 s) and, if the
+  adapter really never returns, raises with the last underlying error
+  attached — "absent" and "present but unopenable" send an operator to
+  different places. `_exchange()` catches the OS-level error, reopens by
+  re-resolving the VID:PID, and reports that attempt as no-reply so the
+  existing retry loop absorbs it. Measured on the still-faulted bench,
+  150 s of `/v1/status` across 18 kernel re-enumerations:
+
+  | | reads | positions | null | median |
+  |---|---|---|---|---|
+  | before | 30 | **0** | 30 | 6112 ms |
+  | after | 959 | **959** | **0** | **30 ms** |
+
+  14 reconnects happened inside that window. The median is back to the
+  healthy-bench figure (27 ms); only the max, 4145 ms, shows a read that
+  spanned a reconnect.
+
+  **And then the part that was left fragile on purpose.** `move_to_mm`
+  refuses to continue across a reconnect: `link_generation` is sampled
+  after the first read and checked after every move and every position
+  read, and on a change the rail is stopped and the move *fails* —
+  `LinkDroppedError` if the stop landed, `MotionStopError` if it did
+  not. So while the link is bad, moves keep aborting. That is the
+  intended behaviour, not a shortfall.
+- **Rule**: Resilience is a per-operation judgement, not a property of a
+  connection. Reopening is right for a read, whose worst case is a stale
+  number, and wrong for a move, whose worst case is a rail travelling
+  with a latched speed command and nobody able to see it. Decide it by
+  what the hardware does during the gap, not by whether reconnecting is
+  technically possible.
+- **On my own reasoning**: I refused this work twice, on the grounds
+  that auto-reconnect would mask a fault, and only built it when asked
+  directly. The refusal was too broad. "Do not paper over the fault" was
+  right about motion and wrong about reads, and treating the link as one
+  thing hid that a 20-line change would have made the bench usable hours
+  earlier. The correct answer was never all-or-nothing; it was to ask
+  which operations are safe to retry, which is the same question
+  `_send_and_receive` already answers for writes a few lines away.
+
+## 27. The rail was homing into its own hard stop, and a passing assert is what hid it
+
+- **Problem**: cell4's first complete weighing run succeeded — 15/15 —
+  and its `move_home` step was recorded as `y_mm -1.797`, passing
+  `verify_back_home` (`-1.797` within ±2.0 mm). Two runs later every
+  move displaced **exactly 0 mm** in any direction, while the amp
+  answered serial normally. Diagnosis took three wrong turns before the
+  operator read the amp's front panel: **Err16.0**, motor overload.
+- **Cause**: `home_linear()` targeted 0.0 mm; the closed loop coasts
+  1.5–1.8 mm past its target; and on this bench **0 mm sits on the
+  mechanical end stop**. So homing drove the carriage into the stop and
+  held it there against the servo until the amp protected itself and
+  de-energised. Every later move then did nothing, because an alarmed
+  amp still serves parameter reads and writes perfectly.
+
+  The three wrong turns are the instructive part, and all three were
+  mine:
+  1. **"stalled"** — the driver's word for "commanded, didn't arrive",
+     which reads as *the servo fought the load* and sent me to the limit
+     switches.
+  2. **POT** — the input frame showed `POT(SI2)=0`, active on a
+     b-contact. I reported it as the cause and sent the operator to
+     check X4 wiring. `Pr5.04 = 1` **disables the over-travel inputs
+     entirely**; I had found something that looked wrong and stopped
+     before asking whether the amp was configured to care.
+  3. **"the amp accepts and does not drive"** — correct but useless,
+     because I could not read the alarm. `SRV-ON input = 1` was read as
+     "the servo is energised" when it only says a signal is present on
+     the wire.
+- **Fix**: `home_mm` (default 5.0) is cell config, since how much
+  clearance a stop needs is bench wiring, not a driver property. Both
+  scenarios follow it — `demo_linear_move.yaml` was still returning to
+  0.0 and would have re-tripped the alarm on its next run. `FakeL1`
+  homes to the same position, because a fake that homes to 0 lets a
+  scenario asserting `y_mm <= tolerance` pass in CI and damage hardware
+  on the bench. Verified after: a full 15/15 run with the rail parking
+  at 5 mm and never crossing the origin.
+- **Rule**: An axis's software zero is not automatically a place the
+  carriage may *rest*. Before any scenario returns to a coordinate,
+  establish where the mechanical limits are and park clear of them by
+  more than the loop's coast distance — a position that is legal to pass
+  through can be destructive to hold.
+- **On the assert that passed**: `-1.797` inside `±2.0` was written up
+  here as "0.2 mm of margin left", a tolerance to tune later. It was not
+  a near miss on an assert; it was the rail pushing its stop, logged as
+  a success, once per run, until the amp gave out. A tolerance band
+  centred on a hazard reports contact with the hazard as compliance. When
+  a measured value sits at the edge of its band, ask what is physically
+  at the edge before treating it as a number to adjust.
+- **On not asking the device**: the amp knew the answer the entire time
+  and nothing in this repo could ask it — the driver has no alarm read
+  and no alarm clear, which is also why `diagnose()` answered
+  `stage.ok: true` on an alarmed amp. That is the same shape as the
+  hardcoded `ok: True` fixed in #15's family: a health check that cannot
+  fail. Tracked as issue #15; until it lands, the front panel is the
+  only alarm indicator on this bench.

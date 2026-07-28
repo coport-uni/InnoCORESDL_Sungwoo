@@ -944,7 +944,7 @@ replacement. It was the wrong diagnosis twice over. Full write-up in
 ### Software adapted to a spotty link (reads survive; moves still abort)
 
 The wiring fault is unfixed, so the bench was made usable around it.
-Design and numbers in `LearnedPatterns.md` #22.
+Design and numbers in `LearnedPatterns.md` #26.
 
 - [x] **Startup no longer loses a race with the adapter.** `_open_serial`
       waits out an enumeration gap (20 x 0.5 s) instead of taking
@@ -1322,3 +1322,94 @@ that the servo is energised. An alarmed amp answers serial normally.
       raise buys margin, not a fix. If it recurs, the question is why
       the balance stopped talking (COM.OUTP reverted? menu? standby?),
       not how long to wait.
+
+## cell4 bring-up: closing summary (2026-07-28)
+
+The original request was "L1 and L2 working on cell4, verified by the
+scenario". Both scenarios now complete on real hardware. Recorded here so
+the *verification*, not just the outcome, survives.
+
+### What was delivered
+
+| | Verified by |
+|---|---|
+| L1 serves cell4 (balance + MINAS A6 rail) over `/v1` | `diagnose` reads `BCE224I-1SKR` / `SerNo. 0047304196` and `MDDLN45SL Ver.1.016` off the wire |
+| L2 runs a scenario across it | run `20260728T111725Z-demo_weigh_at_position`, **15/15**, `state: completed` |
+| cell4's design premise — the balance can be carried and still weigh | 50 mm out and back moved a 25.7 g vial's reading by **0.0039 g** |
+| One operator pause, not fifteen | `pause:` on the `weigh` step; run without `--step-mode` stops exactly twice |
+| Measurements visible while the run happens | terminal prints each step's result and each assert's substituted expression |
+
+### Defects this bring-up found, each fixed and re-measured
+
+1. **Pre-flight passed a bench that could not start** — auto-detect and
+   file permissions were never checked (LP #10).
+2. **Three driver methods the cell called had never existed** in 66
+   commits (LP #12) — the mock the cell was tested against was written
+   by the same hand as the cell.
+3. **`/v1/health` 500'd on a healthy cell** — `diagnose()` read every
+   device twice, and the second read of a pair returned `None` (LP #14).
+4. **The cell manufactured success from failed reads** — `status()`,
+   `home_linear()` and `move_linear()` each substituted the value its
+   own assert compared against (LP #15). A run recorded `home -> 0.0`
+   passing `0.0 <= 0.1` with the rail at 0.39 mm.
+5. **10% per-read RS485 failure = 100% inside a closed loop** (LP #16).
+6. **`move_to_mm` returned the same type for "arrived" and "gave up"**
+   (LP #17).
+7. **The stop write failed 2 times in 30 and nobody checked it**
+   (LP #18) — the one write whose loss leaves an axis moving.
+8. **`diagnose()` hardcoded `ok: True`** — answered "healthy, safe to
+   start" for an amp returning `None` to every read (ca048f9).
+9. **A failed speed write was reported as "stalled"** (driver 0e78c42),
+   which is what sent a day of diagnosis to the limit switches.
+10. **Homing drove the rail into its mechanical stop** until the amp
+    tripped Err16.0 (LP #27, issue #15) — and the assert that should
+    have caught it passed, every run, at `-1.797` inside `±2.0`.
+
+### Wrong turns, kept on the record
+
+- Recommended **replacing the USB adapter** repeatedly across a full
+  day. It was never the adapter: first a root port, then conducted EMI
+  from the servo amp through the RS485 pair (LP #20).
+- Shortened a timeout to "10x the median" and **halved** the success
+  rate; reverted after measuring (LP #19).
+- Blamed my own read-retry for an overshoot, then measured and found it
+  made no difference (LP #18).
+- Diagnosed **POT over-travel** as the cause of the dead rail and sent
+  the operator to check X4 wiring. `Pr5.04 = 1` disables those inputs
+  entirely (LP #27).
+- **Refused to add link reconnection twice** on the grounds that it
+  would mask a fault. Right for motion, wrong for reads; a 20-line
+  change would have made the bench usable hours earlier (LP #26).
+
+### How each hardware claim was measured
+
+- **RS485 link**: 150 s soak, 959/959 positions, median 30 ms, across 18
+  kernel re-enumerations and 14 driver reconnects.
+- **Balance**: 2.6 lines/s stream, consecutive-3 spread median 0.0005 g,
+  p90 0.0009 g, 21/23 windows inside the 0.002 g settle tolerance.
+- **Amp command path**: execution rights 20/20, `Pr3.04` writes 30/30,
+  feedback reads 30/30 — which is how "the amp accepts and does not
+  drive" was established before the alarm was known.
+- **EMI source**: amp off → 0 re-enumerations / 40 s; amp on → 15;
+  amp on with the RS485 cable unplugged → 0. Three conditions, one
+  conclusion.
+- **Software**: ruff clean; 71 tests here, 16 in `LinearMotorController`
+  — none of which touch hardware, which is exactly why every claim above
+  is a bench measurement and not a test result.
+
+### Still open
+
+- **Issue #13** — the servo amp couples conducted noise into its own
+  RS485 link. Software absorbs it for reads; moves still abort across a
+  drop, by design. The wiring fix (SG, 120R termination once per end,
+  shield grounded at one end only) has not been done.
+- **Issue #15** — the driver cannot read or clear an amp alarm, so
+  `diagnose()` still cannot tell an alarmed amp from a healthy one.
+- `max_drift_g` (0.05) is still a guess against a single 0.0039 g
+  measurement. Repeat the run 2–3 times and set it from the spread.
+- Confirm the real clearance from 5 mm to the stop; raise `home_mm` if
+  it is not comfortably more than the 1.8 mm coast.
+- `home` has still never been proven to *move* anything: it starts
+  inside tolerance, so `move_to_mm` returns `already_in_tolerance`
+  without commanding motion. A scenario that homes from a known
+  non-zero position is needed before homing is trusted.
