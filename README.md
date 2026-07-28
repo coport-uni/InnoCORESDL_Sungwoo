@@ -19,16 +19,41 @@ All hardware drivers are git submodules under `external/` — see
 
 ## Status
 
-**Nothing in this repository has ever run against real hardware.** Every
-device-facing claim below is code-level, or was verified against the real
-FastAPI app driving a stub cell.
+**Cell D (cell5) is bench-verified end to end** — L1 and L2 against the
+real hardware on NUC2 (2026-07-28). The other cells (cell1–4) remain
+code-level only: nothing on NUC1 has run against a device yet.
 
-| Layer | Built | Verified without hardware | Not yet |
+| Layer | Built | Verified | Not yet |
 |---|---|---|---|
-| L1 cells | all three shapes | imports, OpenAPI, config/shape inference, error mapping | every physical behaviour |
-| L1 `/v1` server | 26 routes | live app + stub cell, OpenAPI generation | bench bring-up |
-| L2 orchestrator | registry, client, validator, engine, runlog, `/v1`, CLI | 32 tests; both demo scenarios end-to-end over real HTTP against a stub | anything touching a device |
-| Deployment | systemd template + Docker Compose | — | never deployed to a NUC |
+| L1 cells | all three shapes | **cell5 on real hardware** (Z + hotplate + lamp; pump-less config); others: imports, OpenAPI, shape inference, error mapping | cell1–4 physical behaviour |
+| L1 `/v1` server | 26 routes | **cell5 live on NUC2:17062** — diagnose, 10/10 hotplate/state stress, lamp over LAN | cell1–4 bench bring-up |
+| L2 orchestrator | registry, client, validator, engine (`wait_s`, `until:`), runlog, `/v1`, CLI | 45 tests; **three real Cell D runs completed** (see below) | multi-cell / cross-NUC runs |
+| Deployment | systemd template + Docker Compose | — | never deployed as a service (bench runs used the venv directly) |
+
+### Cell D bench verification (NUC2, 2026-07-28)
+
+How it was verified, in order — the spec §9 ladder (dry run → gated real):
+
+1. **Device identity** — `udevadm`/`lsusb`: Z = NTREX USB2CAN FTDI
+   `NTB3EP5R`, hotplate = STM32 VCP `0483:5740` (auto-detected), lamp =
+   Tapo P110M at `192.168.0.237` (bare-IP entry synthesised by the cell).
+2. **L1 probes** — `GET /v1/diagnose` (pump reported absent-ok),
+   `hotplate/state` ×10 = **10/10** (after the direct-USB-port fix,
+   LearnedPatterns #13), `lamp/state` over the LAN.
+3. **L2 dry runs** — `python -m orchestrator validate` on every scenario:
+   0 issues.
+4. **Gated real runs** through the orchestrator `/v1` API, operator
+   confirming each first-hazard gate; every run left the cell safe
+   (heater off, lamp off, Z at home) and wrote its runlog under `runs/`:
+
+| Run | Result | What it proved |
+|---|---|---|
+| `cell_d_lamp_heat_40c` | 13/13 steps | lamp switch, 40 °C setpoint, `until:` poll to temperature (1 °C readback tolerance, LP #14), verified shutdown; an earlier abort mid-poll killed heater+lamp immediately |
+| `cell_d_z_cycles` (50 mm) | 17/17 steps | homing (15.5 s), three 0↔50 mm strokes (~3.6 s each), re-home |
+| `cell_d_final` | 21/21 steps | home → 400 mm → home, then lamp+heater to 40 °C, **2-minute dwell at temperature**, verified all-off |
+
+Bench IPs (measured): **NUC1 = 192.168.0.126, NUC2 = 192.168.0.120**;
+the orchestrator ran on NUC2 with cell5 at `127.0.0.1:17062`.
 
 ### Safety gaps you must know before touching hardware
 
@@ -53,7 +78,7 @@ scenario YAML ─▶ orchestrator/ :17100 ──HTTP /v1──▶ cell servers �
 | [`cell/`](cell/) | the cell layer: [`cell_protocol.py`](cell/cell_protocol.py) (interface + `CellError` hierarchy), [`pump_gantry_cell.py`](cell/pump_gantry_cell.py), [`balance_linear_cell.py`](cell/balance_linear_cell.py), [`pump_z_thermal_cell.py`](cell/pump_z_thermal_cell.py) |
 | [`server/`](server/) | the L1 `/v1` server — `create_app` + routes + schemas + error mapping. `nuc1/`, `nuc2/` hold the per-NUC config examples |
 | [`orchestrator/`](orchestrator/) | the L2 orchestrator: registry, cell client, scenario loader + dry-run validator, run engine, runlog, `/v1` API, CLI |
-| [`scenarios/`](scenarios/) | scenario files — `demo_linear_move.yaml`, `demo_cell_d_warmup.yaml` |
+| [`scenarios/`](scenarios/) | scenario files — `demo_linear_move.yaml`, `demo_cell_d_warmup.yaml`, and the bench-verified Cell D set: `demo_cell_d_lamp_blink.yaml`, `demo_cell_d_hotplate_30c.yaml`, `demo_cell_d_z_cycles.yaml`, `demo_cell_d_lamp_heat_40c.yaml`, `demo_cell_d_final.yaml` |
 | [`deploy/`](deploy/) | systemd template unit for the cells, Compose for the orchestrator, NUC setup guide |
 | [`claude_test/`](claude_test/) | tests + the two bench tools (`preflight.py`, `smoke_l1.py`) |
 | [`docs/`](docs/) | the L2 spec, the M0 audit, the bring-up runbook |
@@ -79,12 +104,24 @@ a misdirected call is legible instead of a crash.
 L2 never hardcodes these — it reads each cell's `GET /openapi.json`, which is
 why adding Cell D's nine routes needed **zero** orchestrator changes.
 
+Beyond cell calls, asserts and `parallel`, scenario steps can hold and
+poll (both added for the Cell D bench work, spec §8.1):
+
+- `wait_s: 10.0` — local timed hold, sliced 0.2 s so an abort cuts it
+  short; used for "hold the heater for N seconds".
+- `until: "${result.plate_c} >= 39.0"` on a GET — repeat the read every
+  `poll_s` until the condition holds, `timeout_s` bounding the whole
+  poll; used for "wait until the plate reaches temperature". GET-only,
+  and the cell lock is held per read so an abort's stop broadcast is
+  never queued behind the poll.
+
 ---
 
 ## Quick start
 
 ```bash
-conda activate sdl                      # Python >= 3.12
+conda activate sdl                      # Python >= 3.12; on NUC2 use
+                                        # the repo-local .venv instead
 git submodule update --init --recursive
 pip install -r requirements.txt
 
@@ -110,7 +147,11 @@ cell3=17058, cell4=17060, cell5=17062, orchestrator=17100.
 
 ## Next: connecting the real hardware
 
-The runbook is [`docs/L1_BRINGUP.md`](docs/L1_BRINGUP.md). In short:
+**cell5 is done** (see Status above); this section now applies to the
+remaining cells — cell2/cell3 on NUC2, cell1/cell4 on NUC1 — plus
+cell5's missing syringe pump (add the `[pump]` table back when it
+arrives). The runbook is [`docs/L1_BRINGUP.md`](docs/L1_BRINGUP.md).
+In short:
 
 1. **Collect what is still unknown** — `python claude_test/preflight.py`
    lists exactly which addresses are still `TBD`: cell2/cell3 X-adapter FTDI
@@ -179,6 +220,27 @@ before the driver is called. The IR lamp's plug credentials live in
 Code does not read that file. Never run the hotplate driver's own dashboard
 (`hotplate_controller/server.py`) while cell5 is up: one owner per port.
 
+Hard-won bench rules from the 2026-07-28 bring-up (details in
+[`LearnedPatterns.md`](LearnedPatterns.md) #11–#14):
+
+- **The hotplate's USB stays on a direct NUC port, never the shared
+  hub.** Behind the hub its STM32 CDC interface wedged repeatedly and
+  eventually dropped off the bus. Recovery when it wedges: unplug USB →
+  hotplate off → wait 20 s → reconnect on the direct port → power on
+  (the interface board is USB-powered — cycling the hotplate alone
+  never resets it).
+- ModemManager is disabled on NUC2 and
+  `/etc/udev/rules.d/99-innocore-usb.rules` pins node permissions +
+  `ID_MM_DEVICE_IGNORE` for the FTDI and STM32 VCP ids.
+- **Temperature conditions need tolerance**: the RCT reports whole
+  degrees and regulates just under the setpoint (panel shows 40 while
+  serial says 39.0), so scenarios gate on `>= target - 1.0`.
+- The `[pump]` table is optional in the cell5 config: without it the
+  cell serves Z + hotplate + lamp and answers 409 on pump routes.
+- A lamp `target` may be a bare IP unknown to the submodule's
+  `device_list.md` — the cell synthesises the entry, so a re-DHCPed
+  plug never needs an edit under `external/`.
+
 ### Field names must survive YAML
 
 L2 scenarios are YAML, and YAML 1.1 resolves a bare `on:` **key** to a
@@ -190,8 +252,12 @@ See [`LearnedPatterns.md`](LearnedPatterns.md) #8.
 
 ## Dependencies
 
-Python ≥ 3.12 in the shared conda env **`sdl`**. The drivers come from the
-`external/` submodules as editable installs, so a fresh checkout needs both:
+Python ≥ 3.12. The documented shared conda env **`sdl`** does not exist
+on NUC2 — the bench runs there use a repo-local **`.venv`** instead
+(created with `python3.12 -m venv --without-pip .venv` + get-pip.py,
+because `python3-venv` is not installed and conda is blocked on a ToS
+prompt; LearnedPatterns #10). The drivers come from the `external/`
+submodules as editable installs, so a fresh checkout needs both:
 
 ```bash
 git submodule update --init --recursive

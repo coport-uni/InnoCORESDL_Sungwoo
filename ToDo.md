@@ -310,3 +310,11 @@ was a TBD standalone item through spec v0.9.
       21/21 steps (z_up 10.5 s, wait_hot 208.9 s, dwell 120 s);
       final state z=0, heating off, lamp off. FakeL1 e2e test added
       (45/45). Runlog runs/20260728T094346Z-cell_d_final.
+- [x] Documentation pass (user request): README Status rewritten around
+      the Cell D bench verification (device identity -> L1 probes ->
+      dry runs -> three gated real runs, with the results table and
+      how-verified ladder), scenario list + wait_s/until + Cell D bench
+      rules added; real NUC IPs (NUC1=192.168.0.126, NUC2=192.168.0.120)
+      recorded in orchestrator/config.toml.example, the real
+      config.toml (NUC1 cells staged as comments), and the spec's §2/§12
+      examples.

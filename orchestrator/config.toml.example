@@ -38,25 +38,27 @@ hazard_prefixes = [
 
 # --- Cells ----------------------------------------------------------------
 # Keys here are the names scenarios use in `cell:`. Ports follow the
-# SDLClaude ARCHITECTURE.md scheme; the IPs below are PLACEHOLDERS -- fill
-# in the real NUC addresses before the first bench run (spec section 12.10).
+# SDLClaude ARCHITECTURE.md scheme. Real bench IPs measured 2026-07-28:
+#   NUC1 = 192.168.0.126, NUC2 = 192.168.0.120.
+# When the orchestrator runs ON the same NUC as a cell, 127.0.0.1 also
+# works (that is how the 2026-07-28 Cell D bench runs were done).
 
 [cells.cell1]                # Cell A -- pump + X1/Z2 gantry (NUC1)
-base_url = "http://192.168.1.10:17054"
+base_url = "http://192.168.0.126:17054"
 nuc = "nuc1"
 
 [cells.cell4]                # balance + MINAS A6 linear rail (NUC1)
-base_url = "http://192.168.1.10:17060"
+base_url = "http://192.168.0.126:17060"
 nuc = "nuc1"
 
 [cells.cell2]                # Cell B -- clone of Cell A (NUC2)
-base_url = "http://192.168.1.20:17056"
+base_url = "http://192.168.0.120:17056"
 nuc = "nuc2"
 
 [cells.cell3]                # Cell C -- clone of Cell A (NUC2)
-base_url = "http://192.168.1.20:17058"
+base_url = "http://192.168.0.120:17058"
 nuc = "nuc2"
 
 [cells.cell5]                # Cell D -- pump + single Z + hotplate + lamp
-base_url = "http://192.168.1.20:17062"   # confirm 17062 vs ARCHITECTURE.md
+base_url = "http://192.168.0.120:17062"  # bench-verified 2026-07-28
 nuc = "nuc2"
