@@ -850,3 +850,93 @@ considers itself settled, and the judgement moves into the driver.
       (previously 30 s then HTTP 500); `tare` 0.0015 s; a tare followed
       by a read returns 0.0056 g, inside the scenario's `empty_g` 0.01.
 - [x] ruff clean, `pytest` 32 pass.
+
+### Adapter exonerated: the fault follows the USB port, not the device
+
+The UPort 1150 was blamed for seven failures today and recommended for
+replacement. It was the wrong diagnosis twice over. Full write-up in
+`LearnedPatterns.md` #20 and #21.
+
+- [x] **Moved the UPort off the root port** (`3-1`) to the hub that
+      carries the balance (`3-2.2`). The `-71` EPROTO storm went from
+      **336/s to zero** and `serial.Serial()` opened first try, 10/10
+      exchanges including the `_reconfigure_port` call that had been
+      failing. Every device that had never faulted was already behind a
+      hub; only the UPort was on a root port.
+- [x] **Confirmed the remaining fault is electrical, and the kernel
+      names it**: `disabled by hub (EMI?), re-enabling...` on
+      `3-7-port1` (pump) and `3-2-port2` (UPort). Measured over 60 s —
+      pump **14** re-enumerations, UPort **3** (device number 56 -> 66
+      -> 73 -> 77 -> 81), balance on the *same hub* as the UPort **0**.
+      Same hub and host, so this is per-port wiring, not the hub. The
+      two affected devices are the two attached to motor-driven gear.
+- [x] **Explained the instant HTTP 500** that killed run
+      `20260728T101550Z-demo_weigh_at_position` at its first step
+      (`check_status`, 0.002 s): the server held
+      `/proc/<pid>/fd/6 -> /dev/ttyUSB3 (deleted)` after the adapter
+      re-enumerated to `ttyUSB4`. VID:PID is resolved once at startup,
+      so re-enumeration during a run is not covered.
+- [x] Verified the full cell against real hardware while the link was
+      briefly quiet: `diagnose` balance `BCE224I-1SKR` /
+      `SerNo. 0047304196`, stage `MDDLN45SL Ver.1.016`,
+      `ok_to_initialize: true`; `status` `stage_x_mm 0.405`;
+      `balance/weight` 0.0008 g stable in 0.84 s; `validate` 15 steps ok.
+      **The software is ready; the link is not.**
+
+- [x] **Pump exonerated.** Pulling its USB made the UPort *worse*, not
+      better: re-enumerations went 2 -> **12** per 40 s and
+      `disabled by hub` 2 -> **19**. Two devices failing together did
+      not make one the cause of the other.
+- [x] **The servo amp is the emitter — confirmed by switching it off.**
+      With amp power down, a 40 s window gives **0** on every counter:
+      UPort re-enumerations, `disabled by hub`, urb errors, balance
+      events. Over a minute of total silence after 18 re-enumerations
+      per minute. The pump, now on `3-2.3` beside the UPort and the
+      balance, is also **0** — so the pump's 118 dropouts on
+      `3-7-port1` earlier today were this same amp all along, and the
+      "EMI?" in the kernel's message was literal.
+- [x] **Coupling path confirmed: conducted, through the RS485 pair.**
+      Three conditions, 40 s each, UPort re-enumerations:
+
+      | amp | RS485 cable | re-enumerations |
+      |---|---|---|
+      | off | connected | **0** |
+      | on  | connected | **15** |
+      | on  | **disconnected** | **0** (silent 4 min) |
+
+      With the amp running, pulling one serial cable stops it. The noise
+      travels the signal line and ground, not the air — consistent with
+      the balance and pump, which have no galvanic path to the amp,
+      staying at 0 while the UPort flapped. **So shielded USB cable and
+      ferrites on the USB side are the wrong purchase.**
+- [x] **Mains plug position is irrelevant** — moving it changed nothing
+      (15 per 40 s before and after). Revert it if convenient.
+- [ ] **Fix, cheapest first** (1 and 2 cost nothing and are inspection
+      only):
+      1. Grounding: confirm the amp's PE is actually landed; confirm the
+         RS485 run is shielded twisted pair; confirm the shield is
+         terminated at **one end only** (the amp). Shield landed at both
+         ends makes a ground loop, which is this symptom.
+      2. Signal common: MINAS A6 RS485 has an SG terminal. If SG is not
+         run between amp and UPort the two ends float relative to each
+         other and common-mode swings do exactly this. Check the
+         wiring diagram.
+      3. Common-mode choke: 3-4 turns of the RS485 cable through a
+         ferrite core. Cents, and it targets the path now proven.
+      4. Only if 1-3 fail: isolation — UPort **1150I** or an inline
+         RS485 isolator, 2 kV, which breaks the path physically.
+- [ ] Keep the UPort **off the root port** regardless — that fix is
+      independent and it holds (urb `-71` has stayed at 0 since).
+
+- [ ] **Separate fault, not cell4's: the pump flaps on its own.** 9
+      disconnect cycles in 40 s on `3-2-port3`, after 20 min of silence
+      on that same port, and 118 earlier in the day on `3-7-port1`. It
+      follows the device across hubs and comes and goes, so suspect the
+      pump's own USB cable. Affects cell1/cell5; chase it there.
+- [ ] **Deliberately not doing: auto-reopen on `EIO`.** On a link that
+      drops every 20 s it would lose the port during a 14 s move, and
+      the rail has no software stop (GAP-1). Revisit only once the link
+      is stable enough that reconnect covers the rare case.
+- [ ] `demo_weigh_at_position.yaml` still has **never completed** — it
+      has not yet got past its first step. `max_drift_g` (0.05) remains
+      a guess until a run produces the two weight reads.

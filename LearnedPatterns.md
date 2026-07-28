@@ -596,3 +596,126 @@ format below. Newest entries at the bottom.
   and wrong on the bench. When a fix cannot be measured yet — the
   adapter was faulted when this one was written — that is worth saying
   out loud rather than shipping the arithmetic and calling it verified.
+
+## 20. Seven "adapter failures" in one day were a USB port and a cable, and the kernel had said so all along
+
+- **Problem**: The Moxa UPort 1150 carrying the rail's RS485 link failed
+  seven times in a day. Each failure needed a physical re-plug and
+  recurred within minutes, and the symptom was not always the same: for
+  most of the day the adapter *vanished*, but the last time it stayed in
+  `lsusb` while `serial.Serial(...)` raised `OSError [Errno 71]
+  Protocol error` and the kernel logged `ti_interrupt_callback -
+  nonzero urb status, -71` at ~336/s. Six hours went into treating this
+  as a dying adapter, and the standing recommendation was to replace it.
+- **Cause**: Two causes wearing one costume, neither of them the
+  adapter.
+
+  The first was the **root port**. The UPort sat on `3-1`, a port
+  directly on the controller; the balance, pump and motors all sat
+  behind hubs and none of them had ever faulted. Moving the UPort behind
+  the same hub as the balance took the urb error rate from 336/s to
+  **zero**, and the `Errno 71` open failure disappeared with it.
+
+  The second surfaced only once the first was gone, and is what the
+  kernel had been saying all along:
+
+  ```
+  usb 3-7-port1: disabled by hub (EMI?), re-enabling...   <- pump, CH340
+  usb 3-2-port2: disabled by hub (EMI?), re-enabling...   <- rail, UPort
+  ```
+
+  Both ports re-enumerate continuously — the pump 14x/min, the UPort
+  every 12-30 s (device number 56 -> 66 -> 73 -> 77 -> 81 inside a
+  minute). The balance, **on the same hub as the UPort**, logged zero
+  events across the same window. Same hub, same host, same bus: the
+  variable is the port and what hangs off it. The two flapping devices
+  are the two attached to motor-driven equipment with switching
+  supplies; the one steady device is a bench instrument.
+- **Fix**: Relocate off the root port — done, and it stands. Then the
+  emitter was found by switching things off one at a time. Pulling the
+  pump made the UPort **worse** (2 -> 12 re-enumerations per 40 s), so
+  it was not the cause. Powering down the **servo amp** produced zero on
+  every counter — no re-enumerations, no `disabled by hub`, no urb
+  errors — for over a minute, against 18 re-enumerations per minute with
+  it on. The pump, by then sitting on the same hub, went quiet too, so
+  its 118 dropouts earlier that day were the same amp. Then one more
+  measurement decided *how* the amp reaches the USB bus — run it with
+  the RS485 cable unplugged from the UPort:
+
+  | amp | RS485 cable | UPort re-enumerations / 40 s |
+  |---|---|---|
+  | off | connected | **0** |
+  | on  | connected | **15** |
+  | on  | **disconnected** | **0** |
+
+  The coupling is **conducted, through the RS485 pair and ground** — not
+  radiated. Pulling one signal cable silences a running amp, and the
+  balance and pump, which have no galvanic path to it, sat at 0 all
+  along. That rules out the obvious purchase: a shielded USB cable and
+  ferrites on the USB side would have done nothing. The fix is on the
+  RS485 side and starts free — amp PE actually landed, shield terminated
+  at one end only, signal ground (SG) actually run between the ends —
+  then a common-mode choke, and only then an isolated adapter
+  (UPort 1150**I**).
+- **Rule**: Before condemning a serial adapter, compare it against a
+  device that shares its bus. A fault that follows the *port* rather
+  than the device is wiring or topology, and `journalctl -k` will
+  usually have named it — `disabled by hub (EMI?)` is not a hint, it is
+  a diagnosis. Grep the kernel log for the port before buying hardware.
+  And when several devices misbehave at once, resist pairing them off as
+  cause and effect: here the pump and the rail adapter were both victims
+  of a third thing neither was plugged into. The way to find that third
+  thing is to switch candidates off and count, one at a time, against a
+  device that never fails. Then keep going: "the amp is the emitter" was
+  still not enough to buy a part, because it does not say whether the
+  noise arrives by air or by wire, and the two fixes share nothing. One
+  more cable-pull separated them.
+- **On my own reasoning**: I recommended replacing this adapter
+  repeatedly across the day, and it was never the adapter. Seven
+  failures all produced the same *conclusion* from me because I kept
+  reading the same layer — the device — and never asked why every other
+  device on the machine was fine. The comparison that solved it took one
+  command and was available from the first failure.
+
+## 21. A vanished device node is a permanent outage, because the fd survives the device
+
+- **Problem**: After the adapter re-enumerated, **every** request to the
+  cell server returned HTTP 500 in 2 ms — including `GET /v1/status`,
+  which had answered correctly minutes earlier. It never recovered on
+  its own. The traceback pointed at a line that merely assigns a
+  timeout:
+
+  ```
+  self.ser.timeout = self.exchange_timeout_s
+    -> serial/serialposix.py _reconfigure_port
+    -> SerialException: Could not configure port: (5, 'Input/output error')
+  ```
+- **Cause**: The driver resolves `"110A:1150"` to a device path **once,
+  at startup**, and holds the open fd. When the adapter re-enumerated,
+  the kernel gave it a new node and deleted the old one; the process
+  kept an fd on a node that no longer exists:
+
+  ```
+  /proc/<pid>/fd/6 -> /dev/ttyUSB3 (deleted)
+  ```
+
+  `tcsetattr` on that fd returns `EIO`, so the failure surfaced at a
+  property assignment rather than at a read or a write — which is why it
+  read as a driver bug rather than a missing device. The 2 ms response
+  time was the tell: the request never reached the wire. A real RS485
+  problem costs hundreds of milliseconds and retries; an instant 500 is
+  the local end failing.
+- **Fix**: Restart the server so it re-resolves the VID:PID. Deliberately
+  **not** fixed by auto-reopening on `EIO`: on a link that drops every
+  20 s, a 14 s move would lose its port mid-motion, and this rail cannot
+  be stopped from software (`docs/L1_AUDIT.md` GAP-1). Reconnect logic
+  here would convert a loud failure into a moving rail nobody is talking
+  to. The link gets fixed first; resilience is only worth adding once it
+  is protecting against the rare case rather than the normal one.
+- **Rule**: Resolving a port by VID:PID at startup buys stability against
+  *boot-order* renumbering, not against re-enumeration during a run —
+  the fd outlives the device it names. When a server that was working
+  starts failing instantly and identically on every endpoint, check
+  `/proc/<pid>/fd` for `(deleted)` before reading the traceback. And
+  before adding automatic reconnect, ask what the hardware is doing while
+  the software is reconnecting.

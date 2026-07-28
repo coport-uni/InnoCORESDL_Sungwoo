@@ -117,21 +117,34 @@ class BalanceLinearCell(Cell):
         # which the balance's AUTO W/ auto-push can race an ID reply
         # (LearnedPatterns #13).
         balance_model = self._scale.get_model_number()
+        balance_serial = self._scale.get_serial_number()
         linear_version = self._lin.read_software_version()
+        linear_model = self._lin.read_model_name()
+        # `ok` is derived, never asserted. These four fields used to be
+        # hardcoded True, so diagnose() answered "healthy, ok_to_initialize"
+        # for an amp that had just returned None to *every* read -- the exact
+        # substitution LearnedPatterns #15 removed from the motion path, still
+        # sitting in the pre-flight check that is supposed to catch it. A
+        # device that cannot say what it is has not been reached, and this is
+        # the last gate before an operator commands a rail that has no
+        # software stop (docs/L1_AUDIT.md GAP-1).
+        balance_ok = balance_model is not None and balance_serial is not None
+        stage_ok = linear_model is not None and linear_version is not None
         return {
             # No pump on this cell; ok=True keeps the cell from reading faulted.
             "pump": {"present": False, "ok": True},
             "balance": {
                 "model": balance_model,
-                "serial_number": self._scale.get_serial_number(),
-                "ok": True,
+                "serial_number": balance_serial,
+                "ok": balance_ok,
             },
             "stage": {  # the "stage" axis here is the linear rail
-                "model": self._lin.read_model_name(),
+                "model": linear_model,
                 "version": linear_version,
-                "ok": True,
+                "ok": stage_ok,
             },
-            "ok_to_initialize": True,
+            # The pump is absent by design, so it is not a precondition.
+            "ok_to_initialize": balance_ok and stage_ok,
             "versions": {
                 "balance": balance_model,
                 "linear": linear_version,
