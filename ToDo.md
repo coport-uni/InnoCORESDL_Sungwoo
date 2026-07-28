@@ -977,3 +977,73 @@ Design and numbers in `LearnedPatterns.md` #22.
       complete.
 - [ ] The wiring fix is still the blocker: SG between amp and UPort,
       120R termination once per end, shield grounded at one end only.
+      Tracked as issue #13, which blocks #10.
+
+## 2026-07-28 — cell1 XZ gantry bring-up, without its syringe pump
+
+Hardware for cell1 is on the bench except the SY-01B, whose USB link flaps
+on its own (see the entry above). Goal: L1 + L2 driving the XZ gantry, then
+a scenario that steps the frame 50 mm.
+
+- [x] **The pump is now optional in `PumpGantryCell`.** Omit the config's
+      `[pump]` table and the cell serves its gantry alone: `diagnose()`
+      reports `pump.present=false`, every `/v1/pump/*` action answers 409,
+      and `stop()`/`close()` skip it. Mirrors how cell4 handles its
+      absent-by-design pump, so the cell does not have to be blocked on a
+      device no gantry step needs. `server/nuc1/cell1.toml` written
+      without the table.
+- [x] **Corrected the X adapter serial: `NTAM63XD` → `NTAMU6TO`.** The
+      documented value is not on this bench and `open_xz` raises on it, so
+      the server would have died at startup. The two Z serials
+      (`A10PUO5V`, `A10PUO5W`) were right, which is what made the wrong
+      one look credible. Fixed in the `Config` default, `cell1.toml.example`
+      and `CLAUDE.md`; matches upstream `bridge.py`. LearnedPatterns #22.
+- [x] **Removed two fabricated-success paths from the gantry**, the same
+      class #15/#17 removed from cell4's rail — found by reading the
+      driver, not from a bench failure:
+      - `move_gantry`/`home_gantry` returned the *commanded* target, so a
+        gantry that never moved answered `200 OK` with the requested
+        position. `MKSMotor.move_to` only *prints* `[ERROR] Motor failed
+        to start`, and `move_sync` discards its return value. Now every
+        move is confirmed by an encoder readback, with distinct errors for
+        unreadable (`TransportError`), short (`DeviceFaultError`) and a
+        desynced Z pair.
+      - `diagnose()` hardcoded `stage.ok = True`. Now derived from a live
+        read of all three motors.
+      `status()` likewise serves live encoder values, `null` for an axis
+      it could not read, and flags a racking Z pair in `error`.
+      LearnedPatterns #24.
+- [x] **21 unit tests** in `claude_test/test_pump_gantry_cell.py` (pump
+      absent, silent motor, dropped move, unreadable axis, desynced Z).
+      Full suite 61 passed; ruff clean.
+- [x] **`scenarios/demo_gantry_step.yaml`** — home, X out 50 mm and back,
+      Z out 50 mm and back, asserting the *travelled distance* between
+      consecutive encoder readings rather than the endpoint, plus a
+      `/v1/status` cross-check that must agree with what `gantry/move`
+      returned. Dry run: 23 steps, no issues. Scoped to one 50 mm step per
+      axis by operator decision — travel below Z is not yet measured.
+- [x] `orchestrator/config.toml`: cell1 → `http://127.0.0.1:17054` (same
+      NUC as cell4, so loopback).
+
+- [ ] **BLOCKED on the udev rule — needs root, cannot be done from here.**
+      `ftdi_sio` holds all three USB2CAN adapters and `/dev/bus/usb` nodes
+      are `root:root`, so pyftdi cannot claim them and the cell server
+      cannot start. `release_ftdi_sio()` is a no-op unprivileged. Install
+      `SETUP_UBUNTU.md` §1's rule, then `udevadm control --reload-rules &&
+      udevadm trigger`. Until then `preflight.py` reports the adapters as
+      "not attached", which is a permission failure, not a missing
+      adapter — LearnedPatterns #23.
+- [ ] **Not yet run on hardware.** Everything above is code, dry run and
+      offline tests. Still to do once the rule is in: `python -m server
+      --config server/nuc1/cell1.toml`, `smoke_l1.py --suite gantry`, then
+      the scenario in `--step-mode`.
+- [ ] **`ARRIVAL_TOLERANCE_MM` (1.0) and `Z_DESYNC_LIMIT_MM` (1.0) are
+      placeholders**, as is the scenario's `tolerance_mm`. Set all three
+      from the first run's measured residual and Z spread; they must be
+      tightened together or the scenario asserts and the cell's own check
+      disagree.
+- [ ] **X's `coord_invert` is asserted, not verified.** The cell sets
+      `x_coord_invert = true` with `home_dir_x = 0x00`, while upstream
+      `bridge.py` runs `HOME_DIR_X = 0x00` with X *not* inverted. One of
+      the two is wrong about which way X leaves home. Watch the first X
+      step: if it drives into the limit instead of away, that is this.
