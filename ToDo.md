@@ -1042,8 +1042,56 @@ a scenario that steps the frame 50 mm.
       from the first run's measured residual and Z spread; they must be
       tightened together or the scenario asserts and the cell's own check
       disagree.
-- [ ] **X's `coord_invert` is asserted, not verified.** The cell sets
-      `x_coord_invert = true` with `home_dir_x = 0x00`, while upstream
-      `bridge.py` runs `HOME_DIR_X = 0x00` with X *not* inverted. One of
-      the two is wrong about which way X leaves home. Watch the first X
-      step: if it drives into the limit instead of away, that is this.
+- [ ] **X homes off the opposite end from the only validated script.**
+      Three conventions exist for X and they do not agree:
+
+      | source | `home_dir_x` | X `coord_invert` | +mm goes |
+      |---|---|---|---|
+      | `CVMeasure.py` (validated to 500 mm) | `0x01` | False | away from home |
+      | `bridge.py` | `0x00` | False | **into the home limit** |
+      | this cell | `0x00` | **True** | away from home |
+
+      The cell is self-consistent — homing off the other end and
+      inverting the coordinate cancel out, so `+mm` still travels into
+      the working range. But its origin is the **opposite physical end**
+      of the X rail from CVMeasure's, so any X coordinate taken from that
+      script is mirrored here. `bridge.py` is the odd one out and looks
+      simply untested for absolute X moves (its speed constants cite
+      CVMeasure, not its directions). Nothing to change yet; confirm on
+      the first run which end X homes to and write it down. If the sign
+      is wrong after all, `move_to` drives into a closed limit and the
+      new `_confirm` readback raises rather than reporting success.
+
+### First end-to-end weighing run on cell4 — completed, 15/15
+
+Run `20260728T111725Z-demo_weigh_at_position`, step-mode, git 869f8af.
+The first run in which cell4's balance and rail worked together.
+
+- [x] **The design premise is measured, and it holds.** The scenario
+      exists to answer whether cell4 can weigh somewhere other than
+      where it settles. Carrying the balance 50 mm and back moved the
+      reading by **0.0039 g** (25.7424 -> 25.7385 g on a 25.7 g vial).
+      `max_drift_g` was guessed at 0.05; the measurement is 13x smaller.
+- [x] Balance: tare -> 0.001 g on an empty pan, vial 25.7424 g stable,
+      both reads ~0.8-1.0 s. Rail: `move_to_weigh` 49.478 mm in 6.2 s.
+- [x] **The link dropped during the run and the software absorbed it.**
+      One UPort re-enumeration at 20:18:20, inside the `weigh` step. Both
+      moves happened to get clean windows (20:17:42-49, 20:18:27-33) —
+      partly luck, since a drop during a move would have aborted it by
+      design. This run is not yet reproducible; issue #13 still blocks.
+
+- [ ] **`home` did not move, and the run cannot tell you it did.** It
+      started at 0.177 mm and returned in **29 ms**: inside the 2 mm
+      tolerance, `move_to_mm` reports `already_in_tolerance` without
+      issuing motion. `verify_home` passing is therefore not evidence
+      that homing works. Worth a scenario that homes from a known
+      non-zero position before anyone relies on it.
+- [ ] **`move_home` had 0.2 mm of margin left.** It landed at
+      **-1.797 mm** against a +/-2.0 mm assert, having overshot the
+      origin. The 2 mm tolerance was chosen to sit *above* the measured
+      coast (1.5-1.8 mm) so the first coarse move lands inside it — but
+      the overshoot came in at the top of that range, so there is no
+      headroom. Either widen the assert or tighten the approach speed;
+      do not leave it at a value the last run nearly failed.
+- [ ] Do not tighten `max_drift_g` on one sample. Repeat the run 2-3
+      times once the link is fixed, then set it from the spread.
