@@ -299,3 +299,45 @@ format below. Newest entries at the bottom.
   serial exchanges, and treat "device stopped answering" as a firmware
   wedge: stop querying immediately and power-cycle the device instead
   of retrying harder.
+
+## 13. The RCT wedge's real chain: USB-powered interface + shared hub; and the recovery that works
+
+- **Problem**: LearnedPatterns #12's pacing/flush/retry did not stop the
+  wedges (still 2–6/10 sweeps failing, then bus drop-off). Power-cycling
+  the hotplate never revived the interface; neither did quick cable
+  replugs, `usb.core` reset (later "Protocol error"), port reopen, or
+  disabling ModemManager.
+- **Cause**: Two hardware facts. (1) The hotplate's STM32 USB interface
+  is powered from USB 5 V, so cycling the hotplate's own power never
+  resets it — only cutting USB power does. (2) It sat behind the bench's
+  shared USB hub, whose churn (device addresses in the 80s) destabilized
+  the CDC firmware until it crashed at the USB protocol level.
+- **Fix**: Full-drain recovery: unplug USB → hotplate off → wait 20 s →
+  reconnect **directly into a NUC port** → power on. Result: 6-query
+  sweeps went 2/10 → 10/10 and stayed clean through a full scenario run.
+  ModemManager stays disabled and `/etc/udev/rules.d/99-innocore-usb.rules`
+  pins MODE 0666 + ID_MM_DEVICE_IGNORE for 0483:5740 and 0403:6001.
+  The hub bounces also silenced the MKS CAN side once — fixed by the
+  operator re-powering the motor driver.
+- **Rule**: Keep the RCT (and any single-owner serial device) on a
+  direct NUC port, never the shared hub. When a USB device ignores its
+  host-side resets, cut its *USB* power (unplug), not just the
+  appliance's mains — bus-powered interface boards only reset with the
+  cable.
+
+## 14. The RCT readback never shows the setpoint — condition on a tolerance, not equality
+
+- **Problem**: The first `cell_d_lamp_heat_40c` run polled
+  `plate_c >= 40.0` and hung: the front panel showed 40 while the
+  serial readback (`IN_PV_1`) sat at 39.0 for minutes.
+- **Cause**: The RCT reports whole degrees over serial and its control
+  loop holds just under the setpoint; the panel rounds up. A strict
+  `>=` against the setpoint compares against a value the readback may
+  never produce.
+- **Fix**: The scenario's `until:` uses
+  `plate_c >= hot_c - tol_c` with `tol_c: 1.0`; re-run completed in
+  74 s with every shutdown verify passing.
+- **Rule**: Never gate on exact equality (or strict crossing) of a
+  regulated process value read back from the regulator itself — always
+  allow the device's own reporting granularity + control band as
+  tolerance.

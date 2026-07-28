@@ -272,3 +272,31 @@ was a TBD standalone item through spec v0.9.
 - [x] Register the GitHub issue for this bring-up via `gh issue create` —
       issue #8. (Needed a one-time `gh auth login` by the operator; the
       `gh` CLI itself was installed to ~/.local/bin, no sudo.)
+
+## 2026-07-28 (cont.) — until: polled GET, lamp+heat-to-40C run, bench recovery
+
+- [x] Root-caused the RCT wedge chain: hotplate's USB interface is
+      USB-powered (hotplate power-cycle alone never resets it) and the
+      shared USB hub was destabilizing it — moved to a DIRECT NUC port
+      after a full drain (USB out -> power off -> 20 s -> direct port
+      -> power on): sweeps went 2/10 -> 10/10. ModemManager disabled
+      and udev MODE 0666 + ID_MM_DEVICE_IGNORE rules installed.
+- [x] Z motor CAN silence after the hub bounces — restored by the
+      operator re-powering the motor driver; SETUP OK.
+- [x] Added the `until:` polled GET to the scenario language (spec
+      §8.1): GET-only, `${result.*}` condition, `poll_s` interval,
+      `timeout_s` bounds the whole poll, per-read cell lock so abort
+      never queues. 4 new tests; FakeL1 hotplate now warms 5 C per
+      state read while heating. 44/44 pass.
+- [x] `scenarios/demo_cell_d_lamp_heat_40c.yaml` — lamp on, heat to
+      40 C, shut heater+lamp on arrival (user-requested sequence).
+- [x] Bench: diagnose ok (pump absent), hotplate/state 10/10 over
+      HTTP, all four Cell D scenarios validate ok against the live L1.
+- [x] Real run `cell_d_lamp_heat_40c` submitted through the
+      orchestrator API; operator confirmed the hazard gate.
+- [x] `until:` tolerance fix after the first real run hung at 39.0 C
+      (readback granularity + control band; LearnedPatterns #14). Rerun
+      COMPLETED 13/13 steps: lamp on -> 40 C -> heater+lamp off, final
+      state safe. Runlog runs/20260728T093205Z-cell_d_lamp_heat_40c.
+- [x] LearnedPatterns #13 (USB-powered interface + hub root cause,
+      full-drain recovery, direct-port rule) and #14.

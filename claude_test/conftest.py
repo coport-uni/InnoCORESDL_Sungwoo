@@ -235,6 +235,9 @@ class FakeL1:
         self.position_mm: dict[str, float] = dict.fromkeys(shapes, 0.0)
         self.z_mm: dict[str, float] = dict.fromkeys(shapes, 0.0)
         self.target_c: dict[str, float] = dict.fromkeys(shapes, 20.0)
+        # Warms 5 C per state read while heating, so `until:` polls on
+        # plate_c converge in a handful of reads.
+        self.plate_c: dict[str, float] = dict.fromkeys(shapes, 21.5)
         self.heating: dict[str, bool] = dict.fromkeys(shapes, False)
         self.lamp_on: dict[str, bool] = dict.fromkeys(shapes, False)
         self.failures: dict[tuple[str, str], list[Callable[[], Any]]] = {}
@@ -368,10 +371,12 @@ class FakeL1:
             self.z_mm[cell] = float(body["z_mm"])
             return httpx.Response(HTTP_OK, json={"z_mm": self.z_mm[cell]})
         if action == "hotplate/state":
+            if self.heating[cell]:
+                self.plate_c[cell] += 5.0
             return httpx.Response(
                 HTTP_OK,
                 json={
-                    "plate_c": 21.5,
+                    "plate_c": self.plate_c[cell],
                     "probe_c": 21.0,
                     "target_c": self.target_c[cell],
                     "safety_c": 300.0,

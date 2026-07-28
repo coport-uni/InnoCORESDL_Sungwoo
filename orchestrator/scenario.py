@@ -34,6 +34,9 @@ from orchestrator.registry import Registry
 #: ``${params.volume_uL}`` / ``${measured.weight_g}``
 PLACEHOLDER_RE = re.compile(r"\$\{\s*([A-Za-z_][A-Za-z0-9_.]*)\s*\}")
 PARAMS_ROOT = "params"
+#: Variable root that an ``until:`` expression uses for the latest
+#: response of its own polled GET.
+UNTIL_RESULT_ROOT = "result"
 API_PREFIX = "/v1/"
 SNAKE_CASE_RE = r"^[a-z][a-z0-9_]*$"
 
@@ -173,6 +176,14 @@ class Step(BaseModel):
     #: language had no way to express "hold the heater for 10 s" —
     #: every timed hold used to be the operator's job in --step-mode.
     wait_s: float | str | None = None
+    #: Poll-until condition on a GET call step: repeat the read every
+    #: ``poll_s`` seconds until this expression is true, where
+    #: ``${result.*}`` is the latest response. ``timeout_s`` bounds the
+    #: whole poll, not one HTTP call. GET-only by construction — the
+    #: L1 convention makes every GET a safe, repeatable probe, which is
+    #: exactly what a poll needs ("heat until the plate reaches 40 °C").
+    until: str | None = None
+    poll_s: float = Field(default=2.0, gt=0)
     parallel: list[Step] | None = None
 
     @model_validator(mode="after")
@@ -203,6 +214,14 @@ class Step(BaseModel):
                 raise ValueError("a call step needs both 'cell' and 'action'")
             if self.method == "GET" and self.body:
                 raise ValueError("a GET step cannot carry a 'body'")
+        if self.until is not None:
+            if not (self.cell and self.action):
+                raise ValueError("'until' belongs on a cell call step")
+            if self.method != "GET":
+                raise ValueError(
+                    "'until' polls, so it is GET-only — a POST that acts "
+                    "on hardware must not be repeated by a condition loop"
+                )
         return self
 
     @property
@@ -693,7 +712,15 @@ async def _validate_leaf(
         source = step.wait_s
     else:
         source = step.assert_expr
-    for path in sorted(referenced_paths(source)):
+    paths = set(referenced_paths(source))
+    if step.until is not None:
+        # ``result`` is defined by the poll itself, not the context.
+        paths |= {
+            p
+            for p in referenced_paths(step.until)
+            if p.split(".")[0] != UNTIL_RESULT_ROOT
+        }
+    for path in sorted(paths):
         try:
             lookup(path, context)
         except VariableError as exc:

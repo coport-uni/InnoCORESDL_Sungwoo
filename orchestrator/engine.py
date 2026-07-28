@@ -35,6 +35,7 @@ from orchestrator.scenario import (
     Scenario,
     ScenarioError,
     Step,
+    UNTIL_RESULT_ROOT,
     ValidationIssue,
     VariableError,
     WaitValueError,
@@ -600,17 +601,59 @@ class Engine:
             if step.timeout_s is not None
             else run.scenario.defaults.timeout_s
         )
-        async with self._locks.acquire(step.cell):
-            result = await self._client.call(
-                step.cell,
-                step.action,
-                method=step.method,
-                body=body,
-                timeout_s=timeout,
-            )
+        if step.until is not None:
+            result = await self._poll_until(run, step, timeout)
+        else:
+            async with self._locks.acquire(step.cell):
+                result = await self._client.call(
+                    step.cell,
+                    step.action,
+                    method=step.method,
+                    body=body,
+                    timeout_s=timeout,
+                )
         if step.save_as:
             run.vars[step.save_as] = result
         return result
+
+    async def _poll_until(self, run: Run, step: Step, timeout: float) -> Any:
+        """Repeat a GET until its ``until:`` expression holds.
+
+        ``step.timeout_s`` bounds the whole poll; each HTTP call runs
+        under the orchestrator's default step timeout. The cell lock is
+        held per read, not across the loop, so an abort's stop
+        broadcast is never queued behind the poll.
+
+        Raises:
+            AssertionFailure: The deadline passed (or the run was
+                aborted) before the condition held.
+        """
+        assert step.cell is not None and step.action is not None
+        assert step.until is not None
+        deadline = time.monotonic() + timeout
+        last: Any = None
+        while True:
+            async with self._locks.acquire(step.cell):
+                last = await self._client.call(
+                    step.cell,
+                    step.action,
+                    method=step.method,
+                    timeout_s=self._config.step_timeout_s,
+                )
+            expression = resolve(
+                step.until, {**run.context, UNTIL_RESULT_ROOT: last}
+            )
+            if eval_assert(expression):
+                return last
+            if run.abort_requested:
+                raise AssertionFailure(
+                    f"until aborted before it held: {expression}"
+                )
+            if time.monotonic() >= deadline:
+                raise AssertionFailure(
+                    f"until not reached within {timeout}s: {expression}"
+                )
+            await asyncio.sleep(step.poll_s)
 
     async def _finish(self, run: Run) -> None:
         if run.abort_requested:

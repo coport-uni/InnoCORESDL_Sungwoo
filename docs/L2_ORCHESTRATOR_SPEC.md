@@ -492,6 +492,26 @@ steps:
 것으로, engine은 대기를 0.2 s 단위로 쪼개어 abort 요청이 오면 즉시
 끊는다. hazard 판정 대상이 아니다 (장비에 아무것도 보내지 않으므로).
 
+GET call step에는 `until:` 조건을 붙일 수 있다 — 응답을
+`${result.*}`로 참조하는 assert 문법의 식이 참이 될 때까지 같은
+GET을 `poll_s`(기본 2 s) 간격으로 반복한다 ("플레이트가 40 °C에
+도달할 때까지"). `timeout_s`는 HTTP 한 번이 아니라 폴 전체의
+데드라인이며, 초과 시 step 실패로 처리된다. POST에는 붙일 수 없다
+(하드웨어를 움직이는 명령을 조건 루프로 반복해서는 안 된다). cell
+lock은 읽기 한 번 단위로만 잡으므로 abort의 stop broadcast가 폴
+뒤에 줄 서지 않고, abort 요청 시 폴은 즉시 실패로 끝난다.
+
+```yaml
+  - id: wait_hot
+    cell: cell5
+    action: hotplate/state
+    method: GET
+    until: "${result.plate_c} >= ${params.warm_c}"
+    poll_s: 5.0
+    timeout_s: 900.0    # 폴 전체 데드라인
+    save_as: reached    # 조건을 만족시킨 마지막 응답
+```
+
 위 필드명은 v0.9에서 `server/schemas.py` 기준으로 정정된 것이다. 예시를
 그대로 믿지 말고 항상 cell의 OpenAPI로 대조하라 — validator가 그렇게
 동작하며, 오타는 dry run에서 `body_mismatch`로 잡힌다

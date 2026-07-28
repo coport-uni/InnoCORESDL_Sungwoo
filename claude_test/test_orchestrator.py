@@ -596,6 +596,66 @@ async def test_abort_cuts_a_wait_short(engine: Engine) -> None:
     assert run.records[0]["duration_s"] < WAIT_TIMEOUT_S
 
 
+# ── until: polled GETs ─────────────────────────────────────────────────────
+
+
+async def test_until_polls_to_condition(
+    engine: Engine, fake_l1: FakeL1
+) -> None:
+    # FakeL1 warms 5 C per state read while heating: 21.5 -> 41.5 on
+    # the fourth read, so the poll converges quickly.
+    text = scenario_yaml(
+        "  - id: heat\n    cell: cell5\n    action: hotplate/heater\n"
+        "    body:\n      enabled: true\n"
+        "  - id: hot\n    cell: cell5\n    action: hotplate/state\n"
+        "    method: GET\n"
+        '    until: "${result.plate_c} >= 40.0"\n'
+        "    poll_s: 0.01\n    timeout_s: 5.0\n    save_as: reached\n",
+        name="until_check",
+    )
+    _s, issues = await engine.validate(text)
+    assert [str(i) for i in issues] == []
+    run = await engine.create_run(text)
+    await engine.wait(run.run_id)
+    assert run.state is RunState.COMPLETED
+    assert run.vars["reached"]["plate_c"] >= 40.0
+    reads = [c for c in fake_l1.calls if c[2] == "/v1/hotplate/state"]
+    assert len(reads) == 4
+
+
+async def test_until_timeout_fails_the_run(
+    engine: Engine, fake_l1: FakeL1
+) -> None:
+    # Heater never turned on -> the plate never warms -> deadline.
+    run = await engine.create_run(
+        scenario_yaml(
+            "  - id: hot\n    cell: cell5\n    action: hotplate/state\n"
+            "    method: GET\n"
+            '    until: "${result.plate_c} >= 40.0"\n'
+            "    poll_s: 0.01\n    timeout_s: 0.05\n",
+            name="until_timeout",
+        )
+    )
+    await engine.wait(run.run_id)
+    assert run.state is RunState.FAILED
+    assert "until not reached" in run.records[-1]["error"]["message"]
+
+
+def test_until_rejects_post() -> None:
+    from orchestrator.scenario import load_scenario_text, ScenarioError
+
+    with pytest.raises(ScenarioError, match="GET-only"):
+        load_scenario_text(
+            scenario_yaml(
+                "  - id: bad\n    cell: cell5\n"
+                "    action: hotplate/heater\n"
+                "    body:\n      enabled: true\n"
+                '    until: "${result.heating} == True"\n',
+                name="until_post",
+            )
+        )
+
+
 # ── the three Cell D bench demos ───────────────────────────────────────────
 
 
@@ -622,6 +682,23 @@ async def test_cell_d_hotplate_demo(engine: Engine, fake_l1: FakeL1) -> None:
     assert run.state is RunState.COMPLETED
     assert fake_l1.target_c["cell5"] == 30.0
     assert fake_l1.heating["cell5"] is False
+
+
+async def test_cell_d_lamp_heat_demo(engine: Engine, fake_l1: FakeL1) -> None:
+    text = (
+        REPO_ROOT / "scenarios" / "demo_cell_d_lamp_heat_40c.yaml"
+    ).read_text(encoding="utf-8")
+    _s, issues = await engine.validate(text)
+    assert [str(i) for i in issues] == []
+    run = await engine.create_run(text)
+    await engine.wait(run.run_id)
+    assert run.state is RunState.COMPLETED
+    # The run must end with heater AND lamp off, and the poll's saved
+    # response at or above target.
+    assert fake_l1.heating["cell5"] is False
+    assert fake_l1.lamp_on["cell5"] is False
+    assert run.vars["reached"]["plate_c"] >= 40.0
+    assert fake_l1.target_c["cell5"] == 40.0
 
 
 async def test_cell_d_z_cycles_demo(engine: Engine, fake_l1: FakeL1) -> None:
