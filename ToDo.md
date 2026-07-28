@@ -981,6 +981,8 @@ Design and numbers in `LearnedPatterns.md` #22.
 
 ## 2026-07-28 — cell1 XZ gantry bring-up, without its syringe pump
 
+Tracked as [#14](https://github.com/coport-uni/InnoCORESDL_Sungwoo/issues/14).
+
 Hardware for cell1 is on the bench except the SY-01B, whose USB link flaps
 on its own (see the entry above). Goal: L1 + L2 driving the XZ gantry, then
 a scenario that steps the frame 50 mm.
@@ -1133,3 +1135,94 @@ no link error at all.
       it: when a move ends with zero displacement, read the input frame
       and name POT/NOT/SRV-ON in the error instead of guessing at
       oscillation. Belongs in `LinearMotorController.move_to_mm`.
+
+### 2026-07-28 (same day, later) — cell1 gantry verified on hardware
+
+The udev rule was installed by the operator; all three adapters came up
+under pyftdi and `preflight.py` went to 3/3, clean.
+
+- [x] **L1 verified on the real gantry.** `diagnose` → all three motors
+      answered (`stage.ok` derived, not asserted); `/v1/pump/*` → 409
+      "configured without a pump"; `/v1/linear/*` → 409 (wrong shape);
+      `status` → live encoder values.
+- [x] **All four motion types run, measured, and returned to origin:**
+
+      | move | commanded | measured |
+      |---|---|---|
+      | `gantry/home` | 0 | X 0.0012, Z 0.0 (5.5 s) |
+      | X out | 50 | 50.038 |
+      | X back | 0 | 0.021 |
+      | Z down | 50 | 50.021 |
+      | Z up | 0 | 0.037 |
+
+      Worst residual **0.038 mm**; a follow-up `status` read showed
+      exactly 50.000, i.e. the servo closes the rest after the move
+      returns. Worst Z-pair spread **0.020 mm**, and **0.0000 mm** at
+      50 mm depth.
+- [x] **RESOLVED: X's homing convention is correct as configured.**
+      `x_coord_invert = true` with `home_dir_x = 0x00` drove X *away*
+      from its limit and reached 50 mm exactly, so the cell's convention
+      holds on this bench and the open question from the earlier entry is
+      closed. `bridge.py` remains the odd one out (`0x00` with no invert)
+      and still looks untested for absolute X moves — not ours to fix,
+      but do not copy its X constants.
+- [x] **Tolerances set from measurement, no longer placeholders.**
+      `ARRIVAL_TOLERANCE_MM` and `Z_DESYNC_LIMIT_MM` 1.0 → **0.5 mm**
+      (~13x the worst residual, ~25x the worst spread), and the
+      scenario's `tolerance_mm` with them — the three must move together
+      or the cell and the scenario disagree about what "arrived" means.
+- [x] **Fixed a schema defect the dry run could not catch:**
+      `GantryMoveRequest.accel_pct` was `ge=1`, rejecting `accel_pct: 0`
+      with a 422 — but 0 is the MKS "no ramp" setting that both
+      `bridge.py` and the validated `CVMeasure.py` use. Now `ge=0`; the
+      identical defect in cell5's `ZStageMoveRequest` fixed too.
+      LearnedPatterns #25.
+- [x] L2 → L1 confirmed: `python -m orchestrator validate` against the
+      **live** cell1 server, 23 steps ok.
+- [x] Tests 66 passed, ruff clean.
+
+- [ ] **`demo_gantry_step.yaml` has not been run end-to-end yet.** The
+      operator is running it in `--step-mode` from their own terminal
+      (this session has no stdin, so the engine's `input()` gate cannot
+      be answered from here). Read the runlog under `runs/` afterwards
+      and record the per-step timings.
+- [ ] Extending past one 50 mm step per axis still needs the frame's real
+      travel measured, especially below Z. Raise `max_mm` and add a
+      step/verify pair per waypoint only after that.
+- [ ] The cell1 server currently runs from a shell, not systemd. Enable
+      `cell@nuc1-cell1` once the scenario has passed once.
+
+### CORRECTION: POT was not the cause — Pr5.04 disables over-travel entirely
+
+The entry above is wrong and the bench action it recommended (check the
+POT wiring on X4/SI2) is a waste of time. `POT(SI2)=0` is real, but:
+
+    Pr5.04 over-travel input setup = 1   (= inputs DISABLED / ignored)
+
+The amp does not look at POT or NOT at all, so their state cannot inhibit
+anything. I read the input frame, found an input that looked wrong, and
+stopped before asking whether the amp was configured to care.
+
+- [x] **The command path is healthy**, measured with the server stopped:
+      execution rights 20/20, `Pr3.04 <- 0` writes **30/30**, feedback
+      reads **30/30**. So the move command reaches the amp.
+- [x] **All motion parameters are correct**: Pr0.01=1 (speed mode),
+      Pr3.00=1 (internal speed), Pr3.04=0 at rest, SRV-ON input = 1.
+- [x] `move_relative` **discards the speed write's return value**
+      (LinearMotorController.py:776). That is a real defect and stays on
+      the list, but it is not this failure: the write is landing.
+- [ ] **So the amp accepts everything and does not drive.** That points
+      at the amp's own state rather than at the link or the software.
+      Two checks that need no protocol knowledge:
+      1. **Read the front-panel display.** It shows the alarm code
+         directly. An alarm disables the servo while leaving serial
+         parameter access working — exactly what is observed.
+      2. **Try to move the rail by hand.** Free = the servo is not
+         energised, whatever the SRV-ON *input* reads. Held = energised,
+         and the problem is the speed command itself.
+- [ ] Probing `cmd=2 mode=0` returned `[01 52 00]` and `cmd=0 mode=2`
+      returned `[10 16 00]`. These look like alarm/status registers, but
+      the byte layout is not documented in this repo — do not read
+      meaning into them without `MinasA6_driver_main.pdf`. Decoding them
+      properly would make this diagnosable over the wire instead of by
+      eye.
