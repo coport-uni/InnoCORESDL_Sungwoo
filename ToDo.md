@@ -357,3 +357,7 @@ was a TBD standalone item through spec v0.9.
       land it upstream.
 - [x] Submodule pins bumped: HotplateController -> 1c2bc8b,
       SmartPlugController -> 00ef6c6.
+- [x] ESP32S3BOX3MotorController forked to coport-uni (upstream write
+      access denied): fork PR #2 merged with the Cell 5 bench ToDo
+      entry (issue #1); submodule URL repointed to the fork in
+      .gitmodules + SUBMODULES.md; pin bumped 872df98 -> f5c8089.
