@@ -21,7 +21,7 @@ The four the cells depend on are **installable packages**, listed in
 |---|---|---|---|
 | `SyringePumpController/` | coport-uni/SyringePumpController | `sy01b` | SY-01B syringe pump. |
 | `PrecisionScaleController/` | coport-uni/PrecisionScaleController | `entris_ii` | Entris-II BCE224I balance (SBI). |
-| `ESP32S3BOX3MotorController/` | kkhyunhho/ESP32S3BOX3MotorController | `mks_motor` | MKS SERVO57D XZ gantry over FTDI USB2CAN (pyftdi). Carries the paired-Z interlock (`move_sync`, `home_xz`, `stop_group_hard`) and the limit-quirk handling `PumpGantryCell` requires. |
+| `ESP32S3BOX3MotorController/` | coport-uni/ESP32S3BOX3MotorController (fork of kkhyunhho/ESP32S3BOX3MotorController) | `mks_motor` | MKS SERVO57D XZ gantry over FTDI USB2CAN (pyftdi). Carries the paired-Z interlock (`move_sync`, `home_xz`, `stop_group_hard`) and the limit-quirk handling `PumpGantryCell` requires. Forked 2026-07-28 so bench notes can land (no write access upstream); sync from upstream when kkhyunhho advances. |
 | `LinearMotorController/` | coport-uni/LinearMotorController | `LinearMotorController` | MINAS A6 linear rail, RS485 standard protocol (`Pr5.37=0`) with the `PIDController` loop; `resolve_port` accepts a `"VID:PID"` string. |
 
 Not installed as packages — imported by path or not yet used:
