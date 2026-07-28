@@ -817,3 +817,36 @@ balance/weight : 30.0 s -> HTTP 500                       (both calls)
       both the wrong `serial_number` in `/v1/diagnose` earlier and this
       confusing diagnosis. The ID readers should reject lines that parse
       as weights instead of trusting arrival order.
+
+### Balance adapted to the bench: settling judged in software
+
+Operator set the panel to `COM.OUTP = AUTO.W/O` (automatic output
+*without* stability), so the balance now streams whether or not it
+considers itself settled, and the judgement moves into the driver.
+
+- [x] Confirmed the stream: **2.5 lines/s**, all numeric. Before the
+      change, 20 s of listening captured zero lines — `AUTO W/` only
+      speaks after the balance calls itself stable, which on this bench
+      never happened.
+- [x] `set_ambient("very_unstable")` measurably helps: sample spread over
+      15 s fell from **0.0095 g to 0.0036 g**.
+- [x] **Calibrated the settling tolerance against the bench.** Spread
+      across 3 consecutive readings: median 0.0006 g, p90 0.0015 g, max
+      0.0037 g. The driver's `SETTLE_TOLERANCE_G = 0.002` sits between
+      p90 and max — most reads converge at once, an occasional one waits
+      a beat. It was guessed at twice the datasheet jitter and the
+      measurement happens to endorse it; recording that it is now
+      measured rather than assumed.
+- [x] `read_settled_weight` on hardware: **5/5**, 1.2-3.2 s.
+- [x] **The 17 s tare is explained and gone.** `tare()` now measures
+      **0.1 ms**, as the protocol implies. The earlier 17 s was the
+      dead-stream state, where the reply queue had slipped a line — not
+      a property of tare at all.
+- [x] `BalanceLinearCell.read_weight` switched to `read_settled_weight`
+      with an explicit 30 s budget, deliberately under the scenarios'
+      40 s step timeout so the driver's timeout — which names
+      `AUTO.W/O` as the likely cause — fires before a generic one.
+- [x] Verified through L1: `balance/weight` **1.0-1.2 s, HTTP 200**
+      (previously 30 s then HTTP 500); `tare` 0.0015 s; a tare followed
+      by a read returns 0.0056 g, inside the scenario's `empty_g` 0.01.
+- [x] ruff clean, `pytest` 32 pass.

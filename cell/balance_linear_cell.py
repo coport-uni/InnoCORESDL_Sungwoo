@@ -42,6 +42,15 @@ class BalanceLinearConfig:
     ambient: str | None = None
 
 
+#: Budget for one settled weight read. Measured on this bench: 1.2-3.6 s
+#: to converge, so this is roughly eight times the worst observed case.
+#: Deliberately below the tightest `balance/weight` step timeout in the
+#: scenarios (40 s) so the driver's timeout fires first — its message
+#: names the likely cause ("is COM.OUTP set to AUTO.W/O?"), where a step
+#: timeout would only say the call was slow.
+SETTLE_TIMEOUT_S = 30.0
+
+
 def _no_pump() -> WrongStateError:
     # Defensive stub (mirror of PumpGantryCell._no_balance): this cell has no
     # pump, but the `Cell` protocol requires every method, so the pump methods
@@ -167,14 +176,23 @@ class BalanceLinearCell(Cell):
         return self._last_weight_g
 
     def read_weight(self) -> tuple[float, bool]:
-        # Settled read through the balance's stable-weight filter (AUTO W/).
-        # Flush first: the auto-push stream buffers values FIFO, so without
-        # this read_stable_weight returns a STALE pre-load-change reading (the
-        # old 0 g) sitting at the front of the buffer instead of the freshly
-        # settled weight now on the pan. Cache it so status() needn't block.
+        # Settling is judged here, not by the balance. This bench vibrates
+        # enough that the balance's own stability criterion was never met:
+        # under COM.OUTP = AUTO W/ it pushes only after it calls itself
+        # stable, so it simply went silent and every read timed out having
+        # received nothing. The panel is now on AUTO.W/O, which streams
+        # regardless, and read_settled_weight accepts a value once
+        # consecutive readings agree. Measured on this bench: 1.2-3.6 s to
+        # converge, against a 30 s timeout that was previously failing.
+        #
+        # Flush first: the stream buffers FIFO, so without this the read
+        # starts on values captured before the load changed.
         self._scale.flush_pending_reads()
-        reading = self._scale.read_stable_weight()
+        reading = self._scale.read_settled_weight(timeout=SETTLE_TIMEOUT_S)
         self._last_weight_g = float(reading.value)
+        # `stable` means "agreed with its neighbours to within the driver's
+        # tolerance", which is the only stability claim anyone can make on
+        # this bench -- not the balance's own verdict.
         return self._last_weight_g, True
 
     def set_ambient(self, level: str) -> str:
