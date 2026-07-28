@@ -771,3 +771,49 @@ chosen, at 2.0 mm.
       finer positioning *and* the RS485 link becomes dependable — or if
       the position-control mode is adopted, which would make the
       trade-off unnecessary.
+
+### Balance stopped auto-pushing; SBI reply queue is one behind
+
+Operator reported the tare step taking ~40 s. Measured through L1:
+
+```
+balance/tare   : 17.1 s (first call) / 0.001 s (second)   HTTP 200
+balance/weight : 30.0 s -> HTTP 500                       (both calls)
+```
+
+- [x] The 30 s failure is `read_stable_weight` hitting the driver's
+      `STABLE_READ_TIMEOUT_S`. What the operator experienced as a slow
+      tare is the `confirm_zero` step that follows it, not `tare`.
+- [x] **The balance is sending nothing at all.** Listening raw on
+      `/dev/ttyACM1` for 20 s captured **0 lines**. Under
+      `COM.OUTP = AUTO W/` it should push a value on every stability
+      event, so the auto-push stream is off — and `read_stable_weight`
+      is passive, so it waits forever by design.
+- [x] **The link is fine, but the reply queue is one behind.** Direct
+      commands answer with the *previous* command's response:
+
+      | command | reply |
+      |---|---|
+      | `get_model_number()` (`Esc x1_`) | `G     -   0.0003 g` |
+      | `get_serial_number()` (`Esc x2_`) | `Model  BCE224I-1SKR` |
+      | `Esc kP` | `SerNo.    0047304196` |
+
+      This is LearnedPatterns #13 — the driver trusts the first CR-LF
+      line it reads rather than matching the reply to the command. With
+      auto-push off there is no traffic to hide it, so the one-line skew
+      is now plainly visible instead of intermittent.
+- [ ] **Operator action**: check the front panel —
+      `DATA.OUT. -> COM. SBI -> COM.OUTP = AUTO W/` and
+      `SETUP -> BALANCE -> STAB.RNG = V.FAST`. Neither is settable over
+      SBI. The USB re-plug is the likely trigger.
+- [ ] **Then re-measure and set the balance step timeouts from data.**
+      `tare` is currently 30 s and `confirm_zero` 40 s, the latter
+      overlapping the driver's own 30 s so it is unclear which would
+      fire first. Deliberately not changed yet: the 17 s tare has no
+      explanation — `tare()` writes `Esc T` once and should cost ~25 ms
+      — and picking numbers before understanding that would just add
+      more unfounded constants.
+- [ ] **Fix #13 properly while here.** The queue skew is the root of
+      both the wrong `serial_number` in `/v1/diagnose` earlier and this
+      confusing diagnosis. The ID readers should reject lines that parse
+      as weights instead of trusting arrival order.
