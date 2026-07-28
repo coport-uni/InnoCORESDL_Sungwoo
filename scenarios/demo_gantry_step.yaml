@@ -1,0 +1,218 @@
+# cell1 XZ gantry bring-up: step each axis out 50 mm and back.
+#
+# This is the first scenario to drive cell1. It runs the gantry ALONE --
+# cell1's server is configured without its syringe pump (server/nuc1/
+# cell1.toml has no [pump] table), so every /v1/pump/* action would 409
+# and none is used here.
+#
+# SCOPE: one 50 mm step per axis, chosen by the operator for the first
+# run because the travel available below Z has not been measured. To
+# extend it later, raise `max_mm` and add a step/verify pair per
+# waypoint -- the scenario language has no loop, so each one is written
+# out. Do NOT raise it without re-confirming the frame's clearance.
+#
+# WHAT THIS ACTUALLY VERIFIES
+#   `gantry/move` returns the ENCODER READBACK, not the requested target,
+#   and raises if an axis did not arrive or if the paired Z motors ended
+#   apart (cell/pump_gantry_cell.py `_confirm`). So a 200 already means
+#   "the motor reported it is there". The asserts below add what the cell
+#   cannot check for itself: that the axis was at 0 before the step and
+#   at 50 after it, so the move is a real 50 mm of travel and not a
+#   position that happened to already be true.
+#
+# BEFORE THE FIRST RUN -- read these, they are not boilerplate:
+#   1. TRAVEL. Confirm BOTH axes have at least `max_mm` of free travel
+#      from their home end and nothing is mounted in the way. The
+#      driver's own ceiling, MKSMotor._max_travel_mm = 400 mm, is a
+#      software clamp, not a measurement of this frame.
+#   2. Z+ IS DOWNWARD. z = 0 mm is the retracted/up position (the cell
+#      moves Z to 0 before every X traverse), so the Z leg LOWERS the
+#      head by `max_mm`. Clear the deck underneath before running.
+#   3. E-STOP. Keep it in hand. /v1/stop hard-stops the whole gantry
+#      group (F7 to all three motors), but it is served under the same
+#      lock as the move in flight, so it queues behind it
+#      (docs/L1_AUDIT.md GAP-9). The physical stop is the only immediate
+#      one.
+#   4. PAIRED Z. Z_A and Z_B are mechanically coupled; if they desync the
+#      frame racks. Watch the Z step with your own eyes -- the software
+#      check (Z_DESYNC_LIMIT_MM) is a backstop, not a substitute.
+#   5. Run it in order: dry run -> step-mode -> free run.
+#        python -m orchestrator validate scenarios/demo_gantry_step.yaml
+#        python -m orchestrator run scenarios/demo_gantry_step.yaml --step-mode
+#        python -m orchestrator run scenarios/demo_gantry_step.yaml
+
+name: demo_gantry_step
+description: >
+  cell1's XZ gantry bring-up. Homes the gantry, steps X out 50 mm and
+  back, then does the same on Z, checking the measured encoder position
+  before and after every step. Single cell, no pump, no balance.
+
+params:
+  # The step under test, and -- for this first run -- also the furthest
+  # the frame is allowed from home.
+  step_mm: 50.0
+  max_mm: 50.0
+  # An axis is "there" if the encoder is within this of the target. Must
+  # not be tighter than the cell's own ARRIVAL_TOLERANCE_MM or a move the
+  # cell accepted would fail the assert that follows it — they are set to
+  # the same value on purpose and must be changed together.
+  # Measured across four completed runs on 2026-07-28 (20 waypoints, to
+  # 150 mm): worst residual 0.145 mm, worst increment error 0.094 mm.
+  # ~3.5x margin. The asserts below compare a DIFFERENCE of two readings,
+  # so both errors add -- which is why the increment figure is the one
+  # that bounds them.
+  tolerance_mm: 0.5
+  # Slow and gentle for a bring-up. MOVE_SPEED_PCT in the upstream
+  # bridge.py is 10 with accel 0; matching it here means this scenario
+  # moves the frame exactly as the driver's own reference script does.
+  speed_pct: 10
+  accel_pct: 0
+
+defaults:
+  on_fail: abort        # a motion step must never be retried blindly
+  timeout_s: 60.0
+
+steps:
+  # ── Pre-flight: is the gantry actually reachable? ──────────────────
+  - id: check_diagnose
+    cell: cell1
+    action: diagnose
+    method: GET
+    timeout_s: 15.0
+    save_as: diag
+
+  # diagnose() reads all three encoders, so stage.ok false means a motor
+  # is unpowered or off the CAN bus. Catching that here costs one HTTP
+  # call; catching it after `home` costs a homing run into an axis that
+  # was never listening.
+  - id: verify_gantry_reachable
+    assert: "${diag.stage.ok} == true"
+
+  # Guards the config, not the hardware: if a [pump] table ever comes
+  # back, this run is no longer the pumpless bring-up it claims to be.
+  - id: verify_no_pump_expected
+    assert: "${diag.pump.present} == false"
+
+  # ── Home: the origin every later assert is measured from ───────────
+  - id: home
+    cell: cell1
+    action: gantry/home
+    # Both Z then X, each a full seek to its switch. Measured 5.5 s from
+    # an already-homed start; kept well above that because the seek time
+    # scales with how far the axis happens to be from its switch, which
+    # after a power-up or a hand-moved frame can be the full travel.
+    timeout_s: 180.0
+    save_as: homed
+
+  - id: verify_home_x
+    assert: "${homed.x_mm} <= ${params.tolerance_mm} and ${homed.x_mm} >= 0 - ${params.tolerance_mm}"
+
+  - id: verify_home_z
+    assert: "${homed.z_mm} <= ${params.tolerance_mm} and ${homed.z_mm} >= 0 - ${params.tolerance_mm}"
+
+  # ── X axis: one 50 mm step out ─────────────────────────────────────
+  - id: x_step_out
+    cell: cell1
+    action: gantry/move
+    body:
+      x_mm: "${params.max_mm}"
+      z_mm: 0.0
+      speed_pct: "${params.speed_pct}"
+      accel_pct: "${params.accel_pct}"
+    save_as: x_out
+
+  # The travelled distance, not just the endpoint: measured-after minus
+  # measured-before must be one step_mm. An axis that was already at
+  # 50 mm, or one that never moved, fails this where a bare endpoint
+  # check would not.
+  - id: verify_x_stepped_50mm
+    assert: "${x_out.x_mm} - ${homed.x_mm} >= ${params.step_mm} - ${params.tolerance_mm} and ${x_out.x_mm} - ${homed.x_mm} <= ${params.step_mm} + ${params.tolerance_mm}"
+
+  # An independent witness: /v1/status re-reads the encoders rather than
+  # echoing what gantry/move just returned. If these two ever disagree,
+  # one of them is reporting a cached number and neither can be trusted.
+  - id: read_back_x
+    cell: cell1
+    action: status
+    method: GET
+    timeout_s: 15.0
+    save_as: at_x
+
+  - id: verify_status_agrees_x
+    assert: "${at_x.stage_x_mm} >= ${params.max_mm} - ${params.tolerance_mm} and ${at_x.stage_x_mm} <= ${params.max_mm} + ${params.tolerance_mm}"
+
+  # status() sets `error` when an axis is unread or the Z pair has
+  # drifted apart. Null here is the gantry saying both Z axes agree.
+  - id: verify_no_z_desync_after_x
+    assert: "${at_x.error} == null"
+
+  # ── X axis: the same step back ─────────────────────────────────────
+  # Reversing matters: the MKS firmware drops the first motion command
+  # issued while a limit switch is closed, and a backlash or direction
+  # bug only shows up on the return leg.
+  - id: x_step_back
+    cell: cell1
+    action: gantry/move
+    body:
+      x_mm: 0.0
+      z_mm: 0.0
+      speed_pct: "${params.speed_pct}"
+      accel_pct: "${params.accel_pct}"
+    save_as: x_back
+
+  - id: verify_x_returned_50mm
+    assert: "${x_out.x_mm} - ${x_back.x_mm} >= ${params.step_mm} - ${params.tolerance_mm} and ${x_out.x_mm} - ${x_back.x_mm} <= ${params.step_mm} + ${params.tolerance_mm}"
+
+  - id: verify_x_back_at_origin
+    assert: "${x_back.x_mm} <= ${params.tolerance_mm} and ${x_back.x_mm} >= 0 - ${params.tolerance_mm}"
+
+  # ── Z axis: one 50 mm step DOWN, then back up ──────────────────────
+  # X is already at 0, so each of these is a straight Z move (the cell
+  # only inserts an up-X-down sequence when the X target changes).
+  - id: z_step_out
+    cell: cell1
+    action: gantry/move
+    body:
+      x_mm: 0.0
+      z_mm: "${params.max_mm}"
+      speed_pct: "${params.speed_pct}"
+      accel_pct: "${params.accel_pct}"
+    save_as: z_out
+
+  - id: verify_z_stepped_50mm
+    assert: "${z_out.z_mm} - ${x_back.z_mm} >= ${params.step_mm} - ${params.tolerance_mm} and ${z_out.z_mm} - ${x_back.z_mm} <= ${params.step_mm} + ${params.tolerance_mm}"
+
+  - id: read_back_z
+    cell: cell1
+    action: status
+    method: GET
+    timeout_s: 15.0
+    save_as: at_z
+
+  # stage_z_mm is the MEAN of the two Z encoders, so this also fails if
+  # one of the pair stopped short and dragged the average with it.
+  - id: verify_status_agrees_z
+    assert: "${at_z.stage_z_mm} >= ${params.max_mm} - ${params.tolerance_mm} and ${at_z.stage_z_mm} <= ${params.max_mm} + ${params.tolerance_mm}"
+
+  - id: verify_no_z_desync_at_depth
+    assert: "${at_z.error} == null"
+
+  # ── Park at the origin ─────────────────────────────────────────────
+  - id: z_step_back
+    cell: cell1
+    action: gantry/move
+    body:
+      x_mm: 0.0
+      z_mm: 0.0
+      speed_pct: "${params.speed_pct}"
+      accel_pct: "${params.accel_pct}"
+    save_as: parked
+
+  - id: verify_z_returned_50mm
+    assert: "${z_out.z_mm} - ${parked.z_mm} >= ${params.step_mm} - ${params.tolerance_mm} and ${z_out.z_mm} - ${parked.z_mm} <= ${params.step_mm} + ${params.tolerance_mm}"
+
+  - id: verify_parked_x
+    assert: "${parked.x_mm} <= ${params.tolerance_mm} and ${parked.x_mm} >= 0 - ${params.tolerance_mm}"
+
+  - id: verify_parked_z
+    assert: "${parked.z_mm} <= ${params.tolerance_mm} and ${parked.z_mm} >= 0 - ${params.tolerance_mm}"
