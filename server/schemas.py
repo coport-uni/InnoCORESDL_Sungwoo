@@ -34,7 +34,7 @@ class StatusResponse(BaseModel):
     stage_z_mm: float
     busy: bool
     error: str | None
-    # Cell D (cell5) only; None on cells without those devices. The
+    # Cell 5 (cell5) only; None on cells without those devices. The
     # heating/stirring flags are the last commanded state — the RCT
     # digital protocol offers no readback.
     hotplate_c: float | None = None
@@ -144,7 +144,7 @@ class LinearResponse(BaseModel):
     y_mm: float
 
 
-# ── Z stage (single Z) — Cell D / cell5 ──────────────────────────────────────
+# ── Z stage (single Z) — Cell 5 / cell5 ──────────────────────────────────────
 # A separate action set from the gantry: no X target, and no paired-Z
 # group interlock (one motor).
 
@@ -159,7 +159,7 @@ class ZStageResponse(BaseModel):
     z_mm: float
 
 
-# ── Hotplate (IKA RCT digital) — Cell D / cell5 ──────────────────────────────
+# ── Hotplate (IKA RCT digital) — Cell 5 / cell5 ──────────────────────────────
 
 
 class HotplateStateResponse(BaseModel):
@@ -212,7 +212,7 @@ class StirrerResponse(BaseModel):
     target_rpm: float
 
 
-# ── Lamp (IR lamp on a Tapo plug) — Cell D / cell5 ───────────────────────────
+# ── Lamp (IR lamp on a Tapo plug) — Cell 5 / cell5 ───────────────────────────
 
 
 class LampRequest(BaseModel):

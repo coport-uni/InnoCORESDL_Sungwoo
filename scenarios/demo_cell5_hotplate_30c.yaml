@@ -1,0 +1,88 @@
+# Cell 5 (cell5) demo 2/3: heat the plate toward 30 °C for 10 seconds.
+#
+# Sets the setpoint, starts the heater, holds 10 s (`wait_s`, spec
+# section 8.1), reads the plate back, and stops the heater. Ten seconds
+# will not necessarily REACH 30 °C — the run verifies the setpoint took
+# and that the heater was commanded for the whole hold, not the final
+# plate temperature. `heating` is the last commanded state; the RCT
+# digital protocol has no readback for it.
+#
+# Field names from server/schemas.py:
+#   hotplate/temperature -> {celsius}
+#   hotplate/heater      -> {enabled}
+#   hotplate/state       -> GET (read-only, never gated)
+#
+# The heater is the hazard here: the first hotplate/ step waits for the
+# operator's confirmation. Stay at the bench for the whole run.
+#
+#   python -m orchestrator validate scenarios/demo_cell5_hotplate_30c.yaml
+#   python -m orchestrator run scenarios/demo_cell5_hotplate_30c.yaml
+
+name: cell5_hotplate_30c
+description: >
+  Set Cell 5's hotplate to 30 C, heat for ten seconds, log the plate
+  temperature, and leave the heater off.
+
+params:
+  warm_c: 30.0
+  soak_s: 10.0
+
+defaults:
+  on_fail: abort
+  timeout_s: 15.0
+
+steps:
+  - id: read_before
+    cell: cell5
+    action: hotplate/state
+    method: GET
+    save_as: before
+
+  - id: set_setpoint
+    cell: cell5
+    action: hotplate/temperature
+    body:
+      celsius: "${params.warm_c}"
+    save_as: setpoint
+
+  - id: verify_setpoint
+    assert: "${setpoint.target_c} == ${params.warm_c}"
+
+  - id: heat_on
+    cell: cell5
+    action: hotplate/heater
+    body:
+      enabled: true
+    save_as: heating
+
+  - id: verify_heating
+    assert: "${heating.heating} == True"
+
+  - id: soak
+    wait_s: "${params.soak_s}"
+
+  - id: read_after
+    cell: cell5
+    action: hotplate/state
+    method: GET
+    save_as: after
+
+  # The plate must not have COOLED while the heater was on, and the
+  # setpoint must still be what we commanded.
+  - id: verify_soak
+    assert: >-
+      ${after.heating} == True and
+      ${after.target_c} == ${params.warm_c} and
+      ${after.plate_c} >= ${before.plate_c} - 0.5
+
+  # `save_as: off` would be YAML-1.1-parsed to boolean False, exactly
+  # like the `on:` key trap (LearnedPatterns #8) — hence `stopped`.
+  - id: heat_off
+    cell: cell5
+    action: hotplate/heater
+    body:
+      enabled: false
+    save_as: stopped
+
+  - id: verify_off
+    assert: "${stopped.heating} == False"

@@ -1,0 +1,161 @@
+# Cell 5 (cell5) FINAL bench demo — the full user-specified sequence
+# (2026-07-28): motion first, thermal second, everything off at the end.
+#
+#   1. Home the Z axis.
+#   2. Move to z_top_mm (400 mm on this bench).
+#   3. Return home.
+#   4. IR lamp on + hotplate to 40 C; wait until the plate arrives
+#      (`until:` poll, 1.0 C tolerance — the RCT reports whole degrees
+#      and regulates just under the setpoint, LearnedPatterns #14),
+#      then HOLD at temperature for two minutes (`wait_s`).
+#   5. Heater off, lamp off, both verified.
+#
+# Safety:
+# - Motion and heat are sequential, never simultaneous: the Z axis is
+#   parked at home before the lamp or heater energize.
+# - The first hazard step (home_z) waits for the operator gate. Stay at
+#   the bench for the WHOLE run; e-stop in reach.
+# - Any failure aborts and broadcasts /v1/stop, which on Cell 5 also
+#   kills the heater and the lamp.
+#
+#   python -m orchestrator validate scenarios/demo_cell5_final.yaml
+#   python -m orchestrator run scenarios/demo_cell5_final.yaml
+
+name: cell5_final
+description: >
+  Cell 5 full demo: home Z, stroke to 400 mm and back, then lamp +
+  hotplate to 40 C, hold two minutes at temperature, and shut both
+  down verified.
+
+params:
+  z_top_mm: 400.0
+  speed_pct: 20
+  accel_pct: 10
+  hot_c: 40.0
+  tol_c: 1.0         # RCT readback granularity + control band (LP #14)
+  hold_s: 120.0      # dwell at temperature
+
+defaults:
+  on_fail: abort
+  timeout_s: 15.0
+
+steps:
+  # ── 1. Home ──────────────────────────────────────────────────────────
+  - id: check_status
+    cell: cell5
+    action: status
+    method: GET
+    timeout_s: 5.0
+    save_as: pre
+
+  - id: home_z
+    cell: cell5
+    action: zstage/home
+    timeout_s: 120.0
+    save_as: homed
+
+  - id: verify_home
+    assert: "${homed.z_mm} == 0.0"
+
+  # ── 2. Stroke out ────────────────────────────────────────────────────
+  - id: z_up
+    cell: cell5
+    action: zstage/move
+    body:
+      z_mm: "${params.z_top_mm}"
+      speed_pct: "${params.speed_pct}"
+      accel_pct: "${params.accel_pct}"
+    timeout_s: 120.0   # 50 mm took 3.6 s on this bench; 400 mm ~ 30 s
+    save_as: top
+
+  - id: verify_top
+    assert: "${top.z_mm} == ${params.z_top_mm}"
+
+  # ── 3. Return home (physically verified, not just bookkeeping) ──────
+  - id: z_return
+    cell: cell5
+    action: zstage/home
+    timeout_s: 180.0
+    save_as: returned
+
+  - id: verify_return
+    assert: "${returned.z_mm} == 0.0"
+
+  # ── 4. Lamp + heat to 40 C, then hold ───────────────────────────────
+  - id: lamp_on
+    cell: cell5
+    action: lamp/switch
+    body:
+      enabled: true
+    save_as: lamp
+
+  - id: verify_lamp_on
+    assert: "${lamp.is_on} == True"
+
+  - id: set_setpoint
+    cell: cell5
+    action: hotplate/temperature
+    body:
+      celsius: "${params.hot_c}"
+    save_as: setpoint
+
+  - id: verify_setpoint
+    assert: "${setpoint.target_c} == ${params.hot_c}"
+
+  - id: heat_on
+    cell: cell5
+    action: hotplate/heater
+    body:
+      enabled: true
+    save_as: heating
+
+  - id: verify_heating
+    assert: "${heating.heating} == True"
+
+  - id: wait_hot
+    cell: cell5
+    action: hotplate/state
+    method: GET
+    until: "${result.plate_c} >= ${params.hot_c} - ${params.tol_c}"
+    poll_s: 5.0
+    timeout_s: 900.0
+    save_as: reached
+
+  # The two-minute dwell: heater stays commanded on, the RCT regulates
+  # at the setpoint, and an abort cuts the hold short immediately.
+  - id: hold_at_temp
+    wait_s: "${params.hold_s}"
+
+  # Still at temperature after the hold — the dwell really happened at
+  # 40 C, not on a cooling plate.
+  - id: read_after_hold
+    cell: cell5
+    action: hotplate/state
+    method: GET
+    save_as: after_hold
+
+  - id: verify_held
+    assert: >-
+      ${after_hold.plate_c} >= ${params.hot_c} - ${params.tol_c} and
+      ${after_hold.heating} == True
+
+  # ── 5. Everything off, verified ─────────────────────────────────────
+  - id: heat_off
+    cell: cell5
+    action: hotplate/heater
+    body:
+      enabled: false
+    save_as: heater_off
+
+  - id: verify_heat_off
+    assert: "${heater_off.heating} == False"
+
+  - id: lamp_off
+    cell: cell5
+    action: lamp/switch
+    body:
+      enabled: false
+    save_as: lamp_off
+
+  - id: verify_lamp_off
+    assert: "${lamp_off.is_on} == False"

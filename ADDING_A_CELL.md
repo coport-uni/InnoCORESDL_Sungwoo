@@ -81,7 +81,7 @@ Rules:
   attempts motor, pump, heater, stirrer and lamp, and reports whatever did
   not stop instead of giving up at the first failure.
 
-**Worked example — Cell D (cell5).** Four devices in one cell (pump +
+**Worked example — Cell 5 (cell5).** Four devices in one cell (pump +
 single Z + hotplate + IR lamp), three brand-new action sets, added in one
 pass: `cell/pump_z_thermal_cell.py`, the `zstage`/`hotplate`/`lamp` routes
 and schemas, `_load_pump_z_thermal()` + `--cell pump_z_thermal`,

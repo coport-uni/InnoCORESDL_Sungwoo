@@ -1,0 +1,97 @@
+# Cell 5 (cell5) demo 1/3: blink the IR lamp for ~5 seconds.
+#
+# Three on/off cycles paced by `wait_s` holds (the local no-device step;
+# spec section 8.1) — 6 switch calls x ~0.8 s hold ≈ 5 s of blinking on
+# top of the plug's own LAN switching latency. There is no loop construct
+# in the scenario language, so the cycles are written out.
+#
+# Field names from server/schemas.py: lamp/switch -> {enabled}
+# (NOT {on}: YAML 1.1 resolves a bare `on:` key to boolean True,
+# LearnedPatterns #8).
+#
+# The lamp is a heat source. The first lamp/switch waits for the
+# operator's confirmation (hazard prefix "lamp/"); keep the area around
+# the IR lamp clear before confirming.
+#
+#   python -m orchestrator validate scenarios/demo_cell5_lamp_blink.yaml
+#   python -m orchestrator run scenarios/demo_cell5_lamp_blink.yaml
+
+name: cell5_lamp_blink
+description: >
+  Blink Cell 5's IR lamp three times over about five seconds, verify the
+  plug reports the commanded state, and leave the lamp off.
+
+params:
+  blink_hold_s: 0.8
+
+defaults:
+  on_fail: abort
+  timeout_s: 15.0
+
+steps:
+  - id: check_lamp_reachable
+    cell: cell5
+    action: lamp/state
+    method: GET
+    timeout_s: 10.0
+    save_as: pre
+
+  - id: blink1_on
+    cell: cell5
+    action: lamp/switch
+    body:
+      enabled: true
+    save_as: b1on
+
+  - id: verify_on
+    assert: "${b1on.is_on} == True"
+
+  - id: hold1_on
+    wait_s: "${params.blink_hold_s}"
+
+  - id: blink1_off
+    cell: cell5
+    action: lamp/switch
+    body:
+      enabled: false
+
+  - id: hold1_off
+    wait_s: "${params.blink_hold_s}"
+
+  - id: blink2_on
+    cell: cell5
+    action: lamp/switch
+    body:
+      enabled: true
+
+  - id: hold2_on
+    wait_s: "${params.blink_hold_s}"
+
+  - id: blink2_off
+    cell: cell5
+    action: lamp/switch
+    body:
+      enabled: false
+
+  - id: hold2_off
+    wait_s: "${params.blink_hold_s}"
+
+  - id: blink3_on
+    cell: cell5
+    action: lamp/switch
+    body:
+      enabled: true
+
+  - id: hold3_on
+    wait_s: "${params.blink_hold_s}"
+
+  - id: blink3_off
+    cell: cell5
+    action: lamp/switch
+    body:
+      enabled: false
+    save_as: last
+
+  # Never leave the run with the IR lamp energized.
+  - id: verify_off
+    assert: "${last.is_on} == False"

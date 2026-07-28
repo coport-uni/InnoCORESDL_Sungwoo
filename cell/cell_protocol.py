@@ -6,7 +6,7 @@ devices behind one interface. Three implementations satisfy the
 
 * :class:`PumpGantryCell` (cell1–3) — pump + XZ gantry.
 * :class:`BalanceLinearCell` (cell4) — balance + linear Y rail.
-* :class:`PumpZThermalCell` (cell5, Cell D) — pump + single Z stage +
+* :class:`PumpZThermalCell` (cell5, Cell 5) — pump + single Z stage +
   hotplate + IR lamp on a Tapo plug.
 
 All three drive real drivers opened at the bench; verification is
@@ -109,7 +109,7 @@ class Cell(Protocol):
     # different motor, axis, and wire protocol (see ARCHITECTURE.md).
     def home_linear(self) -> float: ...
     def move_linear(self, y_mm: float) -> float: ...
-    # Z-stage actions (a SINGLE Z axis, no X) — Cell D / cell5. Its own set
+    # Z-stage actions (a SINGLE Z axis, no X) — Cell 5 / cell5. Its own set
     # rather than a reuse of the gantry: the gantry signature carries an X
     # target and its motion goes through the paired-Z group interlock, and
     # this cell has neither. Same driver family (mks_motor over CAN), one
@@ -118,7 +118,7 @@ class Cell(Protocol):
     def move_zstage(
         self, z_mm: float, *, speed_pct: int, accel_pct: int
     ) -> float: ...
-    # Hotplate actions (IKA RCT digital) — Cell D / cell5. ``heating`` and
+    # Hotplate actions (IKA RCT digital) — Cell 5 / cell5. ``heating`` and
     # ``stirring`` are the last commanded state: the RCT protocol offers no
     # readback for either.
     def read_hotplate(self) -> dict: ...
@@ -126,7 +126,7 @@ class Cell(Protocol):
     def set_hotplate_heater(self, *, enabled: bool) -> dict: ...
     def set_hotplate_speed(self, rpm: float) -> float: ...
     def set_hotplate_stirrer(self, *, enabled: bool) -> dict: ...
-    # Lamp actions (IR lamp on a Tapo plug) — Cell D / cell5. The only
+    # Lamp actions (IR lamp on a Tapo plug) — Cell 5 / cell5. The only
     # network-attached device in any cell; still owned by exactly one cell.
     def read_lamp(self) -> dict: ...
     def set_lamp(self, *, enabled: bool) -> dict: ...

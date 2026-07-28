@@ -1,0 +1,116 @@
+# Cell 5 (cell5) bench run: lamp on, heat to 40 C, then everything off.
+#
+# The user-specified sequence (2026-07-28): switch the IR lamp on, heat
+# the plate toward 40 C, and the moment the plate REACHES 40 C, shut
+# both the heater and the lamp down. "Reaches" is the `until:` poll
+# (spec section 8.1): the hotplate/state GET repeats every poll_s until
+# `${result.plate_c} >= ${params.hot_c}`, bounded by its timeout_s.
+#
+# Safety:
+# - [hotplate] max_celsius in server/nuc2/cell5.toml is 60 C; 40 C is
+#   inside it. The cell rejects anything above the ceiling with a 400.
+# - The first hazard step (lamp_on) waits for the operator's
+#   confirmation. Stay at the bench for the WHOLE run -- this scenario
+#   energizes a heater and an IR lamp at the same time.
+# - If the poll times out or any step fails, on_fail: abort ends the
+#   run and the orchestrator broadcasts /v1/stop, which on Cell 5 kills
+#   the heater, the stirrer, and the lamp (cell/pump_z_thermal_cell.py
+#   stop()). The physical e-stop stays the primary stop regardless.
+#
+#   python -m orchestrator validate scenarios/demo_cell5_lamp_heat_40c.yaml
+#   python -m orchestrator run scenarios/demo_cell5_lamp_heat_40c.yaml
+
+name: cell5_lamp_heat_40c
+description: >
+  Switch Cell 5's IR lamp on, heat the plate to 40 C, and shut the
+  heater and the lamp down as soon as the plate reaches temperature.
+
+params:
+  hot_c: 40.0
+  # Bench finding (2026-07-28): the RCT's serial readback reports whole
+  # degrees and its control loop holds JUST under the setpoint — the
+  # front panel already rounds to 40 while IN_PV_1 still says 39.0, so
+  # a strict `>= 40.0` never fires. "Reached" therefore means within
+  # this tolerance of the target.
+  tol_c: 1.0
+
+defaults:
+  on_fail: abort
+  timeout_s: 15.0
+
+steps:
+  - id: read_before
+    cell: cell5
+    action: hotplate/state
+    method: GET
+    save_as: before
+
+  - id: lamp_on
+    cell: cell5
+    action: lamp/switch
+    body:
+      enabled: true
+    save_as: lamp
+
+  - id: verify_lamp_on
+    assert: "${lamp.is_on} == True"
+
+  - id: set_setpoint
+    cell: cell5
+    action: hotplate/temperature
+    body:
+      celsius: "${params.hot_c}"
+    save_as: setpoint
+
+  - id: verify_setpoint
+    assert: "${setpoint.target_c} == ${params.hot_c}"
+
+  - id: heat_on
+    cell: cell5
+    action: hotplate/heater
+    body:
+      enabled: true
+    save_as: heating
+
+  - id: verify_heating
+    assert: "${heating.heating} == True"
+
+  # The wait-for-temperature: poll the read-only state until the plate
+  # reaches the target. timeout_s bounds the WHOLE poll here (from
+  # ~23 C ambient the RCT reaches 40 C well inside 900 s). poll_s and
+  # timeout_s are engine numbers, not interpolated -- ${...} does not
+  # work in them.
+  - id: wait_hot
+    cell: cell5
+    action: hotplate/state
+    method: GET
+    until: "${result.plate_c} >= ${params.hot_c} - ${params.tol_c}"
+    poll_s: 5.0
+    timeout_s: 900.0
+    save_as: reached
+
+  # Shutdown, heater first (the greater hazard), then the lamp.
+  - id: heat_off
+    cell: cell5
+    action: hotplate/heater
+    body:
+      enabled: false
+    save_as: heater_off
+
+  - id: verify_heat_off
+    assert: "${heater_off.heating} == False"
+
+  - id: lamp_off
+    cell: cell5
+    action: lamp/switch
+    body:
+      enabled: false
+    save_as: lamp_off
+
+  - id: verify_lamp_off
+    assert: "${lamp_off.is_on} == False"
+
+  # The plate really did get there: the saved poll result is at or
+  # within tolerance of the target.
+  - id: verify_reached
+    assert: "${reached.plate_c} >= ${params.hot_c} - ${params.tol_c}"

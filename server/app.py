@@ -75,14 +75,14 @@ def create_app(cell_factory: CellFactory | None = None) -> FastAPI:
             {
                 "name": "ZStage",
                 "description": (
-                    "Cell D's single Z axis (one MKS SERVO57D). Separate "
+                    "Cell 5's single Z axis (one MKS SERVO57D). Separate "
                     "from the gantry: no X target, no paired-Z group."
                 ),
             },
             {
                 "name": "Hotplate",
                 "description": (
-                    "Cell D's IKA RCT digital: setpoint, heater, stirrer. "
+                    "Cell 5's IKA RCT digital: setpoint, heater, stirrer. "
                     "Heating is unattended-motion's thermal twin — the "
                     "operator stays at the bench."
                 ),
@@ -90,14 +90,14 @@ def create_app(cell_factory: CellFactory | None = None) -> FastAPI:
             {
                 "name": "Lamp",
                 "description": (
-                    "Cell D's IR lamp, switched through its Tapo plug "
+                    "Cell 5's IR lamp, switched through its Tapo plug "
                     "over the LAN."
                 ),
             },
             {
                 "name": "Safety",
                 "description": (
-                    "Abort now. On Cell D this also stops the heater, the "
+                    "Abort now. On Cell 5 this also stops the heater, the "
                     "stirrer and the lamp."
                 ),
             },
