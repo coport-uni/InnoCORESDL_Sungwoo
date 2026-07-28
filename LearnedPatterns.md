@@ -237,3 +237,65 @@ format below. Newest entries at the bottom.
   waits on before you believe it — and prove it with a timestamped probe
   against a deliberately slow operation, which costs nothing and needs no
   hardware.
+
+## 10. This NUC's Python needs a bootstrap: no `sdl` env, conda blocked by ToS, `python3-venv` missing
+
+- **Problem**: `pip install -r requirements.txt` had nowhere to go on
+  NUC2: no `sdl` conda env exists, `conda create` fails until Anaconda's
+  channel Terms of Service are accepted (a licensing decision, not a
+  technical one), the Debian `python3` is PEP 668 externally-managed, and
+  `python3 -m venv` fails because the `python3-venv` apt package (bundled
+  `ensurepip`) is not installed — and installing it needs sudo.
+- **Cause**: Bare-metal NUC image with stock Debian Python plus a
+  personal Anaconda install; none of the documented paths (`conda
+  activate sdl`) exist on this machine.
+- **Fix**: `python3.12 -m venv --without-pip .venv`, then bootstrap pip
+  with `curl -sSL https://bootstrap.pypa.io/get-pip.py |
+  .venv/bin/python -`, then `.venv/bin/pip install -r requirements.txt`.
+  `.venv/` is already gitignored.
+- **Rule**: `--without-pip` + get-pip.py turns a venv-less Debian Python
+  into a working venv with no sudo and no conda. Check `.venv/bin/python
+  -V` matches the project's floor (3.12) before installing.
+
+## 11. The Tapo plug's IP drifts; the fix belongs in the cell, not the submodule
+
+- **Problem**: Cell D's IR-lamp plug answers at 192.168.0.237, but the
+  driver's `device_list.md` (inside the `SmartPlugController` submodule)
+  still says 192.168.1.239 — `resolve_targets()` matched nothing and the
+  lamp was unreachable by name or by its real IP.
+- **Cause**: The plug is on DHCP and the bench moved to the 192.168.0.x
+  subnet. The device list lives *inside the submodule*, and CLAUDE.md
+  forbids local-only edits under `external/` — so the obvious one-line
+  fix was the wrong one.
+- **Fix**: `PumpZThermalCell._resolve_lamp()`: when `lamp_target` parses
+  as an IP address and matches no list entry, the cell synthesises a
+  `DeviceEntry` for it. The bench config (`server/nuc2/cell5.toml`) sets
+  `target = "192.168.0.237"`; the submodule stays untouched.
+- **Rule**: Bench-local facts (IPs, serials, ports) go in the gitignored
+  cell config, never into a submodule's tracked files. When a driver's
+  registry file can go stale, give the cell a config-driven escape hatch
+  and record the current value in the `.example` as a comment.
+
+## 12. The RCT digital's USB interface wedges under sustained polling — and only power does what reset cannot
+
+- **Problem**: During Cell D bring-up, `hotplate/state` (six serial
+  queries per call) failed 8/10 under a tight loop; continued probing
+  then silenced the device completely — even raw `IN_NAME` at correct
+  7E1 framing got nothing — and finally `0483:5740` vanished from the
+  USB bus. `usb.core`'s device reset and replugging the cable did not
+  bring it back.
+- **Cause**: The `ika` package sends with a fixed 0.1 s post-write
+  sleep, never flushes the input buffer, and never retries. One late
+  reply desyncs every following exchange, and continued pressure
+  crashes the RCT's USB CDC firmware outright. A crashed CDC interface
+  does not respond to a USB bus reset; it needs the device's own power
+  to cycle.
+- **Fix**: Upstream `HotplateController` PR #8 (`fix/serial-robustness`,
+  pinned here at 2f3b8d6): 0.25 s minimum gap between exchanges, input
+  flush before each, one retry after 0.3 s. Recovery procedure: hotplate
+  power off → replug USB → power on; then re-apply device-node
+  permissions (a replug resets them).
+- **Rule**: Never poll the RCT back-to-back — keep ≥0.25 s between
+  serial exchanges, and treat "device stopped answering" as a firmware
+  wedge: stop querying immediately and power-cycle the device instead
+  of retrying harder.

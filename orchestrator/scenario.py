@@ -115,6 +115,10 @@ class AssertSyntaxError(ValueError):
     """Raised when an ``assert:`` expression is not a plain comparison."""
 
 
+class WaitValueError(ValueError):
+    """Raised when a ``wait_s:`` does not resolve to a positive number."""
+
+
 class _Unknown:
     """Placeholder for a value only known at run time (validate only)."""
 
@@ -149,7 +153,8 @@ class StepDefaults(BaseModel):
 
 
 class Step(BaseModel):
-    """One scenario item: a cell call, an assertion, or a parallel block."""
+    """One scenario item: a cell call, an assertion, a timed wait, or a
+    parallel block."""
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -163,6 +168,11 @@ class Step(BaseModel):
     on_fail: OnFail | None = None
     retries: int | None = Field(default=None, ge=0)
     assert_expr: str | None = Field(default=None, alias="assert")
+    #: Local hold: sleep this many seconds without touching any cell.
+    #: A float, or a ``${...}`` string resolved at run time. The scenario
+    #: language had no way to express "hold the heater for 10 s" —
+    #: every timed hold used to be the operator's job in --step-mode.
+    wait_s: float | str | None = None
     parallel: list[Step] | None = None
 
     @model_validator(mode="after")
@@ -170,13 +180,16 @@ class Step(BaseModel):
         kinds = [
             bool(self.cell or self.action),
             self.assert_expr is not None,
+            self.wait_s is not None,
             self.parallel is not None,
         ]
         if sum(kinds) != 1:
             raise ValueError(
                 "a step must be exactly one of: a cell call (cell + "
-                "action), an 'assert', or a 'parallel' block"
+                "action), an 'assert', a 'wait_s', or a 'parallel' block"
             )
+        if isinstance(self.wait_s, float) and self.wait_s <= 0:
+            raise ValueError("'wait_s' must be a positive number")
         if self.parallel is not None:
             if not self.parallel:
                 raise ValueError("'parallel' needs at least one child step")
@@ -194,11 +207,13 @@ class Step(BaseModel):
 
     @property
     def kind(self) -> str:
-        """``call`` | ``assert`` | ``parallel``."""
+        """``call`` | ``assert`` | ``wait`` | ``parallel``."""
         if self.parallel is not None:
             return "parallel"
         if self.assert_expr is not None:
             return "assert"
+        if self.wait_s is not None:
+            return "wait"
         return "call"
 
     def children(self) -> list[Step]:
@@ -595,6 +610,55 @@ async def validate_scenario(
     return issues
 
 
+def resolve_wait_s(step: Step, context: dict[str, Any]) -> float:
+    """Resolve a wait step's duration to concrete positive seconds.
+
+    Args:
+        step: A ``wait`` step.
+        context: Variable context for ``${...}`` resolution.
+
+    Returns:
+        The number of seconds to hold.
+
+    Raises:
+        VariableError: A placeholder names an undefined variable.
+        WaitValueError: The resolved value is not a positive number.
+    """
+    assert step.wait_s is not None
+    value = resolve(step.wait_s, context)
+    if isinstance(value, _Unknown):
+        raise WaitValueError(f"step {step.id!r}: wait_s is unresolved")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise WaitValueError(
+            f"step {step.id!r}: wait_s must be a number, got {value!r}"
+        )
+    if value <= 0:
+        raise WaitValueError(
+            f"step {step.id!r}: wait_s must be positive, got {value!r}"
+        )
+    return float(value)
+
+
+def _check_wait(step: Step, context: dict[str, Any]) -> list[ValidationIssue]:
+    """Dry-run check of a wait step's duration, where it is knowable.
+
+    A duration that hangs off a run-time variable (:data:`UNKNOWN`) is
+    checked for presence only, like an unknown body field.
+    """
+    assert step.wait_s is not None
+    try:
+        value = resolve(step.wait_s, context)
+    except VariableError:
+        return []  # already reported as var_order above
+    if isinstance(value, _Unknown):
+        return []
+    try:
+        resolve_wait_s(step, context)
+    except WaitValueError as exc:
+        return [ValidationIssue("body_mismatch", step.id, str(exc))]
+    return []
+
+
 def _check_parallel_cells(step: Step, index: int) -> list[ValidationIssue]:
     seen: set[str] = set()
     issues: list[ValidationIssue] = []
@@ -623,12 +687,20 @@ async def _validate_leaf(
     reported: set[str],
 ) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
-    source = step.body if step.kind == "call" else step.assert_expr
+    if step.kind == "call":
+        source: Any = step.body
+    elif step.kind == "wait":
+        source = step.wait_s
+    else:
+        source = step.assert_expr
     for path in sorted(referenced_paths(source)):
         try:
             lookup(path, context)
         except VariableError as exc:
             issues.append(ValidationIssue("var_order", step.id, str(exc)))
+    if step.kind == "wait":
+        issues.extend(_check_wait(step, context))
+        return issues
     if step.kind != "call":
         return issues
 

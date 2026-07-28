@@ -1,0 +1,134 @@
+# Cell D (cell5) demo 3/3: home the Z axis, then run top-to-bottom
+# three times.
+#
+# The single MKS SERVO57D homes to its limit (0 mm), then cycles
+# 0 -> z_top_mm -> 0 three times. Moves go through the cell's zstage
+# actions, which drive the mks_motor GROUP helpers (home_sync /
+# move_sync) — the only path with the _is_at_limit() pre-send that
+# absorbs the firmware's "first motion command after a limit stop is
+# dropped" quirk (CLAUDE.md Folder-specific rules #3). Each move blocks
+# until motion completes, so no wait_s is needed between strokes.
+#
+# z_top_mm is a PLACEHOLDER TRAVEL — 10 mm until the operator measures
+# the real safe stroke of this bench. Override without editing the file:
+#   python -m orchestrator run scenarios/demo_cell_d_z_cycles.yaml \
+#       --param z_top_mm=50.0
+#
+# THIS MOVES A MOTOR. The first zstage/ step waits for the operator's
+# confirmation; clear the frame and keep the e-stop in reach.
+#
+#   python -m orchestrator validate scenarios/demo_cell_d_z_cycles.yaml
+#   python -m orchestrator run scenarios/demo_cell_d_z_cycles.yaml --step-mode
+
+name: cell_d_z_cycles
+description: >
+  Home Cell D's Z axis, then stroke it top-to-bottom three times and
+  finish parked at home.
+
+params:
+  z_top_mm: 10.0       # calibrate to this bench's real safe stroke
+  speed_pct: 20
+  accel_pct: 10
+
+defaults:
+  on_fail: abort       # never blindly retry a motion command
+  timeout_s: 60.0
+
+steps:
+  - id: check_status
+    cell: cell5
+    action: status
+    method: GET
+    timeout_s: 5.0
+    save_as: pre
+
+  - id: home_z
+    cell: cell5
+    action: zstage/home
+    timeout_s: 120.0   # homing crawls from wherever the stage was left
+    save_as: homed
+
+  - id: verify_home
+    assert: "${homed.z_mm} == 0.0"
+
+  # ── stroke 1 ──────────────────────────────────────────────────────────
+  - id: up1
+    cell: cell5
+    action: zstage/move
+    body:
+      z_mm: "${params.z_top_mm}"
+      speed_pct: "${params.speed_pct}"
+      accel_pct: "${params.accel_pct}"
+    save_as: top1
+
+  - id: verify_top1
+    assert: "${top1.z_mm} == ${params.z_top_mm}"
+
+  - id: down1
+    cell: cell5
+    action: zstage/move
+    body:
+      z_mm: 0.0
+      speed_pct: "${params.speed_pct}"
+      accel_pct: "${params.accel_pct}"
+    save_as: bottom1
+
+  - id: verify_bottom1
+    assert: "${bottom1.z_mm} == 0.0"
+
+  # ── stroke 2 ──────────────────────────────────────────────────────────
+  - id: up2
+    cell: cell5
+    action: zstage/move
+    body:
+      z_mm: "${params.z_top_mm}"
+      speed_pct: "${params.speed_pct}"
+      accel_pct: "${params.accel_pct}"
+    save_as: top2
+
+  - id: verify_top2
+    assert: "${top2.z_mm} == ${params.z_top_mm}"
+
+  - id: down2
+    cell: cell5
+    action: zstage/move
+    body:
+      z_mm: 0.0
+      speed_pct: "${params.speed_pct}"
+      accel_pct: "${params.accel_pct}"
+    save_as: bottom2
+
+  - id: verify_bottom2
+    assert: "${bottom2.z_mm} == 0.0"
+
+  # ── stroke 3 ──────────────────────────────────────────────────────────
+  - id: up3
+    cell: cell5
+    action: zstage/move
+    body:
+      z_mm: "${params.z_top_mm}"
+      speed_pct: "${params.speed_pct}"
+      accel_pct: "${params.accel_pct}"
+    save_as: top3
+
+  - id: verify_top3
+    assert: "${top3.z_mm} == ${params.z_top_mm}"
+
+  - id: down3
+    cell: cell5
+    action: zstage/move
+    body:
+      z_mm: 0.0
+      speed_pct: "${params.speed_pct}"
+      accel_pct: "${params.accel_pct}"
+    save_as: bottom3
+
+  - id: verify_bottom3
+    assert: "${bottom3.z_mm} == 0.0"
+
+  # Re-home so the stroke count ends on a physically verified origin,
+  # not just the driver's coordinate bookkeeping.
+  - id: park_home
+    cell: cell5
+    action: zstage/home
+    timeout_s: 120.0

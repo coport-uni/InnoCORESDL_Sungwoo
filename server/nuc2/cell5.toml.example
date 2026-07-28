@@ -6,6 +6,10 @@
 # The [zstage]/[hotplate]/[lamp] tables are what select this cell shape --
 # no --cell flag needed.
 
+# The [pump] table is OPTIONAL: omit it while the syringe pump is not on
+# the bench yet and the cell serves Z + hotplate + lamp, answering 409 on
+# the pump routes (like the absent balance). Add it back when the pump
+# arrives.
 [pump]
 port = "1A86:7523"     # SY-01B CH340 USB-serial (VID:PID)
 syringe_uL = 125
@@ -14,9 +18,11 @@ init_force = 2
 [zstage]
 # ONE MKS SERVO57D on an FTDI USB2CAN adapter. Unlike cell1-3 there is no
 # X axis and no paired-Z group -- this is a single motor.
-# TBD: fill in this adapter's FTDI serial. Omitting it opens the first
+# Fill in this adapter's FTDI serial (udevadm info -q property -n
+# /dev/ttyUSB0 | grep SERIAL_SHORT). Omitting it opens the first
 # enumerated FTDI device, which is only safe if it is the only one here.
-serial = "TBD-CELL5-Z"
+# The NUC2 bench adapter (NTREX USB2CAN) is NTB3EP5R.
+serial = "NTB3EP5R"
 coord_invert = true    # +mm moves away from the 0x00 home limit
 home_dir = 0           # flip 0 <-> 1 to home off the opposite end
 
@@ -38,7 +44,10 @@ max_celsius = 150.0
 # Credentials live in external/SmartPlugController/secure.env, written by
 # the operator. If they are missing the cell still starts; only the lamp
 # endpoints return 409.
-target = "TBD-IR-LAMP"
+# A bare IP that device_list.md does not know is also accepted -- the
+# cell synthesises the entry, so a re-DHCPed plug needs no edit inside
+# the submodule. The NUC2 bench plug (tapo_plug1) is 192.168.0.237.
+target = "192.168.0.237"
 
 [server]
 host = "0.0.0.0"

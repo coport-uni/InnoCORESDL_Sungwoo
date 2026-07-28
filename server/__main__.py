@@ -91,6 +91,9 @@ def _load_pump_z_thermal(
     lamp = raw.get("lamp", {})
     server = raw.get("server", {})
     cell_cfg = PumpZThermalConfig(
+        # No [pump] table = no pump on this bench yet; the cell then
+        # serves Z + hotplate + lamp and answers 409 on pump routes.
+        pump_enabled="pump" in raw,
         pump_port=pump.get("port", "1A86:7523"),
         pump_address=int(pump.get("address", 1)),
         pump_baud=int(pump.get("baud", 9600)),

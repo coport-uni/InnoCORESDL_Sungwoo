@@ -482,7 +482,15 @@ steps:
     save_as: measured                # 응답 JSON을 변수로 저장
   - id: check_mass
     assert: ${measured.weight_g} > 0.004  # 장비 호출 없는 검증 step
+  - id: soak
+    wait_s: 10.0                     # 장비 호출 없는 시간 유지 step
 ```
+
+`wait_s` step은 어느 cell도 호출하지 않고 지정한 초만큼 대기한다
+(양수 float 또는 `${params.x}` placeholder). Cell D의 "가열 후 N초
+유지", "램프 깜박임" 같은 timed hold를 시나리오로 표현하기 위한
+것으로, engine은 대기를 0.2 s 단위로 쪼개어 abort 요청이 오면 즉시
+끊는다. hazard 판정 대상이 아니다 (장비에 아무것도 보내지 않으므로).
 
 위 필드명은 v0.9에서 `server/schemas.py` 기준으로 정정된 것이다. 예시를
 그대로 믿지 말고 항상 cell의 OpenAPI로 대조하라 — validator가 그렇게

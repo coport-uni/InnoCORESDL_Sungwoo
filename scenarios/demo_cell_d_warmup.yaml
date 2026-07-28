@@ -8,10 +8,12 @@
 #                                        the field would be unreachable
 #                                        from a scenario (LearnedPatterns #8).
 #
-# THERE IS NO WAIT STEP in the scenario language (spec section 8.1). The
-# thermal hold is therefore the operator's, in --step-mode: the run pauses
-# after `heat_on`, you watch the plate reach temperature, then resume. Do
-# not run this scenario unattended -- it energizes a heater and a lamp.
+# The scenario language now has a `wait_s` step (spec section 8.1;
+# demo_cell_d_hotplate_30c.yaml uses it for a fixed 10 s soak). This
+# scenario predates it and keeps the operator-paced hold instead: the run
+# pauses after `heat_on` in --step-mode, you watch the plate reach
+# temperature, then resume. Do not run this scenario unattended -- it
+# energizes a heater and a lamp.
 #
 # Run it as: dry run -> real step_mode -> real.
 #   python -m orchestrator validate scenarios/demo_cell_d_warmup.yaml

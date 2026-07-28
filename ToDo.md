@@ -242,3 +242,33 @@ was a TBD standalone item through spec v0.9.
       `/v1/health`, and give each driver a priority path for its stop
       command. The second half is upstream driver work.
 - [ ] Bench bring-up itself (see `docs/L1_BRINGUP.md`).
+
+## 2026-07-28 — NUC2 Cell D bring-up: pump-less shape, wait_s step, three bench demos
+
+- [x] Verified the bench hardware: MKS Z on FTDI `NTB3EP5R`
+      (NTREX USB2CAN, 0403:6001), IKA RCT digital on 0483:5740
+      (`/dev/ttyACM0`, auto-detected), tapo_plug1 reachable at
+      192.168.0.237 (P110M, secure.env in place). No syringe pump on the
+      bus (1A86:7523 absent).
+- [x] Made Cell D's pump optional: no `[pump]` table → the cell opens
+      with Z + hotplate + lamp and answers 409 on pump routes
+      (`cell/pump_z_thermal_cell.py`, `server/__main__.py`).
+- [x] Lamp target may be a bare IP unknown to the submodule's
+      device_list.md — the cell synthesises the entry
+      (`_resolve_lamp`; LearnedPatterns #11).
+- [x] Added the `wait_s` scenario step (local timed hold, abort-sliced,
+      not hazard-gated) to `orchestrator/scenario.py` + `engine.py`;
+      spec §8.1 updated; 8 new tests.
+- [x] Three Cell D bench scenarios: `demo_cell_d_lamp_blink.yaml`
+      (3 blinks ≈ 5 s), `demo_cell_d_hotplate_30c.yaml` (30 °C, 10 s
+      soak), `demo_cell_d_z_cycles.yaml` (home + 3 top-to-bottom
+      strokes). All validate + run against FakeL1 (40/40 tests pass).
+- [x] Real NUC2 configs written (gitignored): `server/nuc2/cell5.toml`,
+      `orchestrator/config.toml` (cell5 @ 127.0.0.1:17062).
+- [x] Python env bootstrapped in `.venv/` (LearnedPatterns #10).
+- [ ] Bench verification: blocked on USB permissions (dialout group +
+      raw-USB udev rule need sudo), then L1 server up → validate →
+      operator-gated runs of the three demos.
+- [x] Register the GitHub issue for this bring-up via `gh issue create` —
+      issue #8. (Needed a one-time `gh auth login` by the operator; the
+      `gh` CLI itself was installed to ~/.local/bin, no sudo.)

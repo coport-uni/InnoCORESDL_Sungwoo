@@ -38,6 +38,7 @@ Hardware-verified at the bench, not in CI.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import sys
 from dataclasses import dataclass
 
@@ -53,6 +54,7 @@ from external.HotplateController.hotplate_controller import (
 )
 from external.SmartPlugController.smartplugcontroller import (
     ControllerError,
+    DeviceEntry,
     SmartPlugController,
 )
 
@@ -74,7 +76,12 @@ DEFAULT_MAX_CELSIUS = 150.0
 class PumpZThermalConfig:
     """Bench wiring for Cell D (loaded from the cell5 TOML)."""
 
-    # Pump — identical to a dispense cell.
+    # Pump — identical to a dispense cell. `pump_enabled = False` (an
+    # omitted [pump] table) builds the cell without one: the bench ran
+    # Cell D's Z + hotplate + lamp before its syringe pump arrived, and a
+    # missing pump must not keep the other three devices down. The pump
+    # endpoints then answer 409 exactly like the absent balance does.
+    pump_enabled: bool = True
     pump_port: str = "1A86:7523"
     pump_address: int = 1
     pump_baud: int = 9600
@@ -91,6 +98,10 @@ class PumpZThermalConfig:
     max_celsius: float = DEFAULT_MAX_CELSIUS
     # Lamp: device name or IP as written in the plug driver's
     # device_list.md. "all" would switch every plug on the bench.
+    # A bare IP that the list does not mention is still addressable: the
+    # cell synthesises the entry (see _resolve_lamp). That keeps a bench
+    # re-IP out of external/, which is a submodule and must not carry
+    # local-only edits (CLAUDE.md Overview).
     lamp_target: str = "all"
 
 
@@ -98,6 +109,13 @@ def _no_balance() -> WrongStateError:
     # Defensive stub: Cell D has no balance (the Phase's single balance
     # lives on cell4), so a stray /v1/balance/* call gets a clean 409.
     return WrongStateError("Cell D has no balance", command="balance")
+
+
+def _no_pump() -> WrongStateError:
+    # Not "broken" but "not fitted": this cell was configured with
+    # pump_enabled = False, so every pump route answers 409 rather than
+    # failing later against a port that was never opened.
+    return WrongStateError("Cell D has no pump configured", command="pump")
 
 
 def _no_gantry() -> WrongStateError:
@@ -127,7 +145,7 @@ class PumpZThermalCell(Cell):
 
     def __init__(
         self,
-        pump: SyringePumpController,
+        pump: SyringePumpController | None,
         z: MKSMotor,
         hotplate: RctDigital,
         plug: SmartPlugController | None,
@@ -150,15 +168,17 @@ class PumpZThermalCell(Cell):
 
     @classmethod
     def open(cls, config: PumpZThermalConfig) -> PumpZThermalCell:
-        pump_cfg = SyringePumpController.Config(
-            port=config.pump_port,
-            address=config.pump_address,
-            baud=config.pump_baud,
-            syringe_uL=config.syringe_uL,
-            step_mode=SyringePumpController.StepMode.NORMAL,
-            reply_timeout_s=2.0,
-        )
-        pump = SyringePumpController.open(pump_cfg)
+        pump: SyringePumpController | None = None
+        if config.pump_enabled:
+            pump_cfg = SyringePumpController.Config(
+                port=config.pump_port,
+                address=config.pump_address,
+                baud=config.pump_baud,
+                syringe_uL=config.syringe_uL,
+                step_mode=SyringePumpController.StepMode.NORMAL,
+                reply_timeout_s=2.0,
+            )
+            pump = SyringePumpController.open(pump_cfg)
         # Docker's /dev is a private tmpfs and ftdi_sio re-claims the FTDI
         # adapter on every enumeration; rebuild the nodes and detach it so
         # pyftdi can open the USB2CAN adapter. No motion, FTDI only.
@@ -196,7 +216,24 @@ class PumpZThermalCell(Cell):
 
     # ── Discovery ───────────────────────────────────────────────────────
     def diagnose(self) -> dict:
-        report = self._pump.diagnose()
+        if self._pump is not None:
+            report = self._pump.diagnose()
+            pump = {
+                "software_version": report.software_version,
+                "serial_number": report.serial_number,
+                "config": report.config,
+                "supply_volts": report.supply_volts,
+                "valve": report.valve_position,
+                "ok": report.ok_to_initialize,
+            }
+            ok_to_initialize = report.ok_to_initialize
+            versions = {"pump": report.software_version}
+        else:
+            # Absent by configuration, like the balance: ok=True so the
+            # cell is not reported faulted for hardware it never had.
+            pump = {"present": False, "ok": True}
+            ok_to_initialize = True
+            versions = {}
         hotplate = self._hotplate_call(
             "diagnose",
             lambda: {
@@ -209,14 +246,7 @@ class PumpZThermalCell(Cell):
             },
         )
         return {
-            "pump": {
-                "software_version": report.software_version,
-                "serial_number": report.serial_number,
-                "config": report.config,
-                "supply_volts": report.supply_volts,
-                "valve": report.valve_position,
-                "ok": report.ok_to_initialize,
-            },
+            "pump": pump,
             # No balance on Cell D; ok=True so the cell isn't faulted.
             "balance": {"present": False, "ok": True},
             "stage": {  # the single Z axis
@@ -226,14 +256,14 @@ class PumpZThermalCell(Cell):
             },
             "hotplate": hotplate,
             "lamp": self._lamp_diagnosis(),
-            "ok_to_initialize": report.ok_to_initialize,
-            "versions": {"pump": report.software_version},
+            "ok_to_initialize": ok_to_initialize,
+            "versions": versions,
         }
 
     def _lamp_diagnosis(self) -> dict:
         if self._plug is None:
             return {"present": False, "ok": False, "error": "not configured"}
-        entries = self._plug.resolve_targets(self._cfg.lamp_target)
+        entries = self._resolve_lamp()
         return {
             "present": True,
             "target": self._cfg.lamp_target,
@@ -244,7 +274,11 @@ class PumpZThermalCell(Cell):
     def status(self) -> dict:
         return {
             "weight_g": 0.0,  # no balance on this cell
-            "valve": self._pump.query_valve_position(),
+            "valve": (
+                self._pump.query_valve_position()
+                if self._pump is not None
+                else "-"  # no pump fitted
+            ),
             "plunger_uL": self._plunger_uL,
             "stage_x_mm": 0.0,  # no X axis on Cell D
             "stage_z_mm": self._z_mm,
@@ -277,12 +311,16 @@ class PumpZThermalCell(Cell):
 
     # ── Pump (same contract as cell1–3) ─────────────────────────────────
     def initialize(self, *, force: int = 2, ccw: bool = False) -> dict:
+        if self._pump is None:
+            raise _no_pump()
         self._pump.initialize(force=force, ccw=ccw)
         self._initialized = True
         self._plunger_uL = 0.0
         return {"valve": self._pump.query_valve_position(), "plunger_uL": 0.0}
 
     def _require_init(self) -> None:
+        if self._pump is None:
+            raise _no_pump()
         if not self._initialized:
             raise WrongStateError("pump not initialized", command="initialize")
 
@@ -452,10 +490,38 @@ class PumpZThermalCell(Cell):
     # python-kasa is async; the server already runs these methods in a
     # worker thread, so that thread has no running loop and asyncio.run
     # is safe here (same pattern the old demo_scenario used).
+    def _resolve_lamp(self) -> list[DeviceEntry]:
+        """Match ``lamp_target`` against the list, or synthesise by IP.
+
+        The driver's ``device_list.md`` lives inside the submodule, which
+        must carry no local-only edits, so a bench whose plug got a new
+        DHCP address configures the bare IP as ``lamp_target`` and the
+        cell builds the entry itself.
+
+        Returns:
+            Matching entries; empty when the target names nothing.
+        """
+        assert self._plug is not None
+        entries = self._plug.resolve_targets(self._cfg.lamp_target)
+        if entries:
+            return entries
+        try:
+            ipaddress.ip_address(self._cfg.lamp_target)
+        except ValueError:
+            return []
+        return [
+            DeviceEntry(
+                device_type="tapo",
+                name=self._cfg.lamp_target,
+                mac="",
+                ip=self._cfg.lamp_target,
+            )
+        ]
+
     def _lamp_entries(self):
         if self._plug is None:
             raise _no_lamp()
-        entries = self._plug.resolve_targets(self._cfg.lamp_target)
+        entries = self._resolve_lamp()
         if not entries:
             raise WrongStateError(
                 f"no plug matches {self._cfg.lamp_target!r} in device_list.md",

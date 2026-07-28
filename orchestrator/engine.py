@@ -37,11 +37,16 @@ from orchestrator.scenario import (
     Step,
     ValidationIssue,
     VariableError,
+    WaitValueError,
     eval_assert,
     load_scenario_text,
     resolve,
+    resolve_wait_s,
     validate_scenario,
 )
+
+#: How often a running ``wait_s`` hold re-checks for an abort request.
+WAIT_SLICE_S = 0.2
 
 
 class RunState(str, Enum):
@@ -537,6 +542,8 @@ class Engine:
         try:
             if step.kind == "assert":
                 record["result"] = self._run_assert(run, step)
+            elif step.kind == "wait":
+                record["result"] = await self._run_wait(run, step)
             else:
                 record["result"] = await self._call_cell(run, step)
             record["ok"] = True
@@ -546,6 +553,7 @@ class Engine:
             VariableError,
             AssertSyntaxError,
             AssertionFailure,
+            WaitValueError,
         ) as exc:
             record["ok"] = False
             record["result"] = None
@@ -557,6 +565,25 @@ class Engine:
         record["finished_utc"] = utc_now()
         record["duration_s"] = round(time.monotonic() - clock, 3)
         return record
+
+    async def _run_wait(self, run: Run, step: Step) -> dict[str, Any]:
+        """Hold for ``wait_s`` seconds, re-checking for an abort.
+
+        The hold is sliced so an ``abort`` cuts it short instead of
+        letting a long thermal soak keep the run alive; the record then
+        shows how long was actually waited.
+        """
+        seconds = resolve_wait_s(step, run.context)
+        waited = 0.0
+        while waited < seconds and not run.abort_requested:
+            slice_s = min(WAIT_SLICE_S, seconds - waited)
+            await asyncio.sleep(slice_s)
+            waited += slice_s
+        return {
+            "requested_s": seconds,
+            "waited_s": round(waited, 3),
+            "aborted": run.abort_requested,
+        }
 
     def _run_assert(self, run: Run, step: Step) -> dict[str, Any]:
         assert step.assert_expr is not None

@@ -507,6 +507,135 @@ async def test_wrong_shape_action_fails_cleanly_at_runtime(
     assert error["payload"]["error"] == "WrongStateError"
 
 
+CELL_D_BLINK = REPO_ROOT / "scenarios" / "demo_cell_d_lamp_blink.yaml"
+CELL_D_HOTPLATE = REPO_ROOT / "scenarios" / "demo_cell_d_hotplate_30c.yaml"
+CELL_D_Z_CYCLES = REPO_ROOT / "scenarios" / "demo_cell_d_z_cycles.yaml"
+
+#: Overrides that shrink the demos' real-time holds to test speed.
+FAST_HOLDS = {"blink_hold_s": 0.01, "soak_s": 0.01}
+
+
+# ── wait_s steps ───────────────────────────────────────────────────────────
+
+
+async def test_wait_step_holds_and_records(engine: Engine) -> None:
+    run = await engine.create_run(
+        scenario_yaml(
+            "  - id: hold\n    wait_s: 0.05\n",
+            name="wait_check",
+        )
+    )
+    await engine.wait(run.run_id)
+    assert run.state is RunState.COMPLETED
+    record = run.records[0]
+    assert record["kind"] == "wait"
+    assert record["result"]["requested_s"] == 0.05
+    assert record["result"]["waited_s"] >= 0.05
+    assert record["duration_s"] >= 0.05
+
+
+async def test_wait_step_takes_params(engine: Engine) -> None:
+    text = scenario_yaml(
+        "  - id: hold\n    wait_s: ${params.hold_s}\n",
+        name="wait_param",
+        extra="params:\n  hold_s: 0.05\n",
+    )
+    _s, issues = await engine.validate(text)
+    assert [str(i) for i in issues] == []
+    run = await engine.create_run(text)
+    await engine.wait(run.run_id)
+    assert run.state is RunState.COMPLETED
+    assert run.records[0]["result"]["waited_s"] >= 0.05
+
+
+async def test_wait_step_rejects_bad_durations(engine: Engine) -> None:
+    # A negative literal fails the model; a non-numeric param fails the
+    # dry run — both before anything runs.
+    _s, issues = await engine.validate(
+        scenario_yaml("  - id: hold\n    wait_s: -1\n")
+    )
+    assert {i.code for i in issues} == {"schema"}
+    _s, issues = await engine.validate(
+        scenario_yaml(
+            "  - id: hold\n    wait_s: ${params.hold_s}\n",
+            extra="params:\n  hold_s: not_a_number\n",
+        )
+    )
+    assert {i.code for i in issues} == {"body_mismatch"}
+
+
+async def test_wait_step_is_not_gated(
+    config: OrchestratorConfig, registry: Registry, client: Any
+) -> None:
+    # A wait touches no device, so it must not trip the first-motion gate.
+    guarded = OrchestratorConfig(
+        log_dir=config.log_dir,
+        retry_delay_s=0.0,
+        confirm_first_motion=True,
+    )
+    engine = Engine(guarded, registry, client)
+    run = await engine.create_run(
+        scenario_yaml("  - id: hold\n    wait_s: 0.01\n", name="wait_gate")
+    )
+    await engine.wait(run.run_id)
+    assert run.state is RunState.COMPLETED
+    assert run.pending_confirmation is None
+
+
+async def test_abort_cuts_a_wait_short(engine: Engine) -> None:
+    run = await engine.create_run(
+        scenario_yaml("  - id: hold\n    wait_s: 30.0\n", name="wait_abort")
+    )
+    await wait_for(
+        lambda: len(run.records) == 0 and run.current_step is not None
+    )
+    await engine.abort(run.run_id)
+    await engine.wait(run.run_id)
+    assert run.state is RunState.ABORTED
+    # The 30 s hold must have ended early, not slept out.
+    assert run.records[0]["duration_s"] < WAIT_TIMEOUT_S
+
+
+# ── the three Cell D bench demos ───────────────────────────────────────────
+
+
+async def test_cell_d_lamp_blink_demo(engine: Engine, fake_l1: FakeL1) -> None:
+    text = CELL_D_BLINK.read_text(encoding="utf-8")
+    _s, issues = await engine.validate(text)
+    assert [str(i) for i in issues] == []
+    run = await engine.create_run(text, params=FAST_HOLDS)
+    await engine.wait(run.run_id)
+    assert run.state is RunState.COMPLETED
+    switches = [
+        c[3]["enabled"] for c in fake_l1.calls if c[2] == "/v1/lamp/switch"
+    ]
+    assert switches == [True, False, True, False, True, False]
+    assert fake_l1.lamp_on["cell5"] is False
+
+
+async def test_cell_d_hotplate_demo(engine: Engine, fake_l1: FakeL1) -> None:
+    text = CELL_D_HOTPLATE.read_text(encoding="utf-8")
+    _s, issues = await engine.validate(text)
+    assert [str(i) for i in issues] == []
+    run = await engine.create_run(text, params=FAST_HOLDS)
+    await engine.wait(run.run_id)
+    assert run.state is RunState.COMPLETED
+    assert fake_l1.target_c["cell5"] == 30.0
+    assert fake_l1.heating["cell5"] is False
+
+
+async def test_cell_d_z_cycles_demo(engine: Engine, fake_l1: FakeL1) -> None:
+    text = CELL_D_Z_CYCLES.read_text(encoding="utf-8")
+    _s, issues = await engine.validate(text)
+    assert [str(i) for i in issues] == []
+    run = await engine.create_run(text)
+    await engine.wait(run.run_id)
+    assert run.state is RunState.COMPLETED
+    tops = [c[3]["z_mm"] for c in fake_l1.calls if c[2] == "/v1/zstage/move"]
+    assert tops == [10.0, 0.0, 10.0, 0.0, 10.0, 0.0]
+    assert fake_l1.z_mm["cell5"] == 0.0
+
+
 def test_fake_l1_does_not_drift_from_the_real_openapi() -> None:
     """Guard: the fake must match the real L1's routes AND body fields.
 
