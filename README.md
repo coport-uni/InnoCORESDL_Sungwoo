@@ -135,7 +135,7 @@ The runbook is [`docs/L1_BRINGUP.md`](docs/L1_BRINGUP.md). In short:
 | M1 / M2 — registry + dry-run validator | done |
 | M4 / M5 — engine, runlog, failure policies, pause/resume/abort | done (tests only) |
 | M6 — systemd + Docker + real `demo_linear_move` | artifacts written, **never deployed** |
-| M7 — web scenario tab | not started; `web/` is absent from this working tree |
+| M7 — web scenario tab | not started; `web/` was removed with the other pre-L2 work and lives in git history |
 
 Open questions that shape the next phase, all recorded as gaps:
 

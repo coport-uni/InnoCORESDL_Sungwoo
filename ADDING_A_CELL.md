@@ -127,10 +127,13 @@ python -m server --config server/cellN.toml
 # then GET /v1/health, GET /v1/diagnose before any motion command
 ```
 
-### 8. Register in the web (when wiring the UI)
-Add the cell to the web's cell registry (`web/src/lib/cells.ts`) with its
-base URL; the operator web's switcher picks it up. Adding a cell = a registry
-entry, not a new site.
+### 8. Register in the web (when the UI comes back)
+`web/` was removed from the repo along with the other pre-L2 work; the
+React operator UI is M7 in `docs/L2_ORCHESTRATOR_SPEC.md` and its last
+state is in git history. When it returns, adding a cell is a registry
+entry (base URL) in the web's cell list, not a new site. Until then a cell
+is reachable through its own `/v1` API and through the L2 orchestrator,
+which discovers it from `orchestrator/config.toml`.
 
 ## Checklist
 - [ ] driver submodule in `external/<Repo>/` (installable) + `SUBMODULES.md`
@@ -141,4 +144,4 @@ entry, not a new site.
 - [ ] `--cell` choice + factory branch in `server/__main__.py`
 - [ ] port assigned
 - [ ] `ruff check cell/ server/` passes; cell brought up at the bench (health + diagnose)
-- [ ] cell registered in `web/src/lib/cells.ts`
+- [ ] cell registered in the orchestrator's `config.toml` (and in the web's cell list once M7 lands)

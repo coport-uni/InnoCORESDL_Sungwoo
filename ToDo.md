@@ -164,7 +164,7 @@ the devices are connected. No hardware was available for this work.
       scenario timeouts from them, then run `demo_linear_move` as dry run →
       `--step-mode` → automatic.
 - [x] GAP-2 closed in code — see the Cell D entry below.
-- [ ] M7: the web scenario tab (`web/` is deleted in this working tree).
+- [ ] M7: the web scenario tab (`web/` was removed with the other pre-L2 work; git history has its last state).
 
 ## 2026-07-27 — Cell D (cell5): pump + single Z + hotplate + IR lamp
 

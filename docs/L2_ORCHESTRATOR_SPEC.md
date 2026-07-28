@@ -130,7 +130,8 @@ test의 gantry 합격 기준을 동기 구동 확인 (두 Z축 동시 이동, �
 | 배포 | cell 서버 수동 실행 | 단일 저장소 + NUC별 설정, 실장비는 systemd, orchestrator는 Docker |
 
 주의: `demo_scenario/`는 driver를 직접 여는 L0 스타일이므로 L2의
-참고용으로만 삼고 재사용하지 않는다. L2는 반드시 HTTP `/v1`만 통해
+참고용으로만 삼고 재사용하지 않는다 (2026-07-28에 저장소에서 삭제됨 —
+git 이력에만 남아 있다). L2는 반드시 HTTP `/v1`만 통해
 장비에 접근한다. serial port 단일 소유 규칙 때문이다 (CLAUDE.md
 Folder-specific rules #2).
 
