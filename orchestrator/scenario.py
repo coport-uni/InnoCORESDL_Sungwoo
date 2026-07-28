@@ -164,6 +164,15 @@ class Step(BaseModel):
     retries: int | None = Field(default=None, ge=0)
     assert_expr: str | None = Field(default=None, alias="assert")
     parallel: list[Step] | None = None
+    #: Hold the run *before* this step and show this text to the
+    #: operator. There is no wait step (spec section 8.1) and no way to
+    #: express "the operator does something here", so scenarios that
+    #: need a pair of hands had to be run under --step-mode, which stops
+    #: after *every* step. That makes the one pause that matters
+    #: indistinguishable from a dozen that do not, and an operator
+    #: pressing enter thirteen times is an operator who has stopped
+    #: reading. This marks the single point that needs a human.
+    pause: str | None = None
 
     @model_validator(mode="after")
     def _exactly_one_kind(self) -> Step:
@@ -182,6 +191,15 @@ class Step(BaseModel):
                 raise ValueError("'parallel' needs at least one child step")
             if any(c.parallel is not None for c in self.parallel):
                 raise ValueError("'parallel' blocks cannot be nested")
+            if any(c.pause is not None for c in self.parallel):
+                # The gate runs before the block as a whole, so a pause
+                # on a child would silently never fire. Refuse it at
+                # load time rather than let a run skip the one place an
+                # operator was meant to intervene.
+                raise ValueError(
+                    "'pause' belongs on the 'parallel' block itself, not "
+                    "on a child step"
+                )
         else:
             if not self.id:
                 raise ValueError("every step needs an 'id'")

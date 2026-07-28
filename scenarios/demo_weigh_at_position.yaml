@@ -10,26 +10,31 @@
 #   balance/weight         GET                   -> {weight_g, stable}
 #   status                 GET                   -> {stage_x_mm, weight_g, ...}
 #
-# TWO THINGS THE SCENARIO LANGUAGE CANNOT DO, so the operator supplies
-# them:
+# THE ONE PLACE A HUMAN IS NEEDED is marked with `pause:` on the `weigh`
+# step -- the run holds there, prints the instruction, and continues when
+# the operator presses enter. **Do not run this under --step-mode.** It
+# used to require it, because there is no wait step (spec section 8.1) and
+# --step-mode was the only way to stop anywhere at all. But that stops
+# after *every* step: thirteen prompts of which one matters, which is how
+# an operator stops reading them. `pause:` marks the single one.
 #
-#   1. THERE IS NO WAIT STEP (spec section 8.1). The pause for loading the
-#      vial is the --step-mode pause after `move_to_weigh`. **This
-#      scenario is meaningless without --step-mode** -- run unattended it
-#      weighs an empty pan and fails `verify_vial_present`, which is the
-#      correct outcome but a waste of a run.
-#   2. THERE IS NO abs(). The assert evaluator allows no function calls
-#      (orchestrator/scenario.py _ALLOWED_ASSERT_NODES), so every
-#      "within +/- x" check below is written as two comparisons.
+# The first motion step still waits for a separate confirmation
+# (`confirm_first_motion`, on by default) -- that is CLAUDE.md
+# Folder-specific rule #3 and is not step mode. So expect exactly two
+# prompts: "the rail is about to move", then "load the vial".
+#
+# THERE IS NO abs(). The assert evaluator allows no function calls
+# (orchestrator/scenario.py _ALLOWED_ASSERT_NODES), so every
+# "within +/- x" check below is written as two comparisons.
 #
 # Note `verify_zeroed` reads the weight back rather than trusting what
 # balance/tare returned: BalanceLinearCell.tare() returns a hardcoded 0.0
 # without measuring anything, so asserting on its response would prove
 # only that the code ran. The GET that follows is a real measurement.
 #
-# Run it as: dry run -> real, step-mode, operator at the bench.
+# Run it as: dry run -> real, operator at the bench (no --step-mode).
 #   python -m orchestrator validate scenarios/demo_weigh_at_position.yaml
-#   python -m orchestrator run scenarios/demo_weigh_at_position.yaml --step-mode
+#   python -m orchestrator run scenarios/demo_weigh_at_position.yaml
 #
 # SAFETY: the rail cannot be stopped from software (docs/L1_AUDIT.md
 # GAP-1 and GAP-9). Keep the physical switch in reach and do not run this
@@ -119,16 +124,19 @@ steps:
     assert: "${at_weigh.y_mm} >= ${params.weigh_mm} - ${params.tolerance_mm} and ${at_weigh.y_mm} <= ${params.weigh_mm} + ${params.tolerance_mm}"
 
   # ══════════════════════════════════════════════════════════════════════
-  # OPERATOR: the --step-mode pause after the step above is where you put
-  # the vial on the pan. Let the reading settle before continuing --
-  # balance/weight blocks until the balance itself calls the value
-  # stable, so continuing early costs a timeout, not a wrong number.
+  # THE ONE OPERATOR STEP. The run holds here until enter is pressed.
   # ══════════════════════════════════════════════════════════════════════
 
   - id: weigh
     cell: cell4
     action: balance/weight
     method: GET
+    pause: >-
+      Place the vial on the balance pan, wait for the reading to settle,
+      then press enter. (The rail has stopped at the weighing position.
+      Continuing early is safe -- balance/weight blocks until the balance
+      itself calls the value stable, so it costs a timeout, not a wrong
+      number.)
     timeout_s: 60.0     # settling is the operator's pace, not the bus's
     save_as: vial
 

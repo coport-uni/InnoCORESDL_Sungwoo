@@ -237,6 +237,11 @@ class FakeL1:
         self.target_c: dict[str, float] = dict.fromkeys(shapes, 20.0)
         self.heating: dict[str, bool] = dict.fromkeys(shapes, False)
         self.lamp_on: dict[str, bool] = dict.fromkeys(shapes, False)
+        #: What the pan is carrying, in grams. Default is an empty,
+        #: freshly tared pan. A test that exercises a scenario with an
+        #: operator step sets this *while the run is paused* -- which is
+        #: what the operator physically does at that pause.
+        self.pan_g = 0.005
         self.failures: dict[tuple[str, str], list[Callable[[], Any]]] = {}
 
     # ── failure injection ──────────────────────────────────────────────
@@ -357,7 +362,7 @@ class FakeL1:
             return httpx.Response(HTTP_OK, json={"weight_g": 0.0})
         if action == "balance/weight":
             return httpx.Response(
-                HTTP_OK, json={"weight_g": 0.005, "stable": True}
+                HTTP_OK, json={"weight_g": self.pan_g, "stable": True}
             )
         if action.startswith("pump/"):
             return httpx.Response(HTTP_OK, json={"plunger_uL": 0.0})
