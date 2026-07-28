@@ -35,7 +35,7 @@ Measured bench addresses (2026-07-28): **NUC1 = 192.168.0.126**,
 graph TB
     subgraph NUC1["🖥 NUC1 — synthesis (192.168.0.126)"]
         C1["cell1 · Cell A (:17054)<br/>pump + XZ gantry<br/>(1 X + 2 synced Z motors)"]
-        C4["cell4 (:17060)<br/>MINAS A6 linear rail +<br/>the Phase's single balance"]
+        C4["cell4 (:17060)<br/>MINAS A6 linear rail +<br/>the Phase's single balance<br/>✅ bench-verified"]
     end
 
     subgraph NUC2["🖥 NUC2 — analysis (192.168.0.120)"]
@@ -67,7 +67,7 @@ only by config.
 | **cell1** (Cell A) | NUC1 · 17054 | pump + gantry (`PumpGantryCell`) | Runze SY-01B syringe pump (`sy01b`, CH340 serial) · XZ gantry: 1× X + 2× **synchronized** Z MKS SERVO57D motors (`mks_motor`, FTDI/CAN, paired-Z interlock) | built, no bench run |
 | **cell2** (Cell B) | NUC2 · 17056 | pump + gantry (`PumpGantryCell`) | identical clone of Cell A — different USB serials only | built, no bench run |
 | **cell3** (Cell C) | NUC2 · 17058 | pump + gantry (`PumpGantryCell`) | identical clone of Cell A | built, no bench run |
-| **cell4** | NUC1 · 17060 | balance + linear (`BalanceLinearCell`) | MINAS A6 linear rail (`LinearMotorController`, RS-485) · the Phase's **single** Entris-II balance (`entris_ii`, Sartorius CDC) that shuttles under cell1–3 to weigh each dispense | built, no bench run |
+| **cell4** | NUC1 · 17060 | balance + linear (`BalanceLinearCell`) | MINAS A6 linear rail (`LinearMotorController`, RS-485) · the Phase's **single** Entris-II balance (`entris_ii`, Sartorius CDC) that shuttles under cell1–3 to weigh each dispense | ✅ **bench-verified** |
 | **cell5** (Cell 5) | NUC2 · 17062 | pump + Z + thermal (`PumpZThermalCell`) | syringe pump (*not fitted yet* — optional `[pump]` table) · **one** MKS SERVO57D as a standalone Z axis (`mks_motor`, FTDI `NTB3EP5R`) · IKA RCT digital hotplate (`HotplateController`, STM32 VCP, direct USB port) · IR lamp on a Tapo P110M plug (`SmartPlugController`, LAN `192.168.0.237`) | ✅ **bench-verified** |
 
 Special properties per cell worth remembering:
@@ -116,13 +116,6 @@ gantry is mid bring-up.
 Every number there is a bench measurement. The 71 tests touch no
 hardware, which is the point: they cannot tell you any of this.
 
-
-| Layer | Built | Verified | Not yet |
-|---|---|---|---|
-| L1 cells | all three shapes | **cell5 on real hardware** (Z + hotplate + lamp); others: imports, OpenAPI, shape inference, error mapping | cell1–4 physical behaviour |
-| L1 `/v1` server | 26 routes | **cell5 live on NUC2:17062** — diagnose, 10/10 hotplate-state stress, lamp over LAN | cell1–4 bench bring-up |
-| L2 orchestrator | registry, client, validator, engine (`wait_s`, `until:`), runlog, `/v1`, CLI | 45 tests; **three real Cell 5 runs completed** (below) | multi-cell / cross-NUC runs |
-| Deployment | systemd template + Docker Compose | — | never deployed as a service (bench runs used the venv directly) |
 
 ### How Cell 5 was verified
 
