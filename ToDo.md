@@ -689,3 +689,55 @@ loads a vial → weigh → return to origin.
 - [ ] `max_drift_g: 0.05` is still a guess and is the one parameter that
       should come from measurement. A 23-27 g load carried 50 mm may well
       exceed it; a failure there is the datum, not a defect.
+
+### First weighing run — reached the balance, then stalled on the move out
+
+Run `20260728T093102Z-demo_weigh_at_position`, after the operator power
+cycled the linear rail. **The balance half worked**: `home`, `tare` and
+`confirm_zero` all passed, which is the first time the balance has been
+driven from L2 at all. Then:
+
+```
+move_to_weigh  ->  HTTP 500: did not reach its target (stalled);
+                   it stopped at 51.846 mm
+```
+
+- [x] Bench was healthy going in: rail reads **50/50**, median 25 ms,
+      max 27.9 ms — 538x margin against the 15 s step timeout, so the
+      earlier timeout work was not implicated.
+- [x] **Every bad iteration coincides with an RS485 error inside
+      `move_relative`'s poll loop**, and the failures are not uniform:
+
+      | iter | error in the loop | commanded | actual |
+      |---|---|---|---|
+      | 1 | `Response block receive timeout` | +50.049 mm | overshoot 1.534 mm |
+      | 2 | `Received NAK` | -1.534 mm | **-12.579 mm** |
+      | 4 | NAK, Incomplete, NAK, timeout | -1.837 mm | **+0.008 mm** |
+
+      So a lost read can leave the rail running far past target *or*
+      leave it standing still — the same fault produces opposite
+      outcomes depending on where in the loop it lands.
+- [ ] **Unverified hypothesis**: iteration 4 looks like the speed write
+      (`Pr3.04`) failing — it is the one command still left single-shot,
+      and "no motion, then a 10 s poll timeout" fits what the log shows.
+      Writing a speed is a register write and therefore idempotent, so
+      retrying it is probably as safe as the stop write was. **Not
+      changed**: the adapter died before the measurement, and this
+      session has already produced two changes that were defensible on
+      paper and wrong on the bench (LearnedPatterns #18, #19). Measure
+      the single-shot write success rate first.
+- [ ] **The deeper limit, which retries will not remove.**
+      `move_relative` latches a speed and then polls position over a
+      9600-baud link to decide when to stop. Stopping accuracy is
+      therefore "how far the rail travelled since the last successful
+      read", on a link that fails ~10% of the time and can block for
+      seconds. The convergence loop hides this by iterating, but each
+      iteration's error is large and random. The real fix is the amp's
+      own **position-control mode**, which moves the stopping decision
+      inside the amp and off the serial link — a change of control
+      strategy, not a patch, and worth planning separately.
+- [ ] **Adapter failed for the sixth time today**, ~10 minutes after the
+      power cycle, mid-measurement. No software change can be verified at
+      this rate. Next step is physical: swap the UPort, or at least its
+      USB cable. The balance on the same bus has not faltered once all
+      day.
