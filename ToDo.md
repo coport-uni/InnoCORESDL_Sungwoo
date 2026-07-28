@@ -940,3 +940,40 @@ replacement. It was the wrong diagnosis twice over. Full write-up in
 - [ ] `demo_weigh_at_position.yaml` still has **never completed** — it
       has not yet got past its first step. `max_drift_g` (0.05) remains
       a guess until a run produces the two weight reads.
+
+### Software adapted to a spotty link (reads survive; moves still abort)
+
+The wiring fault is unfixed, so the bench was made usable around it.
+Design and numbers in `LearnedPatterns.md` #22.
+
+- [x] **Startup no longer loses a race with the adapter.** `_open_serial`
+      waits out an enumeration gap (20 x 0.5 s) instead of taking
+      `resolve_port()`'s "no adapter connected" at face value. Was
+      failing 3 starts in 4; now first try.
+- [x] **Reads survive the drop.** `_exchange` reopens on the OS-level
+      error and reports no-reply so the existing retry loop covers it.
+      150 s of `/v1/status` across 18 re-enumerations and 14 reconnects:
+
+      | | reads | positions | null | median |
+      |---|---|---|---|---|
+      | before | 30 | 0 | 30 | 6112 ms |
+      | after | 959 | 959 | 0 | 30 ms |
+
+- [x] **Moves deliberately still fail across a reconnect.**
+      `link_generation` is checked after every move and read inside
+      `move_to_mm`; on a change the rail is stopped and the move raises
+      `LinkDroppedError` (stop landed) or `MotionStopError` (it did
+      not). The cell maps the former to `TransportError` — never a
+      success. Reopening is safe for a read and unsafe for a move, and
+      the rail has no software stop (GAP-1).
+- [x] Driver `feat/reconnect-on-link-drop` 3b8f868 (11 tests, no
+      hardware); parent f6b8623 bumps the pin. ruff clean, 61 pass.
+
+- [ ] **Expect `demo_weigh_at_position.yaml` to abort on a move** while
+      the link is this bad: re-enumerations run ~8 s apart and a 50 mm
+      move takes ~14 s, so most moves will straddle one. That is the
+      abort rule working, not a regression. The run is now *safe* to
+      attempt with the physical e-stop in reach; it is not yet likely to
+      complete.
+- [ ] The wiring fix is still the blocker: SG between amp and UPort,
+      120R termination once per end, shield grounded at one end only.

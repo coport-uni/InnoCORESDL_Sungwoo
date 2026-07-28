@@ -719,3 +719,158 @@ format below. Newest entries at the bottom.
   `/proc/<pid>/fd` for `(deleted)` before reading the traceback. And
   before adding automatic reconnect, ask what the hardware is doing while
   the software is reconnecting.
+
+## 22. Made the link survivable for reads, and deliberately left motion fragile
+
+- **Problem**: The rail's USB adapter re-enumerates every few seconds
+  (#20: the amp couples noise into its own RS485 link). The wiring fix
+  needs bench work that had not happened, and the bench still needed to
+  make progress. Two symptoms: the cell server failed to start on **3 of
+  4** consecutive attempts, and once running, one drop killed it
+  permanently — a 150 s soak returned **0 of 30** positions, every read
+  costing the full 6.1 s retry budget.
+- **Cause**: Two different things, which is why one fix would not have
+  done. Startup failed because `resolve_port()` raises when it looks
+  during an enumeration gap — a *transient absence* read as a missing
+  device. Reads failed forever because the open fd outlives the deleted
+  node (#21), so no amount of retrying on that fd could work.
+- **Fix**: `_open_serial()` waits out the gap (20 x 0.5 s) and, if the
+  adapter really never returns, raises with the last underlying error
+  attached — "absent" and "present but unopenable" send an operator to
+  different places. `_exchange()` catches the OS-level error, reopens by
+  re-resolving the VID:PID, and reports that attempt as no-reply so the
+  existing retry loop absorbs it. Measured on the still-faulted bench,
+  150 s of `/v1/status` across 18 kernel re-enumerations:
+
+  | | reads | positions | null | median |
+  |---|---|---|---|---|
+  | before | 30 | **0** | 30 | 6112 ms |
+  | after | 959 | **959** | **0** | **30 ms** |
+
+  14 reconnects happened inside that window. The median is back to the
+  healthy-bench figure (27 ms); only the max, 4145 ms, shows a read that
+  spanned a reconnect.
+
+  **And then the part that was left fragile on purpose.** `move_to_mm`
+  refuses to continue across a reconnect: `link_generation` is sampled
+  after the first read and checked after every move and every position
+  read, and on a change the rail is stopped and the move *fails* —
+  `LinkDroppedError` if the stop landed, `MotionStopError` if it did
+  not. So while the link is bad, moves keep aborting. That is the
+  intended behaviour, not a shortfall.
+- **Rule**: Resilience is a per-operation judgement, not a property of a
+  connection. Reopening is right for a read, whose worst case is a stale
+  number, and wrong for a move, whose worst case is a rail travelling
+  with a latched speed command and nobody able to see it. Decide it by
+  what the hardware does during the gap, not by whether reconnecting is
+  technically possible.
+- **On my own reasoning**: I refused this work twice, on the grounds
+  that auto-reconnect would mask a fault, and only built it when asked
+  directly. The refusal was too broad. "Do not paper over the fault" was
+  right about motion and wrong about reads, and treating the link as one
+  thing hid that a 20-line change would have made the bench usable hours
+  earlier. The correct answer was never all-or-nothing; it was to ask
+  which operations are safe to retry, which is the same question
+  `_send_and_receive` already answers for writes a few lines away.
+
+## 22. The documented adapter serial was for an adapter that is not on this bench
+
+- **Problem**: Bringing cell1's XZ gantry up for the first time,
+  `server/nuc1/cell1.toml.example`, the `Config` default and
+  `CLAUDE.md`'s hardware table all named the X adapter `NTAM63XD`. The
+  three FTDI adapters actually plugged in are `NTAMU6TO`, `A10PUO5V`
+  and `A10PUO5W`. `MKSMotor.open_xz` checks its `serial_x` against the
+  live list and raises `X adapter (serial=NTAM63XD) not connected`, so
+  the cell server would have died at startup — before any of the
+  gantry code ran.
+- **Cause**: The two Z serials in the docs matched the hardware exactly,
+  which is what made the X entry credible. Only the X adapter had been
+  swapped at some point, and the docs were never re-read against the
+  bus. The upstream driver had the right value the whole time:
+  `bridge.py` and `CVMeasure.py` both carry `SERIAL_X = 'NTAMU6TO'`,
+  and even `open_xz`'s own docstring uses it as its example.
+- **Fix**: Take the serial from the bus, not the doc —
+  `for d in /sys/bus/usb/devices/*/; do ... cat $d/serial; done` filtered
+  to `idVendor=0403`, or the driver's own
+  `CAN2USBAdapterDeviceRecognition.py`. Corrected in the example config,
+  the `Config` default and `CLAUDE.md`. Identifying X among the three
+  needs no guesswork: name X explicitly and `open_xz` assigns whatever
+  two remain to Z, and here the odd adapter out is also a different
+  model (NTREX USB2CAN vs. two identical FT245R), which corroborates it.
+- **Rule**: A hardware address in a doc is a claim about a past bench,
+  and it decays silently. Before the first run of any cell, resolve every
+  address against the live bus and diff it against the driver's own
+  constants — the upstream repo that talks to the device daily is a
+  better source than the integration repo's table. Partial agreement is
+  not corroboration: two of three serials matching is exactly what a
+  single swapped adapter looks like.
+
+## 23. `preflight.py` says "not attached" for an adapter that is plugged in
+
+- **Problem**: With all three USB2CAN adapters visible in `lsusb` and
+  enumerated as `/dev/ttyUSB{1,2,5}`, `claude_test/preflight.py` printed
+  `attached FTDI adapters (0)` and
+  `[MISS] stage.serial_x = NTAMU6TO not attached right now`. Read
+  literally, that says the gantry is unplugged. It is not.
+- **Cause**: Two different access paths to the same chip. The pre-flight
+  resolves FTDI serials through **pyftdi/libusb**, which needs the raw
+  `/dev/bus/usb/<bus>/<dev>` node and needs the chip *not* claimed by a
+  kernel driver. On a host without the udev rule both fail: `ftdi_sio`
+  auto-binds on plug, and the nodes are `crw-rw-r-- root root` while the
+  user is merely in `dialout`/`plugdev`. `Ftdi.list_devices()` then
+  raises `ValueError: The device has no langid (permission issue, no
+  string descriptors supported or device error)` — whose *first* named
+  cause is a permission problem, not an absent device. The pump and
+  balance resolved fine in the same run because pyserial only needs the
+  `ttyUSB`/`ttyACM` node, which `dialout` covers.
+- **Fix**: Install the udev rule from
+  `external/ESP32S3BOX3MotorController/SETUP_UBUNTU.md` §1 (`MODE="0666"`
+  plus a `RUN+=` that unbinds `ftdi_sio`). `release_ftdi_sio()` in the
+  driver cannot substitute: writing `/sys/bus/usb/drivers/ftdi_sio/unbind`
+  needs root, so from an unprivileged cell server it is a silent no-op.
+- **Rule**: "Not attached" from a tool means "I could not see it the way
+  I look", which is a different fact from "it is not there". When a
+  pre-flight disagrees with `lsusb`, ask what access path the pre-flight
+  uses before touching the hardware — and if some devices on the same bus
+  resolve and others do not, the split is the clue: here it lands exactly
+  on libusb-vs-pyserial, i.e. permissions, not cabling. A checker that
+  reports a permission error as a missing device sends you to the wrong
+  end of the bench (see #20 for the day that cost).
+
+## 24. The gantry reported the position it was asked for, not the one it reached
+
+- **Problem**: `PumpGantryCell.move_gantry` set `self._stage_x_mm = target`
+  right after commanding the move and returned it, and `status()` served
+  that same cached number. Every `verify_*` assert in a scenario would
+  therefore compare the request against itself: a gantry that never moved
+  — unpowered, off the CAN bus, or having dropped the command — still
+  answered `200 OK` with `x_mm: 50.0`. `diagnose()` had the matching hole,
+  a hardcoded `"stage": {"ok": True}`.
+- **Cause**: `MKSMotor.move_to` does not raise when a move fails to start;
+  it *prints* `[ERROR] Motor failed to start (status=0x..)` or
+  `[ERROR] No response` and returns the status. `MKSMotor.move_sync` then
+  discards that return value entirely (it runs `move_to` for its side
+  effects inside `_run_group`). So the only signal a caller gets from a
+  refused move is a line on stdout. The paired-Z interlock does not cover
+  this either — it fires on a raised `ConnectionError`, and a *silently
+  dropped* command raises nothing, which is precisely the case where one
+  Z lands and its partner does not.
+- **Fix**: Confirm by measurement, never by echo. `_confirm()` reads
+  `read_position_mm()` back on every axis after each move and raises
+  `TransportError` if an axis cannot be read (position unknown ≠ arrived),
+  `DeviceFaultError` if it is further than `ARRIVAL_TOLERANCE_MM` from the
+  target, and `DeviceFaultError` if the two Z encoders end more than
+  `Z_DESYNC_LIMIT_MM` apart. `status()` reports live encoder values and
+  `null` for an axis it could not read — never `0.0`, which is the one
+  value that would make a `verify_home` assert pass. `diagnose()` derives
+  `stage.ok` from a live read of all three motors. Same substitution
+  removed from cell4's rail in #15/#17, found here by reading the driver
+  rather than by a bench failure.
+- **Rule**: When a driver signals failure by printing, its caller has no
+  error handling — it has a log. Grep any motion primitive for `print(`
+  and `return` before trusting its exceptions, and check what the *group*
+  wrapper does with the return value, because a helper that runs a
+  function for its side effects throws away the status the single-motor
+  path would have given you. The general rule holds: a cell may only
+  report a position it has measured. The dead-reckoned value is the
+  request, and a check that compares the request to itself always passes.
