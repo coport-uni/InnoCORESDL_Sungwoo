@@ -1,0 +1,154 @@
+# cell4's actual job: carry the balance on the rail, stop under a
+# dispense position, and weigh there. demo_linear_move.yaml proves the
+# rail moves; this is the first scenario that uses the balance at all.
+#
+# Field names were checked against server/routes.py and server/schemas.py,
+# not copied from a draft:
+#   linear/home            POST  -> {y_mm}
+#   linear/move            POST  {y_mm}          -> {y_mm}
+#   balance/tare           POST                  -> {weight_g}
+#   balance/weight         GET                   -> {weight_g, stable}
+#   status                 GET                   -> {stage_x_mm, weight_g, ...}
+#
+# TWO THINGS THE SCENARIO LANGUAGE CANNOT DO, so the operator supplies
+# them:
+#
+#   1. THERE IS NO WAIT STEP (spec section 8.1). The pause for loading the
+#      vial is the --step-mode pause after `move_to_weigh`. **This
+#      scenario is meaningless without --step-mode** -- run unattended it
+#      weighs an empty pan and fails `verify_vial_present`, which is the
+#      correct outcome but a waste of a run.
+#   2. THERE IS NO abs(). The assert evaluator allows no function calls
+#      (orchestrator/scenario.py _ALLOWED_ASSERT_NODES), so every
+#      "within +/- x" check below is written as two comparisons.
+#
+# Note `verify_zeroed` reads the weight back rather than trusting what
+# balance/tare returned: BalanceLinearCell.tare() returns a hardcoded 0.0
+# without measuring anything, so asserting on its response would prove
+# only that the code ran. The GET that follows is a real measurement.
+#
+# Run it as: dry run -> real, step-mode, operator at the bench.
+#   python -m orchestrator validate scenarios/demo_weigh_at_position.yaml
+#   python -m orchestrator run scenarios/demo_weigh_at_position.yaml --step-mode
+#
+# SAFETY: the rail cannot be stopped from software (docs/L1_AUDIT.md
+# GAP-1 and GAP-9). Keep the physical switch in reach and do not run this
+# unattended. Confirm weigh_mm is inside the safe travel before the first
+# run -- it is only the same placeholder demo_linear_move.yaml uses.
+
+name: demo_weigh_at_position
+description: >
+  Zero the balance at the origin, carry it out to the weighing position,
+  wait for the operator to load a vial, weigh it, and bring the rail
+  home. Ends with a second weight read so the run also answers whether
+  the return move disturbs the reading.
+
+params:
+  weigh_mm: 50.0        # where the balance stops to be loaded
+  tolerance_mm: 0.1     # the rail's closed loop converges to +-0.1 mm
+  empty_g: 0.01         # |weight| tolerated on an empty, freshly tared pan
+  # The bench vial measures about 23-27 g, so the run brackets it rather
+  # than only checking that *something* is on the pan: an empty pan and a
+  # wrong object both fail. Widen these if the vial changes -- they are a
+  # sanity check on the load, not a specification of it.
+  min_vial_g: 20.0
+  max_vial_g: 30.0
+  max_drift_g: 0.05     # how far the return move may shift the reading
+
+defaults:
+  on_fail: abort        # never retry a motion or a weighing step blindly
+  timeout_s: 30.0
+
+steps:
+  - id: check_status
+    cell: cell4
+    action: status
+    method: GET
+    timeout_s: 5.0
+    save_as: pre
+
+  # ── Zero at the origin ────────────────────────────────────────────────
+  - id: home
+    cell: cell4
+    action: linear/home
+    timeout_s: 60.0
+    save_as: homed
+
+  - id: verify_home
+    assert: "${homed.y_mm} <= ${params.tolerance_mm} and ${homed.y_mm} >= -${params.tolerance_mm}"
+
+  - id: tare
+    cell: cell4
+    action: balance/tare
+    timeout_s: 30.0
+
+  # A real measurement, unlike tare's own response. An empty pan that
+  # does not read ~0 here means the tare did not take, and every weight
+  # later in the run would be offset by that amount.
+  - id: confirm_zero
+    cell: cell4
+    action: balance/weight
+    method: GET
+    timeout_s: 40.0
+    save_as: zeroed
+
+  - id: verify_zeroed
+    assert: "${zeroed.weight_g} <= ${params.empty_g} and ${zeroed.weight_g} >= -${params.empty_g}"
+
+  # ── Out to the weighing position ──────────────────────────────────────
+  - id: move_to_weigh
+    cell: cell4
+    action: linear/move
+    body:
+      y_mm: "${params.weigh_mm}"
+    timeout_s: 90.0     # measured ~14 s for 50 mm; headroom for retries
+    save_as: at_weigh
+
+  - id: verify_at_weigh
+    assert: "${at_weigh.y_mm} >= ${params.weigh_mm} - ${params.tolerance_mm} and ${at_weigh.y_mm} <= ${params.weigh_mm} + ${params.tolerance_mm}"
+
+  # ══════════════════════════════════════════════════════════════════════
+  # OPERATOR: the --step-mode pause after the step above is where you put
+  # the vial on the pan. Let the reading settle before continuing --
+  # balance/weight blocks until the balance itself calls the value
+  # stable, so continuing early costs a timeout, not a wrong number.
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: weigh
+    cell: cell4
+    action: balance/weight
+    method: GET
+    timeout_s: 60.0     # settling is the operator's pace, not the bus's
+    save_as: vial
+
+  - id: verify_vial_present
+    assert: "${vial.weight_g} >= ${params.min_vial_g} and ${vial.weight_g} <= ${params.max_vial_g}"
+
+  - id: verify_vial_stable
+    assert: "${vial.stable} == true"
+
+  # ── Home again ────────────────────────────────────────────────────────
+  - id: move_home
+    cell: cell4
+    action: linear/move
+    body:
+      y_mm: 0.0
+    timeout_s: 90.0
+    save_as: back
+
+  - id: verify_back_home
+    assert: "${back.y_mm} <= ${params.tolerance_mm} and ${back.y_mm} >= -${params.tolerance_mm}"
+
+  # The point of the second read: the vial has not changed, so any
+  # difference from `weigh` is what carrying the balance did to the
+  # measurement. That number is what decides whether cell4 can weigh
+  # somewhere other than where it settles.
+  - id: weigh_after_return
+    cell: cell4
+    action: balance/weight
+    method: GET
+    timeout_s: 60.0
+    save_as: vial_after
+
+  - id: verify_no_drift
+    assert: "${vial_after.weight_g} - ${vial.weight_g} <= ${params.max_drift_g} and ${vial.weight_g} - ${vial_after.weight_g} <= ${params.max_drift_g}"

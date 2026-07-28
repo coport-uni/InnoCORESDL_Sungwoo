@@ -616,3 +616,76 @@ Run `20260728T085331Z-demo_linear_move`, `--param target_mm=50.0`,
       Tracked in coport-uni/LinearMotorController#23.
 - [ ] Push the three driver branches, open PRs, bump the two submodule
       pins.
+
+## 2026-07-28 — scenarios/demo_weigh_at_position.yaml (the first balance scenario)
+
+Asked for after the linear demo passed: the balance had still never been
+exercised through L1 or L2. `demo_linear_move.yaml` says so in its own
+description — "Single cell, **no balance**" — and neither existing
+scenario touches it. Operator's requested flow: zero → 50 mm → operator
+loads a vial → weigh → return to origin.
+
+- [x] Closed the L1 gap first by hand, since the four balance endpoints
+      had never been called: `GET /balance/weight` → `0.0005 g stable`;
+      `POST /balance/ambient very_unstable` → accepted; the same with
+      `bogus` → `InvalidArgError`; `POST /balance/tare` then a re-read →
+      **0.0005 g → 0.0 g**, i.e. the balance actually zeroed rather than
+      the call merely not raising. This is the first proof that the three
+      driver methods added earlier work through the HTTP layer, not just
+      when called directly.
+- [x] Wrote `scenarios/demo_weigh_at_position.yaml` (15 steps), field
+      names checked against `server/routes.py` and `server/schemas.py`.
+- [x] `validate` → `demo_weigh_at_position: ok (15 steps)` against the
+      live cell.
+- [x] **Vial loading uses the `--step-mode` pause** — the scenario
+      language has no wait step (spec §8.1). Documented in the file that
+      running it unattended weighs an empty pan and fails
+      `verify_vial_present`.
+- [x] **`verify_zeroed` reads the weight back instead of asserting on
+      `balance/tare`'s response.** `BalanceLinearCell.tare()` returns a
+      hardcoded `0.0` without measuring, so an assert on it would prove
+      only that the code ran — the same family as LearnedPatterns #15,
+      benign here but worth not building a check on.
+- [x] Absolute-value checks written as paired comparisons: the assert
+      evaluator allows no function calls, so `abs()` is unavailable.
+- [x] Added a closing `weigh_after_return` + `verify_no_drift`: the vial
+      is unchanged, so the difference from the first reading is exactly
+      what carrying the balance did to the measurement. That number
+      decides whether cell4 can weigh anywhere other than where it
+      settles.
+- [ ] **Run it** (`--step-mode`, operator at the bench). Not yet run, so
+      the balance has still never been driven from L2.
+- [ ] Tune the guessed parameters from the first run: `min_vial_g` (0.5)
+      needs the real vial mass; `max_drift_g` (0.05) should come from the
+      measured drift rather than a guess — a failure there on the first
+      run is itself the datum.
+- [ ] Commit once it has run and the parameters are real (operator asked
+      for test-before-commit).
+
+### Vial mass supplied; rail adapter then failed at the USB layer
+
+- [x] Operator gave the vial mass as ~23-27 g, so the presence check
+      became a bracket: `min_vial_g: 20.0`, `max_vial_g: 30.0`. A lower
+      bound alone catches only an empty pan; the bracket also catches the
+      wrong object. Re-validated: `demo_weigh_at_position: ok (15 steps)`.
+- [x] **The Moxa UPort then went into a hard USB fault**, so the run
+      could not be attempted. `/v1/status` returned `stage_x_mm: null`
+      four times running — not the intermittent ~10%, but every read.
+      The kernel logs `ti_usb_3410_5052_1 ttyUSB5:
+      ti_bulk_out_callback - nonzero urb status, -71` (EPROTO) every 2 s,
+      and with the server stopped the port cannot even be opened:
+      `OSError [Errno 5] Input/output error: '/dev/ttyUSB5'`. The balance
+      on the same bus answers normally, so this is the adapter alone, not
+      the bus. Needs a physical re-plug; no software path recovers it.
+- [x] Worth noting: the nullable `stage_x_mm` from LearnedPatterns #15 is
+      what made this visible immediately. Before that change the same
+      dead adapter would have reported the rail sitting at 0.0 mm.
+- [x] **Third failure of this adapter today** — dropped mid-run at 17:06,
+      re-enumerated on a different port at 17:08, and now this. The pump's
+      `3-7-port1` is also still flapping. Something physical recurs here;
+      the connectors and cables want inspecting, not just re-seating.
+- [ ] Re-plug the Moxa, restart the server, then run
+      `demo_weigh_at_position.yaml --step-mode` with the vial to hand.
+- [ ] `max_drift_g: 0.05` is still a guess and is the one parameter that
+      should come from measurement. A 23-27 g load carried 50 mm may well
+      exceed it; a failure there is the datum, not a defect.
