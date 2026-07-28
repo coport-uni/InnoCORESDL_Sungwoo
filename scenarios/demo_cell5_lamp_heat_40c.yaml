@@ -1,4 +1,4 @@
-# Cell D (cell5) bench run: lamp on, heat to 40 C, then everything off.
+# Cell 5 (cell5) bench run: lamp on, heat to 40 C, then everything off.
 #
 # The user-specified sequence (2026-07-28): switch the IR lamp on, heat
 # the plate toward 40 C, and the moment the plate REACHES 40 C, shut
@@ -13,16 +13,16 @@
 #   confirmation. Stay at the bench for the WHOLE run -- this scenario
 #   energizes a heater and an IR lamp at the same time.
 # - If the poll times out or any step fails, on_fail: abort ends the
-#   run and the orchestrator broadcasts /v1/stop, which on Cell D kills
+#   run and the orchestrator broadcasts /v1/stop, which on Cell 5 kills
 #   the heater, the stirrer, and the lamp (cell/pump_z_thermal_cell.py
 #   stop()). The physical e-stop stays the primary stop regardless.
 #
-#   python -m orchestrator validate scenarios/demo_cell_d_lamp_heat_40c.yaml
-#   python -m orchestrator run scenarios/demo_cell_d_lamp_heat_40c.yaml
+#   python -m orchestrator validate scenarios/demo_cell5_lamp_heat_40c.yaml
+#   python -m orchestrator run scenarios/demo_cell5_lamp_heat_40c.yaml
 
-name: cell_d_lamp_heat_40c
+name: cell5_lamp_heat_40c
 description: >
-  Switch Cell D's IR lamp on, heat the plate to 40 C, and shut the
+  Switch Cell 5's IR lamp on, heat the plate to 40 C, and shut the
   heater and the lamp down as soon as the plate reaches temperature.
 
 params:

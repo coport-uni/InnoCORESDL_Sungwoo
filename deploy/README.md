@@ -41,7 +41,7 @@ cp server/nuc1/cell1.toml.example server/nuc1/cell1.toml   # NUC1
 cp server/nuc1/cell4.toml.example server/nuc1/cell4.toml   # NUC1
 cp server/nuc2/cell2.toml.example server/nuc2/cell2.toml   # NUC2
 cp server/nuc2/cell3.toml.example server/nuc2/cell3.toml   # NUC2
-cp server/nuc2/cell5.toml.example server/nuc2/cell5.toml   # NUC2 (Cell D)
+cp server/nuc2/cell5.toml.example server/nuc2/cell5.toml   # NUC2 (Cell 5)
 ```
 
 Install the template unit and enable the instances for **that** NUC — the
@@ -60,7 +60,7 @@ systemctl status 'cell@*'
 journalctl -u cell@nuc1-cell4 -f
 ```
 
-Cell D (`cell5`) owns four devices: the pump, one MKS motor as a
+Cell 5 (`cell5`) owns four devices: the pump, one MKS motor as a
 standalone Z axis, an IKA hotplate, and an IR lamp on a Tapo plug. Two
 extra prerequisites for that cell:
 
@@ -106,7 +106,7 @@ Never skip a stage:
 ```bash
 # 1. dry run — no device is touched
 python -m orchestrator validate scenarios/demo_linear_move.yaml
-python -m orchestrator validate scenarios/demo_cell_d_warmup.yaml
+python -m orchestrator validate scenarios/demo_cell5_warmup.yaml
 
 # 2. real, one step at a time, operator at the bench
 python -m orchestrator run scenarios/demo_linear_move.yaml --step-mode

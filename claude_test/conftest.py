@@ -170,7 +170,7 @@ _GANTRY_PATHS: dict[str, Any] = {
     **_PUMP_PATHS,
 }
 
-#: Cell D (cell5): single Z + hotplate + IR lamp, on top of the pump.
+#: Cell 5 (cell5): single Z + hotplate + IR lamp, on top of the pump.
 _THERMAL_PATHS: dict[str, Any] = {
     "/v1/zstage/home": _post("zstage_home"),
     "/v1/zstage/move": _post("zstage_move", "ZStageMoveRequest"),
@@ -423,7 +423,7 @@ class FakeL1:
 
 @pytest.fixture
 def shapes() -> dict[str, str]:
-    """The three cell shapes: cell1–3, cell4, and Cell D (cell5)."""
+    """The three cell shapes: cell1–3, cell4, and Cell 5 (cell5)."""
     return {"cell1": "gantry", "cell4": "linear", "cell5": "thermal"}
 
 

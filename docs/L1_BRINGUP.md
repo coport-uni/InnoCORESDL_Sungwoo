@@ -56,11 +56,11 @@ python -c "from pyftdi.ftdi import Ftdi; Ftdi.show_devices()"    # MKS FTDI seri
 |---|---|---|
 | FTDI serial of cell2's X adapter | Cell B | `server/nuc2/cell2.toml` `[stage] serial_x` |
 | FTDI serial of cell3's X adapter | Cell C | `server/nuc2/cell3.toml` `[stage] serial_x` |
-| FTDI serial of cell5's single Z | Cell D | `server/nuc2/cell5.toml` `[zstage] serial` |
-| Plug name (or IP) of the IR lamp | Cell D | `server/nuc2/cell5.toml` `[lamp] target`, and it must exist in the plug driver's `device_list.md` |
-| Plug credentials | Cell D | `external/SmartPlugController/secure.env` — **the operator writes this; Claude Code does not read it** |
+| FTDI serial of cell5's single Z | Cell 5 | `server/nuc2/cell5.toml` `[zstage] serial` |
+| Plug name (or IP) of the IR lamp | Cell 5 | `server/nuc2/cell5.toml` `[lamp] target`, and it must exist in the plug driver's `device_list.md` |
+| Plug credentials | Cell 5 | `external/SmartPlugController/secure.env` — **the operator writes this; Claude Code does not read it** |
 | Safe travel per axis | all | the `--step-mm` you pass to `smoke_l1.py`, and later `target_mm` / `lift_mm` in the scenarios |
-| `max_celsius` for this bench | Cell D | `server/nuc2/cell5.toml` `[hotplate]` — set it as low as the chemistry allows |
+| `max_celsius` for this bench | Cell 5 | `server/nuc2/cell5.toml` `[hotplate]` — set it as low as the chemistry allows |
 | Real NUC IPs, cell5 port vs ARCHITECTURE.md | L2 | `orchestrator/config.toml` |
 
 Two prerequisites are set on the devices themselves, not in any file:
@@ -176,5 +176,5 @@ python -m orchestrator run      scenarios/demo_linear_move.yaml
 ```
 
 The first motion-bearing step always waits for you. In `--step-mode` every
-step does. Cell D's scenario (`demo_cell_d_warmup.yaml`) has no wait step
+step does. Cell 5's scenario (`demo_cell5_warmup.yaml`) has no wait step
 by design — the thermal hold is yours to time in `--step-mode`.

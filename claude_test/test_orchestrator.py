@@ -406,15 +406,15 @@ async def test_first_motion_step_waits_for_confirmation(
     assert run.pending_confirmation is None
 
 
-# ── Cell D (cell5): pump + single Z + hotplate + IR lamp ───────────────────
+# ── Cell 5 (cell5): pump + single Z + hotplate + IR lamp ───────────────────
 
-CELL_D_DEMO = REPO_ROOT / "scenarios" / "demo_cell_d_warmup.yaml"
+CELL5_DEMO = REPO_ROOT / "scenarios" / "demo_cell5_warmup.yaml"
 
 
-async def test_cell_d_scenario_validates_and_runs(
+async def test_cell5_scenario_validates_and_runs(
     engine: Engine, fake_l1: FakeL1
 ) -> None:
-    text = CELL_D_DEMO.read_text(encoding="utf-8")
+    text = CELL5_DEMO.read_text(encoding="utf-8")
     _s, issues = await engine.validate(text)
     assert [str(i) for i in issues] == []
 
@@ -428,7 +428,7 @@ async def test_cell_d_scenario_validates_and_runs(
     assert fake_l1.z_mm["cell5"] == 0.0
 
 
-async def test_cell_d_body_typo_is_caught_before_anything_moves(
+async def test_cell5_body_typo_is_caught_before_anything_moves(
     engine: Engine, fake_l1: FakeL1
 ) -> None:
     # `celsius` is the field; `temperature` is not. The dry run must catch
@@ -507,9 +507,9 @@ async def test_wrong_shape_action_fails_cleanly_at_runtime(
     assert error["payload"]["error"] == "WrongStateError"
 
 
-CELL_D_BLINK = REPO_ROOT / "scenarios" / "demo_cell_d_lamp_blink.yaml"
-CELL_D_HOTPLATE = REPO_ROOT / "scenarios" / "demo_cell_d_hotplate_30c.yaml"
-CELL_D_Z_CYCLES = REPO_ROOT / "scenarios" / "demo_cell_d_z_cycles.yaml"
+CELL5_BLINK = REPO_ROOT / "scenarios" / "demo_cell5_lamp_blink.yaml"
+CELL5_HOTPLATE = REPO_ROOT / "scenarios" / "demo_cell5_hotplate_30c.yaml"
+CELL5_Z_CYCLES = REPO_ROOT / "scenarios" / "demo_cell5_z_cycles.yaml"
 
 #: Overrides that shrink the demos' real-time holds to test speed.
 FAST_HOLDS = {"blink_hold_s": 0.01, "soak_s": 0.01}
@@ -656,11 +656,11 @@ def test_until_rejects_post() -> None:
         )
 
 
-# ── the three Cell D bench demos ───────────────────────────────────────────
+# ── the three Cell 5 bench demos ───────────────────────────────────────────
 
 
-async def test_cell_d_lamp_blink_demo(engine: Engine, fake_l1: FakeL1) -> None:
-    text = CELL_D_BLINK.read_text(encoding="utf-8")
+async def test_cell5_lamp_blink_demo(engine: Engine, fake_l1: FakeL1) -> None:
+    text = CELL5_BLINK.read_text(encoding="utf-8")
     _s, issues = await engine.validate(text)
     assert [str(i) for i in issues] == []
     run = await engine.create_run(text, params=FAST_HOLDS)
@@ -673,8 +673,8 @@ async def test_cell_d_lamp_blink_demo(engine: Engine, fake_l1: FakeL1) -> None:
     assert fake_l1.lamp_on["cell5"] is False
 
 
-async def test_cell_d_hotplate_demo(engine: Engine, fake_l1: FakeL1) -> None:
-    text = CELL_D_HOTPLATE.read_text(encoding="utf-8")
+async def test_cell5_hotplate_demo(engine: Engine, fake_l1: FakeL1) -> None:
+    text = CELL5_HOTPLATE.read_text(encoding="utf-8")
     _s, issues = await engine.validate(text)
     assert [str(i) for i in issues] == []
     run = await engine.create_run(text, params=FAST_HOLDS)
@@ -684,9 +684,9 @@ async def test_cell_d_hotplate_demo(engine: Engine, fake_l1: FakeL1) -> None:
     assert fake_l1.heating["cell5"] is False
 
 
-async def test_cell_d_lamp_heat_demo(engine: Engine, fake_l1: FakeL1) -> None:
+async def test_cell5_lamp_heat_demo(engine: Engine, fake_l1: FakeL1) -> None:
     text = (
-        REPO_ROOT / "scenarios" / "demo_cell_d_lamp_heat_40c.yaml"
+        REPO_ROOT / "scenarios" / "demo_cell5_lamp_heat_40c.yaml"
     ).read_text(encoding="utf-8")
     _s, issues = await engine.validate(text)
     assert [str(i) for i in issues] == []
@@ -701,8 +701,8 @@ async def test_cell_d_lamp_heat_demo(engine: Engine, fake_l1: FakeL1) -> None:
     assert fake_l1.target_c["cell5"] == 40.0
 
 
-async def test_cell_d_final_demo(engine: Engine, fake_l1: FakeL1) -> None:
-    text = (REPO_ROOT / "scenarios" / "demo_cell_d_final.yaml").read_text(
+async def test_cell5_final_demo(engine: Engine, fake_l1: FakeL1) -> None:
+    text = (REPO_ROOT / "scenarios" / "demo_cell5_final.yaml").read_text(
         encoding="utf-8"
     )
     _s, issues = await engine.validate(text)
@@ -718,8 +718,8 @@ async def test_cell_d_final_demo(engine: Engine, fake_l1: FakeL1) -> None:
     assert run.vars["reached"]["plate_c"] >= 39.0
 
 
-async def test_cell_d_z_cycles_demo(engine: Engine, fake_l1: FakeL1) -> None:
-    text = CELL_D_Z_CYCLES.read_text(encoding="utf-8")
+async def test_cell5_z_cycles_demo(engine: Engine, fake_l1: FakeL1) -> None:
+    text = CELL5_Z_CYCLES.read_text(encoding="utf-8")
     _s, issues = await engine.validate(text)
     assert [str(i) for i in issues] == []
     run = await engine.create_run(text)

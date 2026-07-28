@@ -1,4 +1,4 @@
-# Cell D (cell5) demo 1/3: blink the IR lamp for ~5 seconds.
+# Cell 5 (cell5) demo 1/3: blink the IR lamp for ~5 seconds.
 #
 # Three on/off cycles paced by `wait_s` holds (the local no-device step;
 # spec section 8.1) — 6 switch calls x ~0.8 s hold ≈ 5 s of blinking on
@@ -13,12 +13,12 @@
 # operator's confirmation (hazard prefix "lamp/"); keep the area around
 # the IR lamp clear before confirming.
 #
-#   python -m orchestrator validate scenarios/demo_cell_d_lamp_blink.yaml
-#   python -m orchestrator run scenarios/demo_cell_d_lamp_blink.yaml
+#   python -m orchestrator validate scenarios/demo_cell5_lamp_blink.yaml
+#   python -m orchestrator run scenarios/demo_cell5_lamp_blink.yaml
 
-name: cell_d_lamp_blink
+name: cell5_lamp_blink
 description: >
-  Blink Cell D's IR lamp three times over about five seconds, verify the
+  Blink Cell 5's IR lamp three times over about five seconds, verify the
   plug reports the commanded state, and leave the lamp off.
 
 params:

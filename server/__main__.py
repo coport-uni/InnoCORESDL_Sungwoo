@@ -83,7 +83,7 @@ def _load_balance_linear(
 def _load_pump_z_thermal(
     path: Path,
 ) -> tuple[PumpZThermalConfig, ServerConfig]:
-    """Parse a Cell D (cell5) config: pump + Z + hotplate + lamp."""
+    """Parse a Cell 5 (cell5) config: pump + Z + hotplate + lamp."""
     raw = tomllib.loads(path.read_text(encoding="utf-8"))
     pump = raw.get("pump", {})
     zstage = raw.get("zstage", {})
@@ -117,7 +117,7 @@ def _load_pump_z_thermal(
 def _infer_cell(path: Path) -> str:
     """Pick the cell shape from the config's tables so `--config` alone selects
     it. A ``[zstage]`` / ``[hotplate]`` / ``[lamp]`` table → ``pump_z_thermal``
-    (cell5, Cell D — checked first because it also has a ``[pump]`` table); a
+    (cell5, Cell 5 — checked first because it also has a ``[pump]`` table); a
     ``[linear]`` (or ``[balance]``) table → ``balance_linear`` (cell4);
     otherwise ``pump_gantry`` (cell1–3). ``--cell`` overrides this."""
     raw = tomllib.loads(path.read_text(encoding="utf-8"))

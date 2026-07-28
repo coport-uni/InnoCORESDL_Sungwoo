@@ -318,3 +318,14 @@ was a TBD standalone item through spec v0.9.
       recorded in orchestrator/config.toml.example, the real
       config.toml (NUC1 cells staged as comments), and the spec's §2/§12
       examples.
+- [x] Rename "Cell D" -> "Cell 5" repo-wide per the user's correction:
+      docs (README, CLAUDE.md, spec, audit, bringup, deploy), code
+      comments/docstrings, configs, and the scenario files
+      (demo_cell_d_* -> demo_cell5_*, name: cell_d_* -> cell5_*).
+      Historical ToDo/LearnedPatterns entries left as written
+      (append-only). All 6 scenarios re-validated against the live L1;
+      45/45 tests; ruff clean.
+- [x] README rewritten for readers new to this kind of automation:
+      layered mermaid overview, bench topology with real IPs, the
+      verification ladder, a run sequence diagram, and a scenario
+      mini-tutorial. (English per CommonClaude language rule.)

@@ -1,4 +1,4 @@
-# Cell D (cell5) FINAL bench demo — the full user-specified sequence
+# Cell 5 (cell5) FINAL bench demo — the full user-specified sequence
 # (2026-07-28): motion first, thermal second, everything off at the end.
 #
 #   1. Home the Z axis.
@@ -15,15 +15,15 @@
 #   parked at home before the lamp or heater energize.
 # - The first hazard step (home_z) waits for the operator gate. Stay at
 #   the bench for the WHOLE run; e-stop in reach.
-# - Any failure aborts and broadcasts /v1/stop, which on Cell D also
+# - Any failure aborts and broadcasts /v1/stop, which on Cell 5 also
 #   kills the heater and the lamp.
 #
-#   python -m orchestrator validate scenarios/demo_cell_d_final.yaml
-#   python -m orchestrator run scenarios/demo_cell_d_final.yaml
+#   python -m orchestrator validate scenarios/demo_cell5_final.yaml
+#   python -m orchestrator run scenarios/demo_cell5_final.yaml
 
-name: cell_d_final
+name: cell5_final
 description: >
-  Cell D full demo: home Z, stroke to 400 mm and back, then lamp +
+  Cell 5 full demo: home Z, stroke to 400 mm and back, then lamp +
   hotplate to 40 C, hold two minutes at temperature, and shut both
   down verified.
 

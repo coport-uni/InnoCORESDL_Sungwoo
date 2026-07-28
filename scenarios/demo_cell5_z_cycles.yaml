@@ -1,4 +1,4 @@
-# Cell D (cell5) demo 3/3: home the Z axis, then run top-to-bottom
+# Cell 5 (cell5) demo 3/3: home the Z axis, then run top-to-bottom
 # three times.
 #
 # The single MKS SERVO57D homes to its limit (0 mm), then cycles
@@ -11,18 +11,18 @@
 #
 # z_top_mm is a PLACEHOLDER TRAVEL — 10 mm until the operator measures
 # the real safe stroke of this bench. Override without editing the file:
-#   python -m orchestrator run scenarios/demo_cell_d_z_cycles.yaml \
+#   python -m orchestrator run scenarios/demo_cell5_z_cycles.yaml \
 #       --param z_top_mm=50.0
 #
 # THIS MOVES A MOTOR. The first zstage/ step waits for the operator's
 # confirmation; clear the frame and keep the e-stop in reach.
 #
-#   python -m orchestrator validate scenarios/demo_cell_d_z_cycles.yaml
-#   python -m orchestrator run scenarios/demo_cell_d_z_cycles.yaml --step-mode
+#   python -m orchestrator validate scenarios/demo_cell5_z_cycles.yaml
+#   python -m orchestrator run scenarios/demo_cell5_z_cycles.yaml --step-mode
 
-name: cell_d_z_cycles
+name: cell5_z_cycles
 description: >
-  Home Cell D's Z axis, then stroke it top-to-bottom three times and
+  Home Cell 5's Z axis, then stroke it top-to-bottom three times and
   finish parked at home.
 
 params:

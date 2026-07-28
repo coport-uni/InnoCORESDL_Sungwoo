@@ -1,4 +1,4 @@
-# Cell D (cell5) bring-up demo: single Z + hotplate + IR lamp in one run.
+# Cell 5 (cell5) bring-up demo: single Z + hotplate + IR lamp in one run.
 #
 # Field names were taken from server/schemas.py, not guessed:
 #   zstage/move        -> {z_mm, speed_pct, accel_pct}
@@ -9,15 +9,15 @@
 #                                        from a scenario (LearnedPatterns #8).
 #
 # The scenario language now has a `wait_s` step (spec section 8.1;
-# demo_cell_d_hotplate_30c.yaml uses it for a fixed 10 s soak). This
+# demo_cell5_hotplate_30c.yaml uses it for a fixed 10 s soak). This
 # scenario predates it and keeps the operator-paced hold instead: the run
 # pauses after `heat_on` in --step-mode, you watch the plate reach
 # temperature, then resume. Do not run this scenario unattended -- it
 # energizes a heater and a lamp.
 #
 # Run it as: dry run -> real step_mode -> real.
-#   python -m orchestrator validate scenarios/demo_cell_d_warmup.yaml
-#   python -m orchestrator run scenarios/demo_cell_d_warmup.yaml --step-mode
+#   python -m orchestrator validate scenarios/demo_cell5_warmup.yaml
+#   python -m orchestrator run scenarios/demo_cell5_warmup.yaml --step-mode
 #
 # Before the first run:
 #   1. Confirm the safe Z travel with the operator and set lift_mm.
@@ -26,9 +26,9 @@
 #      above it with a 400 before touching the device.
 #   3. Clear anything flammable from around the IR lamp.
 
-name: cell_d_warmup
+name: cell5_warmup
 description: >
-  Cell D bring-up: raise the Z stage, set the hotplate to a mild setpoint
+  Cell 5 bring-up: raise the Z stage, set the hotplate to a mild setpoint
   and confirm it took, blink the IR lamp, then leave everything off and
   the stage back home.
 

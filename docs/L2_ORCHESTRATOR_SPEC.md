@@ -4,15 +4,15 @@
 문서 버전: v1.1 (2026-07-27)
 독자: 이 저장소에서 작업하는 Claude Code
 
-v1.0 대비 변경 (구현 반영): **Cell D (cell5)가 구현되었다.**
+v1.0 대비 변경 (구현 반영): **Cell 5 (cell5)가 구현되었다.**
 `cell/pump_z_thermal_cell.py` (`PumpZThermalCell`)와 신규 action set 3종
 (`zstage/*`, `hotplate/*`, `lamp/*`), `server/nuc2/cell5.toml.example`,
-시나리오 `scenarios/demo_cell_d_warmup.yaml`이 추가되었고
+시나리오 `scenarios/demo_cell5_warmup.yaml`이 추가되었고
 `[cells.cell5]`가 orchestrator config에 등록되었다. 그 과정에서 확정된
 사항 셋:
 
 1. **단일 Z축은 gantry action set을 재사용하지 않는다.** gantry는 X
-   target을 요구하므로 Cell D에 맞지 않는다 (`ADDING_A_CELL.md`의 "새
+   target을 요구하므로 Cell 5에 맞지 않는다 (`ADDING_A_CELL.md`의 "새
    motion family는 새 action set" 규칙). 다만 모터 구동은 여전히
    드라이버의 group helper (`home_sync`/`move_sync`/`stop_group_hard`)를
    one-motor group으로 호출한다 — 쌍 Z 인터록이 아니라 limit-drop 흡수가
@@ -30,12 +30,12 @@ v1.0 대비 변경 (구현 반영): **Cell D (cell5)가 구현되었다.**
 공유하는 경우를 모델링하지 못한다**는 점이 확인되었다 (로봇 편입 시
 현실화). `docs/L1_AUDIT.md` GAP-8로 등록했다.
 
-v0.9 대비 변경 (사용자 확정): **Cell D의 구성이 확정되었다** — MKS motor
+v0.9 대비 변경 (사용자 확정): **Cell 5의 구성이 확정되었다** — MKS motor
 1개 (Z축 단독) + hotplate 1개 + Tapo 플러그 1개 + 시린지 펌프. 즉
-**hotplate가 Cell D의 내부 device로 편입**되었다. 이전 판까지 hotplate는
-L1화 여부 자체가 TBD인 별도 항목이었고 (4.2절 표의 보류 행), Cell D는
+**hotplate가 Cell 5의 내부 device로 편입**되었다. 이전 판까지 hotplate는
+L1화 여부 자체가 TBD인 별도 항목이었고 (4.2절 표의 보류 행), Cell 5는
 "pump + Z + IR 램프" 3종으로 서술되어 있었다. 이에 따라 2절 도식도와
-대응표, 4.1의 A8, 4.2의 smoke test 표를 Cell D = **4종 device**로
+대응표, 4.1의 A8, 4.2의 smoke test 표를 Cell 5 = **4종 device**로
 수정했다. Tapo 플러그는 지금까지의 서술대로 적외선 램프의 전원
 스위치로 간주한다 (플러그가 램프가 아닌 다른 부하를 켠다면 본 절을
 정정할 것).
@@ -75,20 +75,20 @@ submodule 경유 제어)를 도식도, 장비 대응표, smoke test 표에
 추가했다. cell6 `IrLampCell` :17064 (잠정)로 신규 L1화 대상이다.
 
 v0.5 대비 변경 (사용자 확인 반영): 적외선 램프의 독립 cell화
-(cell6)를 **철회**하고 **Cell D (cell5) 내부 device로 통합**했다.
-또한 **Cell D는 A/B/C와 달리 z축이 존재**하는 별도 구성임이
+(cell6)를 **철회**하고 **Cell 5 (cell5) 내부 device로 통합**했다.
+또한 **Cell 5는 A/B/C와 달리 z축이 존재**하는 별도 구성임이
 확정되어, B/C만 동일 clone으로 남기고 D는 신규 cell 구성 (pump +
 z축 gantry + IR lamp)으로 재정의했다.
 
 v0.6 대비 변경 (사용자 정정 반영): 축 구성을 최종 확정했다. **Cell
-A/B/C는 X축 1개 + Z축 2개 (3축)**, **Cell D는 Z축 1개 단독 + IR
+A/B/C는 X축 1개 + Z축 2개 (3축)**, **Cell 5는 Z축 1개 단독 + IR
 lamp 내장**이다. 이전 판의 "D만 z축 보유" 서술을 폐기하고 도식도,
 대응표, smoke test 표를 이에 맞게 수정했으며, 기존
 `PumpGantryCell`의 X1+Z2 3축 지원 여부 확인을 M0 항목에 추가했다.
 
 v0.7 대비 변경 (사용자 정정 반영): A/B/C의 **Z축 2개는 개별 구동이
 아니라 항상 동시 (동기) 구동**으로 확정. 이동 자유도는 X와 Z 두
-개이며 L2 시나리오 언어에서 Z는 단일 값으로만 다룬다. **Cell D는
+개이며 L2 시나리오 언어에서 Z는 단일 값으로만 다룬다. **Cell 5는
 pump를 포함**하는 것으로 확정 (pump + Z축 단독 + IR lamp). smoke
 test의 gantry 합격 기준을 동기 구동 확인 (두 Z축 동시 이동, 축간
 어긋남 없음)으로 교체했다.
@@ -161,7 +161,7 @@ graph TB
         A_ROBOT["분석 로봇"]
         A_CB["Cell B<br/>(X축 1 + Z축 2)"]
         A_CC["Cell C<br/>(X축 1 + Z축 2)"]
-        A_CD["Cell D<br/>(pump + Z축 1개 + hotplate + Tapo 플러그)"]
+        A_CD["Cell 5<br/>(pump + Z축 1개 + hotplate + Tapo 플러그)"]
     end
 
     ORCH -->|HTTP /v1| S_ROBOT
@@ -186,14 +186,14 @@ graph TB
 | 저울 + Linear Rail | NUC1 | cell4 (`BalanceLinearCell`) :17060 | 기존 구현 그대로 |
 | Cell A | NUC1 | cell1 (`PumpGantryCell`) :17054 | 구동축은 **X축 1개 + Z축 2개** (총 3축). 단 **Z축 2개는 개별 구동이 아니라 항상 동시 (동기) 구동**된다. 즉 이동 명령 관점의 자유도는 X와 Z 두 개다. 기존 `PumpGantryCell`이 Z 명령 1회로 두 Z축을 동기 구동하는 구성 (하드웨어 병렬 결선인지 소프트웨어 동기인지 포함)을 지원하는지 M0의 A1에서 확인한다 |
 | Cell B / C | NUC2 | cell2 :17056, cell3 :17058 | Cell A와 같은 **X축 1개 + Z축 2개** 구성의 동일 하드웨어 clone. **신규 cell 클래스를 만들지 않는다.** config toml 2벌 (각자의 USB serial 식별자)만 추가한다 |
-| Cell D | NUC2 | cell5 :17062 (신규 cell 구성) | A/B/C와 달리 구동축이 **Z축 1개뿐**이고 X축이 없다. 구성은 **device 4종으로 확정** (2026-07-27): 시린지 펌프 (`sy01b`) + **MKS motor 1개** (Z축 단독, `mks_motor`의 단일 모터 API — 쌍 Z 인터록은 해당 없음) + **hotplate 1개** (`external/HotplateController`, IKA RCT digital) + **Tapo 플러그 1개** (`external/SmartPlugController`, python-kasa; 적외선 램프 전원). 독립 IrLampCell이나 HotplateCell을 만들지 않고 cell 경계 규칙 (one cell = one server)에 따라 Cell D 서버 하나가 넷을 소유한다. 포트 17062는 ARCHITECTURE.md 대조 후 확정 |
+| Cell 5 | NUC2 | cell5 :17062 (신규 cell 구성) | A/B/C와 달리 구동축이 **Z축 1개뿐**이고 X축이 없다. 구성은 **device 4종으로 확정** (2026-07-27): 시린지 펌프 (`sy01b`) + **MKS motor 1개** (Z축 단독, `mks_motor`의 단일 모터 API — 쌍 Z 인터록은 해당 없음) + **hotplate 1개** (`external/HotplateController`, IKA RCT digital) + **Tapo 플러그 1개** (`external/SmartPlugController`, python-kasa; 적외선 램프 전원). 독립 IrLampCell이나 HotplateCell을 만들지 않고 cell 경계 규칙 (one cell = one server)에 따라 Cell 5 서버 하나가 넷을 소유한다. 포트 17062는 ARCHITECTURE.md 대조 후 확정 |
 | 합성 로봇 | NUC1 | 대응 없음 (확정) | 본 사양 범위 외. registry 미등록 상태로 진행하고, 추후 L1화 시 `ADDING_A_CELL.md` 절차로 별도 편입 |
 | 분석 로봇 | NUC2 | 대응 없음 (확정) | 상동 |
 
   B/C가 동일 hardware clone이므로 M0의 A1은 위 표 검증으로
   단축된다. 실질 격차는 네 가지다: A/B/C의 **X1 + Z2 (동기) 구성을
   기존 `PumpGantryCell`이 지원하는지 확인**, 인스턴스별 config
-  (FTDI serial, CH340 포트 식별자) 채집, **Cell D (cell5)의 신규
+  (FTDI serial, CH340 포트 식별자) 채집, **Cell 5 (cell5)의 신규
   구성** (pump + Z축 단독 + IR lamp 통합, `ADDING_A_CELL.md`
   절차), cell5 포트 확정. 특히 **이동 자유도가 cell마다 다르다는
   점** (A/B/C는 X와 Z, D는 Z뿐)이 확정되었으므로, 8.2절의 OpenAPI
@@ -201,7 +201,7 @@ graph TB
   명령의 축 파라미터를 cell 간에 복사해 쓰지 않는다. 또한 시나리오
   언어에서 Z는 항상 **하나의 값**으로 다룬다. Z축 2개를 개별
   지정하는 파라미터를 L2에 노출하지 않는다. 로봇 2대는 A8 검토
-  대상에서 제외하며, A8의 실질 대상은 Cell D의 IR lamp (smartplug)와
+  대상에서 제외하며, A8의 실질 대상은 Cell 5의 IR lamp (smartplug)와
   hotplate다.
 
 - IP와 포트의 실제 값은 `orchestrator/config.toml`에서만 정의한다.
@@ -253,7 +253,7 @@ L1을 검토와 보강의 대상으로 삼는 것이 본 프로젝트의 방침�
 | A5 | 오류가 `CellError` 계층으로 HTTP status에 일관 매핑되는가 | `server/errors.py` 대조 | on_fail 정책이 오류 종류를 구분하는 근거 |
 | A6 | OpenAPI 스키마가 실제 라우트와 일치하며 L2 validator가 소비 가능한가 | `GET /openapi.json` 조회 | dry run 검증이 OpenAPI 대조로 동작 |
 | A7 | 동시 요청에 대한 L1의 거동이 정의되어 있는가 (직렬화 또는 409) | 코드 확인 + 동시 호출 테스트 | L2 lock이 실패해도 하드웨어가 보호되는지 |
-| A8 | Cell D의 미L1화 device (Z축 MKS motor, hotplate, Tapo 플러그) driver와 통신 사양이 확보되어 있는가 | `external/` submodule 열람 + 사용자 문의 | cell5 작성 가능성 판단 |
+| A8 | Cell 5의 미L1화 device (Z축 MKS motor, hotplate, Tapo 플러그) driver와 통신 사양이 확보되어 있는가 | `external/` submodule 열람 + 사용자 문의 | cell5 작성 가능성 판단 |
 
 ### 4.2 실장비 smoke test (사용자 감독 필수)
 
@@ -276,11 +276,11 @@ M0의 판정은 코드 열람만으로 끝내지 않는다. 검토 항목별로 
 |---|---|---|---|
 | Linear rail (cell4) | `linear/home` 후 `linear/move`로 약 10mm 이동, 다시 0mm 복귀 | 왕복 완료, status 좌표가 ±0.1mm 내 수렴, 소요 시간 기록 | 가동 범위 내 소폭 이동만. 이 결과가 8.3 데모의 timeout 보정값이 된다 |
 | Gantry (Cell A/B/C: X1 + 동기 Z2) | `gantry/home` 후 X축 약 10mm 왕복, 이어서 Z 이동 명령 1회로 약 10mm 왕복. 각 cell의 OpenAPI로 축 파라미터명을 먼저 확인 | 왕복 완료, **Z 명령 1회에 두 Z축이 동시에 같은 양만큼 움직이고 축간 어긋남 (기울어짐)이 없음을 육안 확인**, 첫 명령 drop quirk 미발생 (발생 시 기록) | 최고 위험 장비. 프레임 정리, e-stop 대기, 사용자 승인 후 축당 1회씩. 두 Z축 중 한쪽만 움직이는 이상 발생 시 즉시 정지 |
-| Z stage (Cell D: Z1 단독) | home 후 Z축 약 10mm 이동과 복귀 | 왕복 완료, X축 명령이 스키마에 존재하지 않음을 확인 | 상동. 단일 모터이므로 쌍 Z 동기 확인은 해당 없고, 대신 `emergency_stop`이 실제로 듣는지 확인 |
+| Z stage (Cell 5: Z1 단독) | home 후 Z축 약 10mm 이동과 복귀 | 왕복 완료, X축 명령이 스키마에 존재하지 않음을 확인 | 상동. 단일 모터이므로 쌍 Z 동기 확인은 해당 없고, 대신 `emergency_stop`이 실제로 듣는지 확인 |
 | Balance (cell4) | `balance/tare` 후 `balance/weight` 읽기, 기지 분동 또는 소형 물체 올려 재읽기 | tare 후 0 부근, 물체 재읽기에서 값 변화 확인, AUTO W/ 안정화 시간 기록 | SBI 모드 사전 조건 (front panel) 확인 선행 |
 | Pump (Cell A/B/C/D 전부) | `valve` 전환 (port 2 → 1, M05 90° 규칙) 후 소량 (수 µL) cycle | 액체 이동을 **육안으로** 확인 (`?6` 응답만으로 판정 금지, LearnedPatterns #1) | 튜브와 시약 상태를 사용자가 사전 점검 |
-| Hotplate (**Cell D 내장**, cell5 L1화 시) | 목표 온도 30°C 설정, 단시간 유지 후 heater off | 설정값 반영과 온도 상승 추세 확인, off 후 setpoint 복원 | 가열 중 자리 이탈 금지. Cell D의 device이므로 cell5 서버의 hotplate endpoint로 수행한다. 드라이버 자체의 대시보드 서버 (`hotplate_controller/server.py`)를 동시에 띄우지 말 것 — 같은 시리얼 포트를 두 프로세스가 잡는다 |
-| 적외선 램프 (Cell D 내장, cell5 L1화 시) | Cell D 서버의 lamp endpoint로 on 후 off | IR 램프 점등과 소등을 육안 확인, 상태 조회 (`is_on`)와 실물 일치 | 램프 주변 가연물 제거를 사용자가 사전 점검, 점등 상태로 자리 이탈 금지. plug 자격증명은 `vendor/SmartPlugController/secure.env`에 사용자가 직접 기입하며 **Claude Code는 이 파일을 읽지 않는다** (pre-read-env-guard hook이 차단) |
+| Hotplate (**Cell 5 내장**, cell5 L1화 시) | 목표 온도 30°C 설정, 단시간 유지 후 heater off | 설정값 반영과 온도 상승 추세 확인, off 후 setpoint 복원 | 가열 중 자리 이탈 금지. Cell 5의 device이므로 cell5 서버의 hotplate endpoint로 수행한다. 드라이버 자체의 대시보드 서버 (`hotplate_controller/server.py`)를 동시에 띄우지 말 것 — 같은 시리얼 포트를 두 프로세스가 잡는다 |
+| 적외선 램프 (Cell 5 내장, cell5 L1화 시) | Cell 5 서버의 lamp endpoint로 on 후 off | IR 램프 점등과 소등을 육안 확인, 상태 조회 (`is_on`)와 실물 일치 | 램프 주변 가연물 제거를 사용자가 사전 점검, 점등 상태로 자리 이탈 금지. plug 자격증명은 `vendor/SmartPlugController/secure.env`에 사용자가 직접 기입하며 **Claude Code는 이 파일을 읽지 않는다** (pre-read-env-guard hook이 차단) |
 
 smoke test 순서는 위험이 낮은 순 (balance → linear → pump →
 gantry)을 권장하며, 하루에 전부 수행할 필요는 없다. 미수행 항목이
@@ -489,7 +489,7 @@ steps:
 ```
 
 `wait_s` step은 어느 cell도 호출하지 않고 지정한 초만큼 대기한다
-(양수 float 또는 `${params.x}` placeholder). Cell D의 "가열 후 N초
+(양수 float 또는 `${params.x}` placeholder). Cell 5의 "가열 후 N초
 유지", "램프 깜박임" 같은 timed hold를 시나리오로 표현하기 위한
 것으로, engine은 대기를 0.2 s 단위로 쪼개어 abort 요청이 오면 즉시
 끊는다. hazard 판정 대상이 아니다 (장비에 아무것도 보내지 않으므로).
@@ -700,7 +700,7 @@ Conventional Commit, ToDo.md 갱신을 동반한다.
 9. **확정 사항 (재질의 불필요)**: 로봇 2대는 L1 대응 없음, Cell
    A/B/C는 **X축 1개 + Z축 2개**의 동일 hardware이며 **두 Z축은
    항상 동시 (동기) 구동** (B/C는 A의 clone, 클래스 신설 금지,
-   config 인스턴스만 추가), **Cell D는 pump + Z축 1개 단독 + IR
+   config 인스턴스만 추가), **Cell 5는 pump + Z축 1개 단독 + IR
    lamp (Tapo 플러그) + hotplate 내장** (cell5 = 4종 device, 독립
    IrLampCell/HotplateCell 금지), L2
    시나리오 언어에서 Z는 단일 값 (Z축 개별 지정 파라미터 노출
@@ -708,7 +708,7 @@ Conventional Commit, ToDo.md 갱신을 동반한다.
 10. **미확정 값 (TBD)**: NUC별 실제 IP, cell5 포트 (17062 잠정)의
     ARCHITECTURE.md 대조, cell2/3/5 인스턴스별 USB 식별자, 기존
     `PumpGantryCell`의 X1 + 동기 Z2 지원 여부와 동기 방식 (하드웨어
-    병렬 결선 대 소프트웨어 동기, M0 판정), Cell D의 Z stage 사양,
+    병렬 결선 대 소프트웨어 동기, M0 판정), Cell 5의 Z stage 사양,
     IR lamp plug의 IP와 자격증명 (secure.env, 사용자 기입),
     `demo_linear_move`의 안전 가동 범위 (`target_mm`), orchestrator
     포트 17100 확정. M0 진행 중 사용자에게 확인 요청할 것.

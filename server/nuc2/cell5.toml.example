@@ -1,4 +1,4 @@
-# NUC2 / Cell D -- pump + single Z stage + hotplate + IR lamp (Tapo plug).
+# NUC2 / Cell 5 -- pump + single Z stage + hotplate + IR lamp (Tapo plug).
 # Copy to server/nuc2/cell5.toml (gitignored), then:
 #   systemctl enable --now cell@nuc2-cell5
 #   # or, by hand:  python -m server --config server/nuc2/cell5.toml

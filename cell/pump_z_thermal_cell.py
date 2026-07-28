@@ -1,4 +1,4 @@
-"""Real Cell D (cell5): pump + single Z stage + hotplate + IR lamp.
+"""Real Cell 5 (cell5): pump + single Z stage + hotplate + IR lamp.
 
 Composition confirmed with the user on 2026-07-27 — four devices in one
 cell, one server, one owner:
@@ -74,11 +74,11 @@ DEFAULT_MAX_CELSIUS = 150.0
 
 @dataclass(frozen=True, slots=True)
 class PumpZThermalConfig:
-    """Bench wiring for Cell D (loaded from the cell5 TOML)."""
+    """Bench wiring for Cell 5 (loaded from the cell5 TOML)."""
 
     # Pump — identical to a dispense cell. `pump_enabled = False` (an
     # omitted [pump] table) builds the cell without one: the bench ran
-    # Cell D's Z + hotplate + lamp before its syringe pump arrived, and a
+    # Cell 5's Z + hotplate + lamp before its syringe pump arrived, and a
     # missing pump must not keep the other three devices down. The pump
     # endpoints then answer 409 exactly like the absent balance does.
     pump_enabled: bool = True
@@ -106,29 +106,29 @@ class PumpZThermalConfig:
 
 
 def _no_balance() -> WrongStateError:
-    # Defensive stub: Cell D has no balance (the Phase's single balance
+    # Defensive stub: Cell 5 has no balance (the Phase's single balance
     # lives on cell4), so a stray /v1/balance/* call gets a clean 409.
-    return WrongStateError("Cell D has no balance", command="balance")
+    return WrongStateError("Cell 5 has no balance", command="balance")
 
 
 def _no_pump() -> WrongStateError:
     # Not "broken" but "not fitted": this cell was configured with
     # pump_enabled = False, so every pump route answers 409 rather than
     # failing later against a port that was never opened.
-    return WrongStateError("Cell D has no pump configured", command="pump")
+    return WrongStateError("Cell 5 has no pump configured", command="pump")
 
 
 def _no_gantry() -> WrongStateError:
     # Defensive stub: motion here is one Z axis (the zstage action set).
     # A /v1/gantry/* call carries an X target this cell cannot honour.
     return WrongStateError(
-        "Cell D has no XZ gantry; use the zstage actions", command="gantry"
+        "Cell 5 has no XZ gantry; use the zstage actions", command="gantry"
     )
 
 
 def _no_linear() -> WrongStateError:
     # Defensive stub: the linear Y rail belongs to cell4.
-    return WrongStateError("Cell D has no linear rail", command="linear")
+    return WrongStateError("Cell 5 has no linear rail", command="linear")
 
 
 def _no_lamp() -> WrongStateError:
@@ -247,7 +247,7 @@ class PumpZThermalCell(Cell):
         )
         return {
             "pump": pump,
-            # No balance on Cell D; ok=True so the cell isn't faulted.
+            # No balance on Cell 5; ok=True so the cell isn't faulted.
             "balance": {"present": False, "ok": True},
             "stage": {  # the single Z axis
                 "axes": 1,
@@ -280,7 +280,7 @@ class PumpZThermalCell(Cell):
                 else "-"  # no pump fitted
             ),
             "plunger_uL": self._plunger_uL,
-            "stage_x_mm": 0.0,  # no X axis on Cell D
+            "stage_x_mm": 0.0,  # no X axis on Cell 5
             "stage_z_mm": self._z_mm,
             "busy": False,
             "error": None,
@@ -296,7 +296,7 @@ class PumpZThermalCell(Cell):
             "lamp_on": self._lamp_on,
         }
 
-    # ── Balance (none on Cell D) ────────────────────────────────────────
+    # ── Balance (none on Cell 5) ────────────────────────────────────────
     def tare(self) -> float:
         raise _no_balance()
 
@@ -361,7 +361,7 @@ class PumpZThermalCell(Cell):
             "final_valve": self._pump.query_valve_position(),
         }
 
-    # ── Gantry / linear (neither exists on Cell D) ──────────────────────
+    # ── Gantry / linear (neither exists on Cell 5) ──────────────────────
     def home_gantry(self) -> tuple[float, float]:
         raise _no_gantry()
 

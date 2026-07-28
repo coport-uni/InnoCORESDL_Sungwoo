@@ -1,4 +1,4 @@
-# Cell D (cell5) demo 2/3: heat the plate toward 30 °C for 10 seconds.
+# Cell 5 (cell5) demo 2/3: heat the plate toward 30 °C for 10 seconds.
 #
 # Sets the setpoint, starts the heater, holds 10 s (`wait_s`, spec
 # section 8.1), reads the plate back, and stops the heater. Ten seconds
@@ -15,12 +15,12 @@
 # The heater is the hazard here: the first hotplate/ step waits for the
 # operator's confirmation. Stay at the bench for the whole run.
 #
-#   python -m orchestrator validate scenarios/demo_cell_d_hotplate_30c.yaml
-#   python -m orchestrator run scenarios/demo_cell_d_hotplate_30c.yaml
+#   python -m orchestrator validate scenarios/demo_cell5_hotplate_30c.yaml
+#   python -m orchestrator run scenarios/demo_cell5_hotplate_30c.yaml
 
-name: cell_d_hotplate_30c
+name: cell5_hotplate_30c
 description: >
-  Set Cell D's hotplate to 30 C, heat for ten seconds, log the plate
+  Set Cell 5's hotplate to 30 C, heat for ten seconds, log the plate
   temperature, and leave the heater off.
 
 params:
