@@ -1095,3 +1095,41 @@ The first run in which cell4's balance and rail worked together.
       do not leave it at a value the last run nearly failed.
 - [ ] Do not tighten `max_drift_g` on one sample. Repeat the run 2-3
       times once the link is fixed, then set it from the spread.
+
+### `move_to_weigh` "stalled" was the amp refusing: POT over-travel is active
+
+Second run of `demo_weigh_at_position.yaml` failed at `move_to_weigh`:
+`linear rail did not reach its target (stalled); it stopped at
+0.592 mm`. **Not the RS485 fault** — the three failing iterations logged
+no link error at all.
+
+- [x] **The rail did not move at all, three times in a row.** Commanded
+      +49.408 mm at speed 25 on each iteration; position stayed at
+      **exactly** 0.592 mm. Not "moved a little" — zero.
+- [x] **The amp is healthy**: `Pr0.01` mode 1, `Pr3.04` speed 0,
+      `Pr3.00` 1, feedback drift 0 pulses over 2 s, identity reads fine.
+- [x] **The input frame says why.** `0b00101101`, stable across 5 reads:
+
+      | SI | function | contact | input | meaning |
+      |---|---|---|---|---|
+      | SI1 | NOT (negative over-travel) | b | 1 | negative allowed |
+      | SI2 | **POT (positive over-travel)** | **b** | **0** | **positive INHIBITED** |
+      | SI6 | SRV-ON | a | 1 | servo on |
+
+      POT is a **b-contact**, so it is *active when the input reads 0*.
+      The amp is refusing positive motion, which matches the evidence
+      exactly: the previous run's `move_home` (-49.486 mm) worked, and
+      every positive move since has done nothing.
+- [ ] **Bench check, most likely first.** The rail sits at 0.592 mm,
+      near the origin, so a *position*-tripped positive limit makes no
+      sense. A b-contact limit reads 0 when its circuit is **open** —
+      indistinguishable from being pressed. Check the POT wiring on the
+      X4 connector (SI2) before anything else; the amp was rewired
+      repeatedly this evening. Then check whether the switch is
+      physically pressed, and whether the -1.797 mm excursion past the
+      origin disturbed something at the far end.
+- [ ] **Fix the error message.** "stalled" cost an hour of looking in
+      the wrong place. The amp already knew the answer and nobody asked
+      it: when a move ends with zero displacement, read the input frame
+      and name POT/NOT/SRV-ON in the error instead of guessing at
+      oscillation. Belongs in `LinearMotorController.move_to_mm`.
