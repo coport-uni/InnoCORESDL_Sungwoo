@@ -1047,8 +1047,11 @@ async def test_pump_cycle_demo(engine: Engine, fake_l1: FakeL1) -> None:
         "source_port": run.params["source_port"],
         "dispense_port": run.params["dispense_port"],
     }
-    # 1 unrolled + the batched remainder = the 10 requested aspirations.
-    assert 1 + cycle_body["cycles"] == 10
+    # 1 unrolled + the batched remainder = the scenario's declared total.
+    # remaining_cycles is TOTAL MINUS ONE (cycle 1 is unrolled), so a
+    # future edit that sets it to the desired total would run one extra
+    # cycle -- this pin catches that off-by-one.
+    assert 1 + cycle_body["cycles"] == 30
 
     # The fake's end state matches what the scenario's witness asserted.
     assert fake_l1.plunger_uL["cell1"] == 0.0

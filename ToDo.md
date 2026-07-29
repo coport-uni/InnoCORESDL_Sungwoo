@@ -1749,3 +1749,18 @@ bench record compiled as a submittable justification.
       declared the syringe pump successfully primed; cell1 is
       dispense-ready. Recorded in
       `claude_test/smoke_cell1_pump_20260729.md`.
+
+## 2026-07-29 — docs pass and merge: off-by-one, EMI evidence (issue #21)
+
+- [x] `remaining_cycles` = desired total − 1 recorded at the param site,
+      in the scenario header, README's scenario tips, and
+      LearnedPatterns #37; the orchestrator test now pins the total
+      (1 + 29 = 30). Batched-step timeout raised to 600 s (~3x the
+      measured ~7 s/cycle × 29).
+- [x] `docs/RS485_EMI_evidence_20260729.xlsx` committed — the cell4
+      RS485/EMI case (A/B/A switch tests, per-device comparison, run
+      ledger, isolator purchase request) compiled from LearnedPatterns
+      #15–#26; referenced from README's EMI bench note.
+- [x] README status updated: cell1 is now a finished cell (gantry +
+      pump verified, primed); scenario tip for the off-by-one added.
+- [x] PR #22 merged to main.

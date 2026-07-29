@@ -1208,3 +1208,25 @@ format below. Newest entries at the bottom.
   fix, re-run the exact measurement that characterized the fault (the
   devnum watch), then a real traffic run, before declaring it fixed. A
   link that merely *looks* quiet has not earned the `[pump]` table back.
+
+## 37. demo_pump_cycle's remaining_cycles is the desired total MINUS ONE
+
+- **Problem**: An operator wanting 30 pump cycles reads
+  `remaining_cycles` as "the number of cycles" and sets it to 30 —
+  getting 31, or asserts totals that are off by one. The name invites
+  the mistake: nothing at the param site said what it must remain
+  *after*.
+- **Cause**: The scenario language has no loop construct (deliberately —
+  a scenario is data), so the first cycle is unrolled into individually
+  asserted steps and only the remainder runs through one `pump/cycle`
+  call. Total = 1 + remaining_cycles, an invariant that lived in a
+  header comment nobody reads while editing a number.
+- **Fix**: The rule now sits directly on the param ("TOTAL MINUS ONE:
+  for N total cycles set N - 1; 29 -> 30"), in the header, in
+  README.md's scenario tips, and the orchestrator test pins
+  `1 + cycles == 30` so an edit that sets the param to the intended
+  total fails the suite instead of running an extra cycle on hardware.
+- **Rule**: When a scenario splits one logical loop into "unrolled
+  first + batched rest", the batch-count param must carry the off-by-one
+  in its own comment at the definition site — and a test should pin the
+  *total*, not echo the param back at itself.

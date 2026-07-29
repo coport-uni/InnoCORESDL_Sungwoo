@@ -90,12 +90,15 @@ All hardware drivers are git submodules under `external/` — see
 All three were brought up on 2026-07-28, each completing real scenarios
 through the full L1 + L2 stack.
 
-**Only cell4 is a finished cell** — its shape has no pump by design, so
-nothing is missing from it. cell1 and cell5 both define a syringe pump
-that is **not on the bench**. What is proven there is every device they
-actually have: cell1's XZ gantry, and cell5's Z axis, hotplate and lamp.
-Neither cell is verified *as a cell*, and their pump paths have never run
-on hardware. cell2–3 are built and unrun; they are clones of cell1 and
+**cell4 and cell1 are finished cells.** cell4's shape has no pump by
+design, so nothing is missing from it. cell1 completed its pump
+bring-up on 2026-07-29: the SY-01B is back on the bench, its L2 pump
+scenario (`demo_pump_cycle.yaml`) ran on hardware with the liquid
+transfer confirmed by eye, and ~30 cycles of fresh solution primed the
+line (`claude_test/smoke_cell1_pump_20260729.md`) — on top of the XZ
+gantry proven the day before. cell5 still defines a syringe pump that
+is **not on the bench**; what is proven there is its Z axis, hotplate
+and lamp. cell2–3 are built and unrun; they are clones of cell1 and
 need only their own adapter serials.
 
 | Layer | State |
@@ -349,6 +352,10 @@ Things worth knowing before your first scenario:
   `enabled` instead.
 - The first step that moves, heats, or energizes anything **pauses the
   run until the operator confirms**. There is no flag to skip this.
+- **`demo_pump_cycle`'s `remaining_cycles` is the total minus one** —
+  cycle 1 is unrolled into asserted steps, the rest run in one
+  `pump/cycle` call. For N total cycles set `remaining_cycles: N - 1`
+  (29 → 30); setting it to N runs N + 1.
 
 ### The `/v1` action sets
 
@@ -595,6 +602,9 @@ unplugged → 0. It is **conducted, not radiated**, so a shielded USB cable
 and ferrites on the USB side are the wrong purchase — the fix is on the
 RS485 side (SG run between the ends, 120 Ω termination once per end,
 shield grounded at one end only), and only then an isolated adapter.
+The full case — the A/B/A switch tests, the per-device comparison, the
+failure ledger and the purchase request for an isolated adapter (UPort
+1150I) — is compiled in `docs/RS485_EMI_evidence_20260729.xlsx`.
 
 The driver absorbs this for **reads** — it reopens the port and 959/959
 position reads landed across 18 re-enumerations. It deliberately does

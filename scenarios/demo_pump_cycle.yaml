@@ -1,5 +1,5 @@
-# cell1 syringe-pump validation: initialize, then 10 aspirate->dispense
-# cycles, reservoir (physical port 1) -> tip (physical port 3).
+# cell1 syringe-pump validation: initialize, then 1 + remaining_cycles
+# aspirate->dispense cycles between the M05's two fluid states.
 #
 # FIRMWARE COMMAND DIGITS ARE NOT PHYSICAL FITTINGS -- LearnedPatterns #1.
 #   The valve is a Runze M05 Bi-pass with only TWO fluid states, 90
@@ -11,32 +11,36 @@
 #   (20260729T103557Z, 19/19 steps) -- passed every control-path assert
 #   while the water only oscillated in the reservoir line: the rotor
 #   turned, the fluid path never changed.
-#   Bench plumbing (2026-07-29): reservoir tube on PHYSICAL port 1, tip
-#   on PHYSICAL port 3. Hence source COMMAND 1 (syringe<->reservoir)
-#   and dispense COMMAND 2 (syringe<->tip) below -- 90 degrees apart,
-#   a real state switch every half-cycle. The ?6 readbacks prove rotor
-#   position; only the eye (reservoir level falling, drops at the tip)
-#   proves the transfer.
+#   The source/dispense params below pick which state is drawn from and
+#   which is expelled into -- any 90-degree command pair (1 & 2) gives a
+#   real state switch every half-cycle; which direction the liquid goes
+#   depends on the current plumbing. The 2026-07-29 verified transfer
+#   runs (reservoir on physical 1, tip on physical 3) used source
+#   command 1 -> dispense command 2. The ?6 readbacks prove rotor
+#   position; only the eye (one level falling, drops at the other end)
+#   proves the transfer and its direction.
 #
-# HOW THE 10 CYCLES ARE SPLIT
+# HOW THE CYCLES ARE SPLIT -- remaining_cycles IS THE TOTAL MINUS ONE
 #   The scenario language has no loop construct (a scenario is data, not
 #   code). Cycle 1 is unrolled step by step so every leg is asserted on
-#   its own readback; the remaining 9 run inside one pump/cycle call,
-#   whose L1 handler loops in the cell. 1 + 9 = the 10 requested
-#   aspirations, and pump/cycle's cycles_done is asserted so a short
-#   count cannot pass silently.
+#   its own readback; the rest run inside one pump/cycle call, whose L1
+#   handler loops in the cell. Total cycles = 1 + remaining_cycles, so
+#   for N cycles set remaining_cycles: N - 1 (e.g. 29 -> 30 cycles) --
+#   setting it to N runs N + 1. pump/cycle's cycles_done is asserted so
+#   a short count cannot pass silently.
 #
 # BEFORE RUNNING
 #   1. server/nuc1/cell1.toml must carry the [pump] table -- without it
 #      every pump step here answers 409 ("configured without a pump").
 #   2. This pair MOVES LIQUID: each cycle draws volume_uL from the
 #      reservoir (physical port 1) and expels it at the tip (physical
-#      port 3) -- 10 cycles x 100 uL = ~1 mL transferred. Reservoir
-#      stocked, vessel under the tip, watch the first cycle: the
-#      reservoir level must fall and drops must appear at the tip.
-#   3. The 9-cycle step holds the cell's single lock for its whole
-#      duration, so /v1/stop queues behind it (docs/L1_AUDIT.md GAP-9).
-#      Keep the physical e-stop / power switch in hand.
+#      port 3) -- (1 + remaining_cycles) x volume_uL in total, currently
+#      30 x 100 uL = ~3 mL. Reservoir stocked, vessel under the tip,
+#      watch the first cycle: the reservoir level must fall and drops
+#      must appear at the tip.
+#   3. The batched-cycles step holds the cell's single lock for its
+#      whole duration, so /v1/stop queues behind it (docs/L1_AUDIT.md
+#      GAP-9). Keep the physical e-stop / power switch in hand.
 #   4. Run it in order:
 #        python -m orchestrator validate scenarios/demo_pump_cycle.yaml
 #        python -m orchestrator run scenarios/demo_pump_cycle.yaml --step-mode
@@ -47,20 +51,20 @@ description: >
   cell1's syringe pump under L2 control. Initializes the pump, runs one
   fully-asserted aspirate->dispense cycle from the reservoir (physical
   port 1, valve command 1) to the tip (physical port 3, valve command
-  2), then the remaining 9 cycles through pump/cycle -- 10 aspirations
-  in all. Commands 1 -> 2 are the M05's 90-degree pair, so the valve
-  genuinely switches fluid state and each cycle moves liquid from the
-  reservoir to the tip.
+  2), then the rest through a single pump/cycle call -- 1 +
+  remaining_cycles aspirations in all. Commands 1 -> 2 are the M05's
+  90-degree pair, so the valve genuinely switches fluid state and each
+  cycle moves liquid from the reservoir to the tip.
 
 params:
-  # A real stroke on the 125 uL bench syringe, nowhere near the limits,
-  # quick enough that 10 cycles stay short.
+  # A real stroke on the 125 uL bench syringe, nowhere near the limits.
   volume_uL: 100.0
   source_port: 1     # COMMAND 1 -> syringe<->physical 1 = reservoir
   dispense_port: 2   # COMMAND 2 -> syringe<->physical 3 = tip
   init_force: 2      # one-third init force, per the 125 uL syringe
-  # Cycle 1 is unrolled below; 1 + 9 = the 10 requested aspirations.
-  remaining_cycles: 9
+  # TOTAL MINUS ONE: cycle 1 is unrolled below, so for N total cycles
+  # set N - 1 here. 29 -> 30 cycles (the priming count).
+  remaining_cycles: 29
 
 defaults:
   on_fail: abort     # plunger and valve state carry across steps --
@@ -101,7 +105,7 @@ steps:
   - id: verify_plunger_homed
     assert: "${init.plunger_uL} == 0"
 
-  # ── Cycle 1 of 10, unrolled and asserted leg by leg ────────────────
+  # ── Cycle 1, unrolled and asserted leg by leg ──────────────────────
   # The valve response is the driver's ?6 readback AFTER its own
   # arrival poll -- asserting it means the valve reported the port,
   # not that the command was merely accepted.
@@ -148,10 +152,10 @@ steps:
   - id: verify_c1_emptied
     assert: "${disp.plunger_uL} == 0"
 
-  # ── Cycles 2..10 in one call ───────────────────────────────────────
-  # Worst case per cycle is two valve moves plus two full plunger
-  # strokes (~27 s against the driver's settle timeouts); nine of
-  # those need ~250 s, so 300 s gives margin without hiding a hang.
+  # ── Cycles 2..N in one call ────────────────────────────────────────
+  # Measured 2026-07-29: ~7.0 s per 100 uL cycle (valve x2 + full
+  # aspirate + dispense), so 29 cycles ≈ 205 s; 600 s is ~3x that
+  # without hiding a hang. Scale this timeout with remaining_cycles.
   - id: remaining_cycles
     cell: cell1
     action: pump/cycle
@@ -160,7 +164,7 @@ steps:
       volume_uL: "${params.volume_uL}"
       source_port: "${params.source_port}"
       dispense_port: "${params.dispense_port}"
-    timeout_s: 300.0
+    timeout_s: 600.0
     save_as: cyc
 
   - id: verify_cycle_count
