@@ -1772,3 +1772,39 @@ bench record compiled as a submittable justification.
       10–40 S-code) with the 125 µL rationale in README's scenario
       tips, `server/nuc1/cell1.toml.example`, and the
       `demo_pump_cycle.yaml` param comment.
+
+## 2026-07-29 — Verification Gate: nothing enters git before the bench says so
+
+**Issue**: #26 · **Branch**: `docs/verification-gate` · Upstream:
+coport-uni/CommonClaude#29 (PR #30, merged as `b7957c5`)
+
+Operator's request: forbid commit / push / PR / merge before the work —
+real-hardware work above all — has been verified. The rule belongs
+upstream in CommonClaude so every project inherits it, and is restated
+here in bench terms.
+
+### Work items
+- [x] Register GitHub issue (#26)
+- [x] `git checkout -b docs/verification-gate` (from `main`, 2c8bfea)
+- [x] Record this ToDo entry
+- [x] Upstream `CommonClaude/CLAUDE.md` §5.1 Verification Gate — mandatory
+      banner, per-change-type table, 7 rules; §5.2 = the old test-quality
+      rules; §4 workflow gains a verification step before the first
+      commit; §8 declares the gate not waivable; §12.1 + §15.2 PR
+      template demand the real output; README summary
+- [x] Upstream committed, pushed, PR #30 opened and **merged to main**
+- [x] Bump `external/CommonClaude` pin to `b7957c5`
+- [x] `CLAUDE.md` Folder-specific rule 4 — what "verified" means for
+      `cell/` / `server/` / `scenarios/` / `external/`, what to do when
+      the device is unavailable (leave it in the working tree; never
+      self-start motion or heat), docs claims need the same evidence,
+      a failed or skipped verification blocks the merge
+- [x] `CLAUDE.md` Conventions paragraph names the gate
+- [ ] Commit, push, open PR, close #26
+
+### Note on scope
+This branch carries only `CLAUDE.md` and the submodule pin. The
+in-progress EMI work (`cell/pump_gantry_cell.py`,
+`claude_test/test_pump_gantry_cell.py`, the `*_shinyeong.py` probes and
+the two smoke notes) stays uncommitted in the working tree — it is
+hardware code that has not passed the gate this entry installs.
