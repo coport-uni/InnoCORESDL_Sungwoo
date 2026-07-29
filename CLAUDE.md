@@ -54,9 +54,10 @@ Shared conventions come from **CommonClaude**, tracked as a submodule at
 `external/CommonClaude/` — read its `CLAUDE.md` for the full ruleset: MIT
 code style (80-col, 4-space, `snake_case`, Google-style docstrings, no
 magic numbers), debug files in `claude_test/` (never `tests/`),
-ToDo.md + `gh` issue/branch/PR task workflow, Conventional Commits,
-GitHub Flow, and SemVer. Per its §1 Rule Priority, this project-level
-file wins on conflict.
+ToDo.md + `gh` issue/branch/PR task workflow, the **§5.1 Verification
+Gate** (nothing enters git before it is verified — see Folder-specific
+rule 4), Conventional Commits, GitHub Flow, and SemVer. Per its §1 Rule
+Priority, this project-level file wins on conflict.
 
 Those conventions are enforced by hooks in `.claude/settings.json` (copied
 from CommonClaude; see "Hooks" below).
@@ -240,6 +241,28 @@ overshoot without switching to Modbus.
    first runs; never auto-run the motors from a tool without the operator
    ready. The driver's `release_ftdi_sio()` detaches the kernel `ftdi_sio`
    (FTDI adapters only — the CH340 pump and CDC balance are unaffected).
+
+4. **The bench verifies before git does** (CommonClaude §5.1 Verification
+   Gate). No `git commit`, `git push`, `gh pr create`, or `gh pr merge`
+   until the change has been verified — and on this project almost
+   everything is hardware, so verification means a **run on the bench
+   with the operator present**, not a passing `pytest claude_test` and
+   not a clean `ruff check`. Concretely:
+
+   - A change under `cell/`, `server/`, `scenarios/`, or `external/` is
+     unverified until the affected cell has actually moved, dispensed,
+     weighed, or heated on the real device, with the console output kept
+     for the PR's `## Testing` section.
+   - If the device is powered down, held by another process (rule 2), or
+     otherwise unavailable, the work stays in the working tree or on an
+     unpushed branch. Ask the operator to run it; never start motion,
+     heat, or power switching to satisfy this rule on your own.
+   - Documentation and bench notes are verified against the log,
+     measurement, or code they describe — a claim about the hardware
+     needs the same evidence whether it lands in `.py` or in `.md`.
+   - A failed, partial, or skipped verification blocks the merge. Say so
+     plainly in the PR body; an honest "NOT VERIFIED on the bench" is
+     correct, an optimistic summary is a defect.
 
 ## Research before coding
 
