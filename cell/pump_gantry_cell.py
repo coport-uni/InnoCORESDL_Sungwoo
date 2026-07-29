@@ -22,10 +22,22 @@ instead of blocking the whole cell on a device no step needs.
 from __future__ import annotations
 
 import sys
+import time
 from dataclasses import dataclass
+from typing import Any, Callable
 
 from mks_motor import MKSMotor, prepare_usb_nodes, release_ftdi_sio
 from sy01b import SyringePumpController
+
+try:  # POSIX-only; pyserial can surface a raw termios.error on a dead fd
+    import termios
+
+    _PUMP_LINK_ERRORS: tuple[type[BaseException], ...] = (
+        OSError,
+        termios.error,
+    )
+except ImportError:  # pragma: no cover — non-POSIX dev machine
+    _PUMP_LINK_ERRORS = (OSError,)
 
 from .cell_protocol import (
     Cell,
@@ -106,6 +118,34 @@ Z_DESYNC_LIMIT_MM = 0.5
 ARRIVAL_TOLERANCE_MM = 0.5
 
 
+#: How many times one pump command may be re-issued across link drops
+#: before the cell gives up. With the MINAS amp on, its conducted noise
+#: re-enumerates the pump's CH340 every ~12-15 s (measured 2026-07-29,
+#: devnums 082→096 over 60 s with nobody on the port), so a multi-second
+#: command can lose its link more than once. Under ACTIVE traffic the
+#: drops come every few seconds (4 within ~10 s of the first bench run),
+#: so the budget is per-command generous — the L2 step timeout is the
+#: real ceiling on how long a command may keep trying.
+PUMP_LINK_RETRIES = 10
+
+#: Reopen budget: after a drop, the CH340 needs one re-enumeration gap
+#: to come back. 20 x 1 s covers the measured ~12-15 s worst gap with
+#: margin — the same shape as the rail's startup re-enumeration wait.
+PUMP_REOPEN_ATTEMPTS = 20
+PUMP_REOPEN_DELAY_S = 1.0
+
+#: After a reconnect, a re-issued command can hit the pump's error 15
+#: (CommandOverflow): the interrupted FIRST issue already reached the
+#: MCU and is still executing — the link died, the pump did not.
+#: Waiting it out is correct because this cell serializes all pump
+#: commands under the server lock, so an overflow here can only mean
+#: "my own previous incarnation is still running". 20 x 2 s covers a
+#: full-stroke initialize (~24 s) with margin. Learned on the bench
+#: 2026-07-29: Z2, link drop, reconnect, Z2 again -> code=15.
+PUMP_BUSY_RETRIES = 20
+PUMP_BUSY_DELAY_S = 2.0
+
+
 def _no_pump() -> WrongStateError:
     # Defensive stub used when `pump_port` is unset — cell1 running its
     # gantry with the pump off the bench. Mirror of BalanceLinearCell's
@@ -143,19 +183,67 @@ class PumpGantryCell(Cell):
         self._stage_z_mm = 0.0
         self._initialized = False
 
+    @staticmethod
+    def _pump_config(config: Config) -> SyringePumpController.Config:
+        """The driver config for this cell's pump — also used to reopen
+        the port after a link drop, so it must resolve by VID:PID (the
+        CH340's ttyUSB number changes on every re-enumeration)."""
+        assert config.pump_port is not None
+        return SyringePumpController.Config(
+            port=config.pump_port,
+            address=config.pump_address,
+            baud=config.pump_baud,
+            syringe_uL=config.syringe_uL,
+            step_mode=SyringePumpController.StepMode.NORMAL,
+            reply_timeout_s=2.0,
+        )
+
+    @staticmethod
+    def _open_pump_patiently(
+        pump_cfg: SyringePumpController.Config, command: str
+    ) -> SyringePumpController:
+        """Open the pump's port, waiting out a USB re-enumeration gap.
+
+        With the amp's conducted noise on the bench, the CH340 can be
+        mid-re-enumeration at the moment of the open — the node either
+        absent or already dead — so the first open needs the same
+        patience as a reconnect (the rail grew the same startup wait).
+
+        Raises:
+            TransportError: The link never came back within the budget.
+        """
+        last: BaseException | None = None
+        for attempt in range(1, PUMP_REOPEN_ATTEMPTS + 1):
+            try:
+                pump = SyringePumpController.open(pump_cfg)
+            # RuntimeError too: mid-re-enumeration the node is ABSENT,
+            # and the driver's VID:PID resolve raises RuntimeError("no
+            # serial device matches ..."), not an OSError — learned when
+            # the first bench start under the amp died on exactly that.
+            except (*_PUMP_LINK_ERRORS, RuntimeError) as exc:
+                last = exc
+                time.sleep(PUMP_REOPEN_DELAY_S)
+                continue
+            if attempt > 1:
+                print(
+                    f"[pump-link] opened after {attempt} attempt(s) "
+                    f"({command})",
+                    file=sys.stderr,
+                )
+            return pump
+        raise TransportError(
+            f"pump USB link did not come back within "
+            f"{PUMP_REOPEN_ATTEMPTS * PUMP_REOPEN_DELAY_S:.0f} s "
+            f"(last error: {last}); check the amp's conducted-noise "
+            f"path and the CH340 cable",
+            command=command,
+        )
+
     @classmethod
     def open(cls, config: Config) -> PumpGantryCell:
         pump = None
         if config.pump_port:
-            pump_cfg = SyringePumpController.Config(
-                port=config.pump_port,
-                address=config.pump_address,
-                baud=config.pump_baud,
-                syringe_uL=config.syringe_uL,
-                step_mode=SyringePumpController.StepMode.NORMAL,
-                reply_timeout_s=2.0,
-            )
-            pump = SyringePumpController.open(pump_cfg)
+            pump = cls._open_pump_patiently(cls._pump_config(config), "open")
         # Docker /dev is a private tmpfs and ftdi_sio re-claims the FTDI
         # adapters on every enumeration; rebuild the USB nodes and detach
         # ftdi_sio so pyftdi can open the USB2CAN adapters (mirrors bridge.py).
@@ -214,7 +302,7 @@ class PumpGantryCell(Cell):
         pump_version = None
         pump_ok = False
         if self._pump is not None:
-            report = self._pump.diagnose()
+            report = self._pump_guarded("diagnose", lambda p: p.diagnose())
             pump_version = report.software_version
             pump_ok = report.ok_to_initialize
             pump_block = {
@@ -269,13 +357,21 @@ class PumpGantryCell(Cell):
                 )
         if x_mm is None and error is None:
             error = "the X motor did not report its position"
+        valve = "-"  # no valve to report on a pumpless cell
+        if self._pump is not None:
+            # status() is a probe, so a pump link that stays down after
+            # the guard's reconnects is reported in `error` rather than
+            # raised — the gantry half of the answer is still good.
+            try:
+                valve = self._pump_guarded(
+                    "status", lambda p: p.query_valve_position()
+                )
+            except TransportError as exc:
+                if error is None:
+                    error = str(exc)
         return {
             "weight_g": 0.0,  # no balance on this cell
-            "valve": (
-                self._pump.query_valve_position()
-                if self._pump is not None
-                else "-"  # no valve to report on a pumpless cell
-            ),
+            "valve": valve,
             "plunger_uL": self._plunger_uL,
             # None (an unread axis) is reported as null, never as 0.0: "I
             # could not read the axis" and "the axis is at the origin" are
@@ -302,17 +398,130 @@ class PumpGantryCell(Cell):
         raise _no_balance()
 
     # ── Pump (optional — absent when `pump_port` is unset) ──────────────
+    # Every interaction below runs through `_pump_guarded`: the commands
+    # are absolute targets, so re-issuing one after a link reconnect is
+    # safe (see the note above `_reopen_pump`).
     def initialize(self, *, force: int = 2, ccw: bool = False) -> dict:
-        pump = self._require_pump()
-        pump.initialize(force=force, ccw=ccw)
+        self._require_pump()
+        self._pump_guarded(
+            "initialize",
+            lambda p: p.initialize(force=force, ccw=ccw),
+            # The driver's own init-complete signal: ?6 stops returning
+            # the literal pre-init "?" once plunger+valve homing is done.
+            settle=lambda p: p.query_valve_position().strip() not in ("", "?"),
+        )
         self._initialized = True
         self._plunger_uL = 0.0
-        return {"valve": pump.query_valve_position(), "plunger_uL": 0.0}
+        return {
+            "valve": self._pump_guarded(
+                "initialize", lambda p: p.query_valve_position()
+            ),
+            "plunger_uL": 0.0,
+        }
 
     def _require_pump(self) -> SyringePumpController:
         if self._pump is None:
             raise _no_pump()
         return self._pump
+
+    # ── EMI-robust pump link ────────────────────────────────────────────
+    # With the MINAS amp powered, its conducted noise knocks the pump's
+    # CH340 off USB mid-command (the same coupling documented for the
+    # rail's UPort in docs/RS485_EMI_evidence_20260729.xlsx). The rail
+    # absorbs drops on READS ONLY and deliberately aborts moves, because
+    # a rail move that resumes on an unknown position is unbounded travel
+    # with no software e-stop (GAP-1). The pump is different in kind:
+    # every SY-01B command is an ABSOLUTE target (A<n> plunger position,
+    # I<n> valve port), the driver verifies arrival by polling, and the
+    # travel is mechanically bounded by the syringe stroke — so re-issuing
+    # an interrupted command after a reconnect converges on the same state
+    # it would have reached, and cannot overshoot. That is why the pump
+    # may retry its motions while the rail must not.
+    def _reopen_pump(self, command: str) -> SyringePumpController:
+        """Reopen the pump's port after a link drop, waiting out the USB
+        re-enumeration gap. The pump MCU is powered from its own 24 V
+        supply, so its state (init, valve, plunger) survives the USB
+        link dying; only the transport needs rebuilding."""
+        # The dead handle stays in `self._pump` until a reopen succeeds:
+        # nulling it would turn the next call into a 409 "configured
+        # without a pump", which is the wrong claim for a pump that is
+        # configured but temporarily unreachable — a dead handle raises
+        # a link error instead, which re-enters this reconnect path.
+        old = self._pump
+        if old is not None:
+            try:
+                old.close()
+            except Exception:  # noqa: BLE001 — the fd is already dead
+                pass
+        time.sleep(PUMP_REOPEN_DELAY_S)  # let the re-enumeration begin
+        pump = self._open_pump_patiently(self._pump_config(self._cfg), command)
+        self._pump = pump
+        print(f"[pump-link] reopened ({command})", file=sys.stderr)
+        return pump
+
+    def _pump_guarded(
+        self,
+        command: str,
+        fn: Callable[[SyringePumpController], Any],
+        settle: Callable[[SyringePumpController], bool] | None = None,
+    ) -> Any:
+        """Run one pump interaction, absorbing link drops.
+
+        On a dead-link error the port is reopened and ``fn`` re-issued,
+        up to :data:`PUMP_LINK_RETRIES` times. Device-domain errors
+        (NAKs, timeouts on a live port) pass straight through — they
+        mean the pump answered, and answering wrongly is not a link
+        problem.
+
+        ``settle`` is the motion commands' completion probe: the MCU
+        keeps executing an interrupted command while the USB link is
+        down (bench 2026-07-29: a re-issued Z2 met error 15), so after
+        a reconnect the guard first asks "did the interrupted issue
+        already finish?" — and only re-issues when it did not. Query
+        commands pass no ``settle``; re-asking is always harmless.
+        """
+        pump = self._require_pump()
+        link_drops = 0
+        busy_waits = 0
+        while True:
+            try:
+                if link_drops and settle is not None and settle(pump):
+                    print(
+                        f"[pump-link] interrupted {command} finished "
+                        f"inside the MCU; not re-issuing",
+                        file=sys.stderr,
+                    )
+                    return None
+                return fn(pump)
+            except _PUMP_LINK_ERRORS as exc:
+                link_drops += 1
+                if link_drops > PUMP_LINK_RETRIES:
+                    raise TransportError(
+                        f"pump command failed {link_drops} times across "
+                        f"link reconnects (last error: {exc})",
+                        command=command,
+                    )
+                print(
+                    f"[pump-link] link dropped during {command}: {exc}",
+                    file=sys.stderr,
+                )
+                pump = self._reopen_pump(command)
+            except SyringePumpController.CommandOverflowError as exc:
+                busy_waits += 1
+                if busy_waits > PUMP_BUSY_RETRIES:
+                    raise DeviceFaultError(
+                        f"pump stayed busy for "
+                        f"{PUMP_BUSY_RETRIES * PUMP_BUSY_DELAY_S:.0f} s "
+                        f"after a reconnect ({exc}); its state is "
+                        f"unknown — re-initialize before trusting it",
+                        command=command,
+                    )
+                print(
+                    f"[pump-link] pump still executing the interrupted "
+                    f"{command}; waiting ({busy_waits}/{PUMP_BUSY_RETRIES})",
+                    file=sys.stderr,
+                )
+                time.sleep(PUMP_BUSY_DELAY_S)
 
     def _require_init(self) -> SyringePumpController:
         pump = self._require_pump()
@@ -320,20 +529,49 @@ class PumpGantryCell(Cell):
             raise WrongStateError("pump not initialized", command="initialize")
         return pump
 
+    @staticmethod
+    def _valve_settled(port: int) -> Callable[[SyringePumpController], bool]:
+        return lambda p: p.query_valve_position().strip() == str(port)
+
+    def _plunger_settled(
+        self, target_uL: float
+    ) -> Callable[[SyringePumpController], bool]:
+        # Mirrors the driver's _uL_to_steps for the NORMAL step mode this
+        # cell fixes in _pump_config — the plunger's ? readback is in
+        # half-steps, not uL.
+        steps = round(
+            float(target_uL)
+            / self._cfg.syringe_uL
+            * SyringePumpController.StepMode.NORMAL.full_stroke_steps
+        )
+        return lambda p: p.query_plunger_position() == steps
+
     def move_valve(self, port: int) -> str:
-        pump = self._require_init()
-        pump.move_valve_to_port(port)
-        return pump.query_valve_position()
+        self._require_init()
+        self._pump_guarded(
+            "valve",
+            lambda p: p.move_valve_to_port(port),
+            settle=self._valve_settled(port),
+        )
+        return self._pump_guarded("valve", lambda p: p.query_valve_position())
 
     def aspirate(self, target_uL: float) -> float:
-        pump = self._require_init()
-        pump.aspirate_uL(target_uL)
+        self._require_init()
+        self._pump_guarded(
+            "aspirate",
+            lambda p: p.aspirate_uL(target_uL),
+            settle=self._plunger_settled(target_uL),
+        )
         self._plunger_uL = float(target_uL)
         return self._plunger_uL
 
     def dispense(self, target_uL: float = 0.0) -> float:
-        pump = self._require_init()
-        pump.dispense_uL(target_uL)
+        self._require_init()
+        self._pump_guarded(
+            "dispense",
+            lambda p: p.dispense_uL(target_uL),
+            settle=self._plunger_settled(target_uL),
+        )
         self._plunger_uL = float(target_uL)
         return self._plunger_uL
 
@@ -345,16 +583,37 @@ class PumpGantryCell(Cell):
         source_port: int,
         dispense_port: int,
     ) -> dict:
-        pump = self._require_init()
+        # Each leg is guarded on its own, so a link drop mid-loop resumes
+        # at the interrupted leg instead of failing the whole batch — with
+        # the amp on, a multi-minute batch WILL see several drops.
+        self._require_init()
         for _ in range(cycles):
-            pump.move_valve_to_port(source_port)
-            pump.aspirate_uL(volume_uL)
-            pump.move_valve_to_port(dispense_port)
-            pump.dispense_uL(0)
+            self._pump_guarded(
+                "cycle",
+                lambda p: p.move_valve_to_port(source_port),
+                settle=self._valve_settled(source_port),
+            )
+            self._pump_guarded(
+                "cycle",
+                lambda p: p.aspirate_uL(volume_uL),
+                settle=self._plunger_settled(volume_uL),
+            )
+            self._pump_guarded(
+                "cycle",
+                lambda p: p.move_valve_to_port(dispense_port),
+                settle=self._valve_settled(dispense_port),
+            )
+            self._pump_guarded(
+                "cycle",
+                lambda p: p.dispense_uL(0),
+                settle=self._plunger_settled(0),
+            )
         self._plunger_uL = 0.0
         return {
             "cycles_done": cycles,
-            "final_valve": pump.query_valve_position(),
+            "final_valve": self._pump_guarded(
+                "cycle", lambda p: p.query_valve_position()
+            ),
         }
 
     # ── Stage = XZ gantry ───────────────────────────────────────────────

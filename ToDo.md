@@ -1773,6 +1773,65 @@ bench record compiled as a submittable justification.
       tips, `server/nuc1/cell1.toml.example`, and the
       `demo_pump_cycle.yaml` param comment.
 
+## 2026-07-29 20:23 — bench noise re-measured; the pump link has regressed
+
+Operator asked for a live noise check. Read-only throughout: kernel log
+plus `/sys/bus/usb/devices/*/devnum`, no serial port opened (no cell
+server was running), no motion commanded.
+
+- [x] **The NUC rebooted at 20:13:38**, so all counts below are from a
+      single 9.5-minute boot window — worth stating, because a
+      bus-wide re-enumeration at boot looks exactly like an EMI event
+      in a `--since` query that straddles it.
+- [x] Counts this boot (`disabled by hub (EMI?)` / re-enumerations):
+
+      | port | device | disabled | re-enum | last 3 min |
+      |---|---|---|---|---|
+      | 3-2.3 | pump CH340 | 105 | 110 | 48 (16/min) |
+      | 3-2.2 | UPort 1150 (rail) | 20 | 24 | 4 (1.3/min) |
+      | 3-7.2 | FTDI Z `A10PUO5W` | 7 | 8 | 0 |
+      | 3-2.1 | balance | **0** | 5 (boot) | 0 |
+      | 3-7.3 / 3-7.4 | FTDI Z `A10PUO5V` / X | 0 | 1 (boot) | 0 |
+
+- [x] **The EMI fault is live**, not historical: UPort re-enumerated at
+      20:22:06, 20:22:26, 20:22:55, 20:23:00. Issue #13 stands.
+- [x] **The balance is still the perfect control** — same hub as the
+      UPort, zero `disabled by hub`. The sheet-3 argument of the
+      evidence workbook reproduces after a reboot.
+- [x] `urb -71` only 1 this boot, so the root-port relocation (LP #20)
+      continues to hold.
+- [x] **Method note, worth keeping**: a 60 s `devnum` watch landed in a
+      quiet gap and reported the UPort as stable at devnum 73 — while
+      the kernel log showed it flapping minutes either side. On a fault
+      this bursty the devnum watch (LP #35/#36) is not sufficient on its
+      own; count the kernel events over a window instead, or the watch
+      will happily certify a broken link.
+- [ ] **Open question blocking interpretation**: whether the servo amp
+      was powered during this window is unknown from software. The
+      UPort's 1.3/min is well below the recorded 15 per 40 s (≈22/min),
+      which is either amp-off (condition A of the A/B/A test) or a
+      different load. Ask the operator before adding this window to
+      sheet 4 of `docs/RS485_EMI_evidence_20260729.xlsx`.
+
+### The pump's CH340 link has regressed (issue #24, LearnedPatterns #36 undone)
+
+- [x] Opened as **issue #24** — separate from #13, which is the amp
+      coupling into its own RS485 pair.
+- [ ] LP #36 declared this fixed — devnum 017 held across a 60 s watch,
+      ~20 min idle, and a full 53 s motion run. It is now the **worst**
+      device on the bench: 110 re-enumerations in 9.5 min, 105
+      `disabled by hub`, and 27 × `device descriptor read/64, error -32`
+      (enumeration failing outright, not just a dropped session).
+- [ ] **Do not start cell1 with `[pump]` in the config** until this is
+      chased: any fd dies EIO within seconds, and because `status()`
+      queries the valve whenever a pump is configured, the dead pump fd
+      takes the gantry's probes down with it (LP #35).
+- [ ] Chase order, from LP #35/#36: watch the devnum with nobody holding
+      the port, then look at what shares the pump's power and ground
+      (that is what fixed it last time), then its own USB cable. Re-run
+      the same measurement after any physical change before declaring
+      it fixed.
+
 ## 2026-07-29 — Verification Gate: nothing enters git before the bench says so
 
 **Issue**: #26 · **Branch**: `docs/verification-gate` · Upstream:
@@ -1808,3 +1867,18 @@ in-progress EMI work (`cell/pump_gantry_cell.py`,
 `claude_test/test_pump_gantry_cell.py`, the `*_shinyeong.py` probes and
 the two smoke notes) stays uncommitted in the working tree — it is
 hardware code that has not passed the gate this entry installs.
+
+## 2026-07-29 — EMI-robust pump link, verified under the amp (issue #25)
+
+- [x] Cell-layer link guard for the pump: patient open, reconnect +
+      re-issue, settle probes (skip re-issue when the MCU finished the
+      interrupted command), error-15 busy-wait, dead-link-stays-503.
+      6 new unit tests (29 total in test_pump_gantry_cell.py).
+- [x] Hardware verification with the amp ON and the CH340 flapping:
+      demo_pump_cycle 19/19 (run 20260729T114000Z, 30 cycles x 100 uL,
+      ~250 s) — 65/65 drops absorbed, 55 skipped re-issues, 2 busy
+      waits, 0 unhandled 500s. Record:
+      claude_test/smoke_cell1_pump_emi_20260729.md.
+- [ ] The electrical fix ladder + isolator purchase still stand
+      (docs/RS485_EMI_evidence_20260729.xlsx) — the guard is a
+      mitigation, not the cure.

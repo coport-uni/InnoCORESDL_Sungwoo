@@ -360,3 +360,202 @@ def test_a_z_only_move_does_not_re_command_x(
     cell.move_gantry(0.0, 40.0, speed_pct=10, accel_pct=0)
 
     assert x.moves == 0
+
+
+# ── EMI-robust pump link: drops are absorbed, absolutes re-issued ───────
+
+
+class DroppingPump(FakePump):
+    """A pump whose link dies for the first ``drops`` interactions.
+
+    OSError(EIO) is what a dead CH340 fd raises through pyserial; every
+    method notes its call so tests can assert the re-issue actually
+    happened rather than the failure being swallowed.
+    """
+
+    def __init__(self, drops: int = 0) -> None:
+        super().__init__()
+        self.drops = drops
+        self.calls: list[str] = []
+        self.valve = "?"
+        self.contained_uL = 0.0
+
+    def _link(self, name: str) -> None:
+        self.calls.append(name)
+        if self.drops > 0:
+            self.drops -= 1
+            raise OSError(5, "Input/output error")
+
+    def initialize(self, *, force: int = 2, ccw: bool = False) -> None:
+        self._link("initialize")
+        self.initialized = True
+        self.valve = "1"
+
+    def move_valve_to_port(self, port: int) -> None:
+        self._link(f"valve:{port}")
+        self.valve = str(port)
+
+    def aspirate_uL(self, target_uL: float) -> None:
+        self._link("aspirate")
+        self.contained_uL = float(target_uL)
+
+    def dispense_uL(self, target_uL: float = 0) -> None:
+        self._link("dispense")
+        self.contained_uL = float(target_uL)
+
+    def query_valve_position(self) -> str:
+        self._link("query")
+        return self.valve
+
+    def query_plunger_position(self) -> int:
+        # Half-steps for the 125 uL syringe in NORMAL mode, like the
+        # real ? readback the settle probes compare against.
+        self._link("query_plunger")
+        return round(self.contained_uL / 125 * 12000)
+
+
+def _pump_cell(
+    pump: DroppingPump, monkeypatch: pytest.MonkeyPatch
+) -> PumpGantryCell:
+    """A cell whose reconnect path reopens onto the same fake pump."""
+    from cell import pump_gantry_cell as mod
+
+    monkeypatch.setattr(mod, "PUMP_REOPEN_DELAY_S", 0.0)
+    monkeypatch.setattr(
+        mod.SyringePumpController,
+        "open",
+        staticmethod(lambda cfg: pump),
+    )
+    return PumpGantryCell(pump, FakeMotor(), FakeMotor(), FakeMotor(), Config())
+
+
+def test_pump_command_survives_a_link_drop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One EIO mid-command: reopen, re-issue, converge — no error out."""
+    pump = DroppingPump(drops=1)
+    cell = _pump_cell(pump, monkeypatch)
+
+    cell.initialize()
+    assert cell.aspirate(50.0) == 50.0
+
+    assert pump.contained_uL == 50.0
+    # The dropped attempt is present AND its re-issue after reconnect.
+    assert pump.calls.count("aspirate") <= 2
+
+
+def test_cycle_resumes_at_the_interrupted_leg(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A drop mid-batch must not fail the whole batch (each leg guarded)."""
+    pump = DroppingPump()
+    cell = _pump_cell(pump, monkeypatch)
+    cell.initialize()
+    pump.drops = 1  # the next leg's first attempt dies
+
+    result = cell.cycle(
+        cycles=2, volume_uL=10.0, source_port=1, dispense_port=2
+    )
+
+    assert result["cycles_done"] == 2
+    assert result["final_valve"] == "2"
+    assert pump.contained_uL == 0.0
+
+
+def test_pump_gives_up_when_the_link_never_returns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A link that stays dead is a 503 TransportError, never a hang."""
+    pump = DroppingPump(drops=10_000)
+    cell = _pump_cell(pump, monkeypatch)
+
+    with pytest.raises(TransportError, match="pump"):
+        cell.initialize()
+
+
+def test_a_dead_link_is_not_reported_as_a_missing_pump(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """After a failed reconnect the pump is unreachable, not absent —
+    the next call must retry the link (503), not answer 409."""
+    pump = DroppingPump(drops=10_000)
+    cell = _pump_cell(pump, monkeypatch)
+
+    with pytest.raises(TransportError):
+        cell.initialize()
+    with pytest.raises(TransportError):  # NOT WrongStateError
+        cell.initialize()
+
+
+def test_status_reports_a_dead_pump_link_in_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """status() is a probe: a dead pump link lands in `error`, and the
+    gantry half of the answer stays usable."""
+    pump = DroppingPump(drops=10_000)
+    cell = _pump_cell(pump, monkeypatch)
+
+    s = cell.status()
+
+    assert s["error"] is not None and "pump" in s["error"]
+    assert s["stage_x_mm"] == 0.0  # the gantry still answered
+
+
+def test_reissue_waits_out_a_busy_pump(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Error 15 after a reconnect means the interrupted first issue is
+    still executing in the MCU — wait, don't fail (bench 2026-07-29)."""
+    from cell import pump_gantry_cell as mod
+
+    monkeypatch.setattr(mod, "PUMP_BUSY_DELAY_S", 0.0)
+
+    class BusyThenDone(DroppingPump):
+        def __init__(self) -> None:
+            super().__init__()
+            self.busy_rejections = 2
+
+        def initialize(self, *, force: int = 2, ccw: bool = False) -> None:
+            self.calls.append("initialize")
+            if self.busy_rejections > 0:
+                self.busy_rejections -= 1
+                raise mod.SyringePumpController.CommandOverflowError(
+                    mod.SyringePumpController.ErrorCode.COMMAND_OVERFLOW,
+                    "Z2",
+                    b"",
+                )
+            self.initialized = True
+            self.valve = "1"
+
+    pump = BusyThenDone()
+    cell = _pump_cell(pump, monkeypatch)
+
+    result = cell.initialize()
+
+    assert result["plunger_uL"] == 0.0
+    assert pump.initialized is True
+    assert pump.calls.count("initialize") == 3  # 2 rejected + 1 accepted
+
+
+def test_a_command_that_finished_in_the_mcu_is_not_reissued(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The link can die AFTER the MCU executed the command; the settle
+    probe must detect the end state and skip the re-issue."""
+
+    class DiesAfterExecuting(DroppingPump):
+        def move_valve_to_port(self, port: int) -> None:
+            self.calls.append(f"valve:{port}")
+            self.valve = str(port)  # executed...
+            if self.drops > 0:
+                self.drops -= 1
+                raise OSError(5, "Input/output error")  # ...then link died
+
+    pump = DiesAfterExecuting()
+    cell = _pump_cell(pump, monkeypatch)
+    cell.initialize()
+    pump.drops = 1
+
+    assert cell.move_valve(2) == "2"
+    # One issue only: the settle probe saw valve=2 after the reconnect.
+    assert pump.calls.count("valve:2") == 1
