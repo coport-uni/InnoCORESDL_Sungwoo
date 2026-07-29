@@ -1703,3 +1703,49 @@ change; the reasoning behind it was wrong by four times. Corrected in
       ~1 mL moved, **liquid transfer confirmed by the operator's eye**
       (reservoir drawn down, expelled at the tip). Record updated:
       `claude_test/smoke_cell1_pump_20260729.md`.
+
+## 2026-07-29 — RS485 EMI evidence pack for the isolator purchase (issue #13)
+
+Operator is buying an RS485 isolator for the UPort 1150 and asked for the
+bench record compiled as a submittable justification.
+
+- [x] **`docs/RS485_EMI_evidence_20260729.xlsx`** — 7 sheets, generated
+      from this repo's own records: summary, the A/B/A switching test,
+      the same-bus device comparison, 16 link-quality measurements, all
+      29 `runs/` executions, the 11 actions already tried plus the
+      remaining ladder, and a source index back to each
+      LearnedPatterns entry.
+- [x] The run history sheet is **extracted mechanically** from
+      `runs/*/meta.json` + `run.jsonl` (state, step counts, failing step,
+      HTTP response, duration), so the numbers are the logs, not prose.
+      Cause classification comes from the contemporaneous diagnosis in
+      LearnedPatterns / ToDo.
+- [x] Headline figures: cell4 20 runs, 5 completed / 15 failed (75%);
+      **9 failures attributable to the RS485/EMI link** (45% of runs,
+      60% of failures). cell1 (no RS485) 9 runs, 9 completed.
+- [x] **Deliberately not attributed to EMI**: 4 balance settle timeouts
+      (all exactly 30.00 s = `SETTLE_TIMEOUT_S`) and 2 Err16.0 overload
+      trips (LP #27) are labelled separate causes. Overstating the EMI
+      share would cost the document its credibility with a reviewer.
+- [x] The workbook records the adapter-replacement recommendation as a
+      **misdiagnosis** (LP #20), so the isolator request reads as the
+      outcome of root-causing rather than parts-swapping.
+- [ ] **Before submitting**: ladder steps 1-2 (amp PE landed, shield
+      terminated one end only, SG run between the ends, 120 Ω once per
+      end) are still recorded as *not yet done*. They are free and a
+      reviewer will ask. Do the inspection, then update sheet 6's status
+      column.
+- [ ] Generator script kept in the session scratchpad
+      (`build_emi_xlsx.py`), not committed — re-run it to refresh the
+      workbook as more runs land. Promote it to `claude_test/` if the
+      workbook needs regenerating routinely.
+
+## 2026-07-29 — new solution primed through the pump (issue #21)
+
+- [x] Fresh solution loaded in the reservoir; three consecutive
+      demo_pump_cycle runs on the 1 → 2 command pair
+      (`20260729T104717Z`, `104844Z`, `105016Z` — all completed) put
+      **30 cycles / ~3 mL** through the reservoir→tip line. Operator
+      declared the syringe pump successfully primed; cell1 is
+      dispense-ready. Recorded in
+      `claude_test/smoke_cell1_pump_20260729.md`.

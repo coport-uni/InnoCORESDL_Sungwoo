@@ -54,6 +54,21 @@ This is the assert no scenario step can make (the `?6` readback proves
 rotor position only), and the pair of runs is the proof of why it must
 stay a human check.
 
+## Priming — new solution loaded, 30 cycles, declared primed
+
+After the fluid path was proven, the operator loaded a fresh solution
+into the reservoir and ran the same scenario three times back to back —
+`20260729T104717Z`, `20260729T104844Z`, `20260729T105016Z`, all
+completed, commands 1 → 2 at 100 µL — for **30 aspirate→dispense
+cycles, ~3 mL pushed through the reservoir→tip line**. The operator
+declared the syringe pump **successfully primed** on that basis: enough
+volume to fill the syringe, valve and tubing with the new solution and
+clear any air from the line. cell1's pump is dispense-ready.
+
+(A fourth same-day run, `20260729T103910Z`, was a 1 → 3 repeat from
+before the port fix — 10 more control-path cycles, no transfer, not
+counted toward priming.)
+
 ## Link stability — the flapping is resolved
 
 Earlier the same day the CH340 re-enumerated every ~10-15 s untouched
