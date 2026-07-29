@@ -1,14 +1,14 @@
 # cell1 syringe-pump validation: initialize, then 10 aspirate->dispense
-# cycles from valve port 3 (source) to valve port 1 (sink).
+# cycles from valve port 1 (source) to valve port 3 (sink).
 #
 # VALVE GOTCHA -- READ BEFORE TRUSTING WHAT THIS PROVES.
 #   The pump's valve is a Runze M05 Bi-pass with only two fluid states,
-#   90 degrees apart. Firmware ports 3 and 1 sit 180 degrees apart, so
+#   90 degrees apart. Firmware ports 1 and 3 sit 180 degrees apart, so
 #   they map to the SAME fluid state (rotor symmetry -- LearnedPatterns
 #   #1). This run therefore validates the CONTROL path -- valve rotation
 #   confirmed by the driver's ?6 readback, plunger travel by its ?
 #   readback, both surfaced through the L1 responses asserted below --
-#   but the fluid path does NOT change between source and sink. 3 -> 1
+#   but the fluid path does NOT change between source and sink. 1 -> 3
 #   is the requested validation pair; for a real liquid transfer use
 #   ports 90 degrees apart (this bench: reservoir = 2, tip = 1) and
 #   verify with the eye, not ?6.
@@ -37,17 +37,17 @@
 name: demo_pump_cycle
 description: >
   cell1's syringe pump under L2 control. Initializes the pump, runs one
-  fully-asserted aspirate->dispense cycle from valve port 3 to port 1,
+  fully-asserted aspirate->dispense cycle from valve port 1 to port 3,
   then the remaining 9 cycles through pump/cycle -- 10 aspirations in
-  all. Control-path validation only: ports 3 and 1 are the same fluid
+  all. Control-path validation only: ports 1 and 3 are the same fluid
   state on the M05 bi-pass valve.
 
 params:
   # Half-ish of the 125 uL bench syringe: a real stroke, nowhere near
   # the limits, and quick enough that 10 cycles stay short.
   volume_uL: 50.0
-  source_port: 3     # requested validation pair -- see the header note
-  dispense_port: 1
+  source_port: 1     # requested validation pair -- see the header note
+  dispense_port: 3
   init_force: 2      # one-third init force, per the 125 uL syringe
   # Cycle 1 is unrolled below; 1 + 9 = the 10 requested aspirations.
   remaining_cycles: 9

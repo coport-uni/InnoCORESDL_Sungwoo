@@ -1670,3 +1670,17 @@ change; the reasoning behind it was wrong by four times. Corrected in
       hold still, restore the table (block is in the config header),
       then `python -m orchestrator run scenarios/demo_pump_cycle.yaml
       --step-mode` with a vessel under the tip.
+
+## 2026-07-29 — pump link stabilized; scenario flipped to 1 → 3 (issue #21)
+
+- [x] After the bench's servo-driver power was tidied, the CH340 held one
+      devnum (017) across a 60 s untouched watch AND six /v1/status
+      valve queries — the ~10-15 s flapping of LearnedPatterns #35 is
+      gone. `[pump]` restored in `server/nuc1/cell1.toml`; live
+      diagnose: fw 8.33, 24.0 V, ok=true.
+- [x] `demo_pump_cycle.yaml` ports swapped per request: source 1,
+      dispense 3 (same fluid state either way — M05 gotcha unchanged).
+      Dry-run against live cell1: ok (19 steps); pytest 87 passed.
+- [ ] Hardware run: needs the operator at the console for the
+      first-motion gate —
+      `.venv/bin/python -m orchestrator run scenarios/demo_pump_cycle.yaml`
