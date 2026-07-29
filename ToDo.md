@@ -1681,6 +1681,9 @@ change; the reasoning behind it was wrong by four times. Corrected in
 - [x] `demo_pump_cycle.yaml` ports swapped per request: source 1,
       dispense 3 (same fluid state either way — M05 gotcha unchanged).
       Dry-run against live cell1: ok (19 steps); pytest 87 passed.
-- [ ] Hardware run: needs the operator at the console for the
+- [x] Hardware run: needs the operator at the console for the
       first-motion gate —
       `.venv/bin/python -m orchestrator run scenarios/demo_pump_cycle.yaml`
+      → **completed 2026-07-29**, run `20260729T103557Z-demo_pump_cycle`,
+      19/19 steps, ~53 s, link held (devnum 017 throughout). Record:
+      `claude_test/smoke_cell1_pump_20260729.md`.

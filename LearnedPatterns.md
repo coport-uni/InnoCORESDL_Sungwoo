@@ -1189,3 +1189,22 @@ format below. Newest entries at the bottom.
   is a link that is dropping, and no amount of node-rebuilding or
   reopening will hold a session on it. Fix the physical layer first,
   then confirm the devnum holds still, then wire it into a cell.
+
+## 36. The #35 flapping was the servo-driver power, and the devnum watch proved the fix
+
+- **Problem**: After the bench's servo-driver power wiring was tidied,
+  was the SY-01B's CH340 link (re-enumerating every ~10-15 s untouched,
+  #35) actually fixed, or just quiet for a moment?
+- **Cause**: The flapping had been power-side noise coupled from the
+  servo-driver wiring — not the pump, not the cable's data lines, not
+  the container's stale-node quirk that #35 already ruled out.
+- **Fix**: The same watch that diagnosed #35 verified its resolution:
+  devnum 017 held across a 60 s untouched watch, ~20 min of idle
+  serving, six consecutive valve queries, and then a full 53 s motion
+  run (`20260729T103557Z-demo_pump_cycle`, 19/19 steps, zero EIO).
+  `[pump]` is back in the live cell1.toml.
+- **Rule**: When a USB serial device flaps, look at what shares its
+  power and ground before touching software — and after any physical
+  fix, re-run the exact measurement that characterized the fault (the
+  devnum watch), then a real traffic run, before declaring it fixed. A
+  link that merely *looks* quiet has not earned the `[pump]` table back.

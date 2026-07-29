@@ -45,7 +45,7 @@ description: >
 params:
   # Half-ish of the 125 uL bench syringe: a real stroke, nowhere near
   # the limits, and quick enough that 10 cycles stay short.
-  volume_uL: 50.0
+  volume_uL: 100.0
   source_port: 1     # requested validation pair -- see the header note
   dispense_port: 3
   init_force: 2      # one-third init force, per the 125 uL syringe
