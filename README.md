@@ -622,6 +622,17 @@ that is the design, not a regression.
 See [`LearnedPatterns.md`](LearnedPatterns.md) #20, #26 and issue
 [#13](https://github.com/coport-uni/InnoCORESDL_Sungwoo/issues/13).
 
+**Operator workaround while the noise stands** (bench-confirmed
+2026-07-29): a `home` from far away is a long sequence of speed writes
+and position polls that cannot fit between two link drops, so it aborts
+every time even while `diagnose`/`status` answer perfectly — four
+consecutive runs did exactly that. **Physically push the carriage to
+near the home position before starting the run**; the homing travel
+then completes inside one quiet window, and the scenario's remaining
+moves are short. Do not raise retry counts on long moves instead — a
+move that cannot fit the window just re-runs the abort
+(`LearnedPatterns.md` #39).
+
 ### Balance settling is judged in software
 
 The bench runs `COM.OUTP = AUTO.W/O` — the balance streams whether or not

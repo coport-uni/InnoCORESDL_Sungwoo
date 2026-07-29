@@ -1882,3 +1882,12 @@ hardware code that has not passed the gate this entry installs.
 - [ ] The electrical fix ladder + isolator purchase still stand
       (docs/RS485_EMI_evidence_20260729.xlsx) — the guard is a
       mitigation, not the cure.
+
+## 2026-07-29 — rail home under EMI: operator workaround recorded
+
+- [x] Four consecutive cell4 `home` failures with the amp on were four
+      correct aborts (reads healthy throughout; moves straddled the
+      periodic link drops — GAP-1 design). Workaround confirmed on the
+      bench and recorded (LearnedPatterns #39, README bench note):
+      push the carriage near home by hand before the run so the homing
+      travel fits between drops. Interim until the RS485 isolator.
