@@ -1764,3 +1764,11 @@ bench record compiled as a submittable justification.
 - [x] README status updated: cell1 is now a finished cell (gantry +
       pump verified, primed); scenario tip for the off-by-one added.
 - [x] PR #22 merged to main.
+
+## 2026-07-29 — document the init_force code (issue #21 follow-up)
+
+- [x] `init_force` (`Z<force>` homing code) documented where it is set
+      and read: syringe-size table (0 full / 1 half / 2 one-third /
+      10–40 S-code) with the 125 µL rationale in README's scenario
+      tips, `server/nuc1/cell1.toml.example`, and the
+      `demo_pump_cycle.yaml` param comment.

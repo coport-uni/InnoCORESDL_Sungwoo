@@ -61,7 +61,11 @@ params:
   volume_uL: 100.0
   source_port: 1     # COMMAND 1 -> syringe<->physical 1 = reservoir
   dispense_port: 2   # COMMAND 2 -> syringe<->physical 3 = tip
-  init_force: 2      # one-third init force, per the 125 uL syringe
+  # Z<force> homing code: 0 = full force (>=1 mL syringes), 1 = half
+  # (250/500 uL), 2 = one-third (50-125 uL), 10..40 = S-code speed.
+  # 2 protects the 125 uL barrel's top stop; keep in agreement with
+  # the cell config's [pump] init_force.
+  init_force: 2
   # TOTAL MINUS ONE: cycle 1 is unrolled below, so for N total cycles
   # set N - 1 here. 29 -> 30 cycles (the priming count).
   remaining_cycles: 29
