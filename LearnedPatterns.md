@@ -1230,3 +1230,35 @@ format below. Newest entries at the bottom.
   first + batched rest", the batch-count param must carry the off-by-one
   in its own comment at the definition site — and a test should pin the
   *total*, not echo the param back at itself.
+
+## 38. A USB link you cannot fix can still be a link you can survive — if the commands are absolute
+
+- **Problem**: With the MINAS amp on, its conducted noise re-enumerates
+  the pump's CH340 every ~12-15 s idle and every few seconds under
+  active traffic — the same coupling class as the rail's UPort (#20).
+  The electrical fix is known but not yet purchased, and any pump
+  scenario under the amp died EIO on an early command.
+- **Cause**: One fd, one link, no recovery: the first drop killed the
+  session, and `status()` querying the valve dragged the whole cell's
+  probes down with it.
+- **Fix**: The rail's ladder, adapted to the pump's physics
+  (`cell/pump_gantry_cell.py`): patient open across the re-enumeration
+  gap; guarded commands that reopen by VID:PID and re-issue; **settle
+  probes** that check the command's end state after a reconnect and
+  skip the re-issue when the MCU finished it alone; an error-15
+  busy-wait for the race with a still-executing first issue; and a
+  dead link that stays 503, never 409. Verified under the noise:
+  `demo_pump_cycle` 19/19, 65/65 drops absorbed, 55 skipped re-issues,
+  0 unhandled 500s (claude_test/smoke_cell1_pump_emi_20260729.md).
+  Three bench surprises en route: an absent node raises
+  `RuntimeError("no serial device matches")`, not `OSError`; a
+  re-issued Z2 met error 15 because the MCU kept executing the
+  interrupted one; drops arrive several times faster under traffic
+  than idle, so retry budgets sized from idle watches are too small.
+- **Rule**: Re-issue-on-reconnect is safe only when the device's
+  commands are absolute and mechanically bounded, AND the device keeps
+  executing through the link loss — so after every reconnect, verify
+  the end state before re-issuing, and treat "busy with my own
+  previous command" as wait, not failure. The rail earns the opposite
+  policy (abort moves) for the same reason stated backwards: its
+  motion is not bounded and its position not re-verifiable mid-flight.
