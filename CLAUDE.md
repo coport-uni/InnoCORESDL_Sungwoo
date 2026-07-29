@@ -191,10 +191,14 @@ The pump's valve is a Runze **M05 Bi-pass** valve with only **two** fluid
 states 90° apart (`C-1/2-3` and `C-3/1-2`). Driven as a 4-way distribution
 valve, firmware ports **1 & 3 map to the same fluid state** (and 2 & 4 to
 the other) due to 180° rotor symmetry. So `move_valve_to_port` changing the
-`?6` digit does **not** prove the fluid path changed. Source and sink must
-be **90° apart, not 180°**: on this bench the reservoir is port 2 and the
-tip is port 1. Verify with the eye (which tube moves liquid), not `?6`. Full
-write-up in `LearnedPatterns.md` #1.
+`?6` digit does **not** prove the fluid path changed. Command digits are
+not physical fittings: command 1 (=3) connects the syringe to **physical
+port 1**, command 2 (=4) to **physical port 3**. Source and sink commands
+must be **90° apart, not 180°** — on this bench (2026-07-29 plumbing) the
+reservoir hangs on physical port 1 and the tip on physical port 3, so
+aspirate with **command 1** and dispense with **command 2**
+(`scenarios/demo_pump_cycle.yaml`). Verify with the eye (which tube moves
+liquid), not `?6`. Full write-up in `LearnedPatterns.md` #1.
 
 ### Balance prerequisites (front panel, menu-only)
 

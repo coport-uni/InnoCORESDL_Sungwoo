@@ -1036,7 +1036,7 @@ async def test_pump_cycle_demo(engine: Engine, fake_l1: FakeL1) -> None:
     assert [p for p, _b in pump] == (
         ["/v1/pump/initialize", *UNROLLED_CYCLE, "/v1/pump/cycle"]
     )
-    # The unrolled cycle goes source -> sink, 1 -> 3 as requested.
+    # The unrolled cycle goes source -> sink: command 1 (reservoir) -> 2 (tip).
     assert pump[1][1]["port"] == run.params["source_port"]
     assert pump[3][1]["port"] == run.params["dispense_port"]
     assert pump[2][1]["target_uL"] == run.params["volume_uL"]

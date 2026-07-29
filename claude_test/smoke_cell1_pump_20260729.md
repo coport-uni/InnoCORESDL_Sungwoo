@@ -1,10 +1,18 @@
-# cell1 pump bench validation — 2026-07-29 (run `20260729T103557Z-demo_pump_cycle`)
+# cell1 pump bench validation — 2026-07-29
 
-First hardware run of `scenarios/demo_pump_cycle.yaml`: the SY-01B under
-L2 YAML control on cell1. **19/19 steps passed**, zero retries, ~53 s
-wall clock. Runlog: `runs/20260729T103557Z-demo_pump_cycle/` (gitignored).
+Two hardware runs of `scenarios/demo_pump_cycle.yaml` (SY-01B under L2
+YAML control on cell1), both 19/19 steps, and together they retell
+LearnedPatterns #1 with the current plumbing:
 
-## What ran
+| Run | Valve commands | Software | Liquid |
+|---|---|---|---|
+| `20260729T103557Z` | 1 → 3 (180°, same state) | 19/19 ✓ | **oscillated at one line only** — no transfer |
+| `20260729T104717Z` | 1 → 2 (90°, real switch) | 19/19 ✓ | **transferred, operator-confirmed by eye** |
+
+The first run is the cautionary half: every wire-level assert can pass
+while the fluid path never changes. Runlogs under `runs/` (gitignored).
+
+## The control-path run — `20260729T103557Z`, commands 1 → 3, 50 µL
 
 Operator-gated run from the console (`python -m orchestrator run`, Enter
 at the first-motion gate). Pump plunger + valve only; the gantry sat
@@ -18,9 +26,33 @@ untouched at X=300 mm the whole run (start and end `/v1/status` agree).
 | `remaining_cycles` ×9 | 41.25 s (~4.6 s/cycle), `cycles_done: 9`, `final_valve: '3'` |
 | `read_back` witness | `/v1/status` re-read: valve '3', plunger 0.0 µL |
 
-1 unrolled + 9 batched = the 10 requested aspirations, port 1 → port 3.
-The verified run used `volume_uL: 50.0`; the working scenario has since
-been raised to 100.0 (still inside the 125 µL syringe; dry-run passes).
+1 unrolled + 9 batched = the 10 requested aspirations (commands 1 → 3,
+50.0 µL). All 19 steps passed — and the operator then reported the water
+only moving back and forth in one line. See "The fluid-path run" below.
+
+## The fluid-path run — `20260729T104717Z`, commands 1 → 2, 100 µL
+
+The bench plumbing has the **reservoir on physical port 1** and the
+**tip on physical port 3**. Per the HIL mapping (driver docstring +
+LearnedPatterns #1): command 1 (=3) → state `C-1/2-3` = syringe↔physical
+1; command 2 (=4) → state `C-3/1-2` = syringe↔physical 3. So the 1 → 3
+command pair of the first run held the syringe on the reservoir line the
+whole time — rotor turning, path constant — exactly what the operator
+saw. The corrected pair is **command 1 (aspirate, reservoir) → command 2
+(dispense, tip)**, 90° apart.
+
+| Step | Result |
+|---|---|
+| `initialize` (force 2) | 6.17 s; valve woke at '4', plunger 0.0 µL |
+| cycle 1 unrolled | cmd 1 ('1' readback), aspirate 100.0 µL, cmd 2 ('2'), dispense→0.0 |
+| `remaining_cycles` ×9 | 62.96 s (~7.0 s/cycle at 100 µL), `cycles_done: 9`, `final_valve: '2'` |
+| `read_back` witness | valve '2', plunger 0.0 µL, gantry untouched at X=300 mm |
+
+**Liquid transfer confirmed by the operator's eye**: reservoir drawn
+down, liquid expelled at the tip — ~1 mL moved across the 10 cycles.
+This is the assert no scenario step can make (the `?6` readback proves
+rotor position only), and the pair of runs is the proof of why it must
+stay a human check.
 
 ## Link stability — the flapping is resolved
 

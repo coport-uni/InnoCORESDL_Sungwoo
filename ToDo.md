@@ -1687,3 +1687,19 @@ change; the reasoning behind it was wrong by four times. Corrected in
       → **completed 2026-07-29**, run `20260729T103557Z-demo_pump_cycle`,
       19/19 steps, ~53 s, link held (devnum 017 throughout). Record:
       `claude_test/smoke_cell1_pump_20260729.md`.
+
+## 2026-07-29 — valve commands corrected to the fluid-moving pair (issue #21)
+
+- [x] The 1 → 3 run moved no liquid (water oscillating in one line) —
+      the operator's report, exactly LearnedPatterns #1: commands 180°
+      apart share a fluid state. Current plumbing pinned down: reservoir
+      on PHYSICAL port 1, tip on PHYSICAL port 3.
+- [x] `demo_pump_cycle.yaml` switched to the 90° command pair: aspirate
+      **command 1** (syringe↔physical 1, reservoir), dispense
+      **command 2** (syringe↔physical 3, tip); volume 100 µL.
+      CLAUDE.md's valve paragraph updated with the command↔physical
+      mapping and the new plumbing.
+- [x] Hardware run `20260729T104717Z-demo_pump_cycle`: 19/19 steps,
+      ~1 mL moved, **liquid transfer confirmed by the operator's eye**
+      (reservoir drawn down, expelled at the tip). Record updated:
+      `claude_test/smoke_cell1_pump_20260729.md`.
