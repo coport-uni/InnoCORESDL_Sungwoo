@@ -1,0 +1,193 @@
+# cell1 syringe-pump validation: initialize, then 1 + remaining_cycles
+# aspirate->dispense cycles between the M05's two fluid states.
+#
+# FIRMWARE COMMAND DIGITS ARE NOT PHYSICAL FITTINGS -- LearnedPatterns #1.
+#   The valve is a Runze M05 Bi-pass with only TWO fluid states, 90
+#   degrees apart, HIL-mapped on this pump (fw 8.33):
+#     command 1 (=3)  ->  C-1/2-3  ->  syringe <-> PHYSICAL port 1
+#     command 2 (=4)  ->  C-3/1-2  ->  syringe <-> PHYSICAL port 3
+#   Commands 180 degrees apart (1<->3, 2<->4) land on the same state,
+#   so a 1 -> 3 command pair -- run on this bench 2026-07-29
+#   (20260729T103557Z, 19/19 steps) -- passed every control-path assert
+#   while the water only oscillated in the reservoir line: the rotor
+#   turned, the fluid path never changed.
+#   The source/dispense params below pick which state is drawn from and
+#   which is expelled into -- any 90-degree command pair (1 & 2) gives a
+#   real state switch every half-cycle; which direction the liquid goes
+#   depends on the current plumbing. The 2026-07-29 verified transfer
+#   runs (reservoir on physical 1, tip on physical 3) used source
+#   command 1 -> dispense command 2. The ?6 readbacks prove rotor
+#   position; only the eye (one level falling, drops at the other end)
+#   proves the transfer and its direction.
+#
+# HOW THE CYCLES ARE SPLIT -- remaining_cycles IS THE TOTAL MINUS ONE
+#   The scenario language has no loop construct (a scenario is data, not
+#   code). Cycle 1 is unrolled step by step so every leg is asserted on
+#   its own readback; the rest run inside one pump/cycle call, whose L1
+#   handler loops in the cell. Total cycles = 1 + remaining_cycles, so
+#   for N cycles set remaining_cycles: N - 1 (e.g. 29 -> 30 cycles) --
+#   setting it to N runs N + 1. pump/cycle's cycles_done is asserted so
+#   a short count cannot pass silently.
+#
+# BEFORE RUNNING
+#   1. server/nuc1/cell1.toml must carry the [pump] table -- without it
+#      every pump step here answers 409 ("configured without a pump").
+#   2. This pair MOVES LIQUID: each cycle draws volume_uL from the
+#      reservoir (physical port 1) and expels it at the tip (physical
+#      port 3) -- (1 + remaining_cycles) x volume_uL in total, currently
+#      30 x 100 uL = ~3 mL. Reservoir stocked, vessel under the tip,
+#      watch the first cycle: the reservoir level must fall and drops
+#      must appear at the tip.
+#   3. The batched-cycles step holds the cell's single lock for its
+#      whole duration, so /v1/stop queues behind it (docs/L1_AUDIT.md
+#      GAP-9). Keep the physical e-stop / power switch in hand.
+#   4. Run it in order:
+#        python -m orchestrator validate scenarios/demo_pump_cycle.yaml
+#        python -m orchestrator run scenarios/demo_pump_cycle.yaml --step-mode
+#        python -m orchestrator run scenarios/demo_pump_cycle.yaml
+
+name: demo_pump_cycle
+description: >
+  cell1's syringe pump under L2 control. Initializes the pump, runs one
+  fully-asserted aspirate->dispense cycle from the reservoir (physical
+  port 1, valve command 1) to the tip (physical port 3, valve command
+  2), then the rest through a single pump/cycle call -- 1 +
+  remaining_cycles aspirations in all. Commands 1 -> 2 are the M05's
+  90-degree pair, so the valve genuinely switches fluid state and each
+  cycle moves liquid from the reservoir to the tip.
+
+params:
+  # A real stroke on the 125 uL bench syringe, nowhere near the limits.
+  volume_uL: 100.0
+  source_port: 1     # COMMAND 1 -> syringe<->physical 1 = reservoir
+  dispense_port: 2   # COMMAND 2 -> syringe<->physical 3 = tip
+  init_force: 2      # one-third init force, per the 125 uL syringe
+  # TOTAL MINUS ONE: cycle 1 is unrolled below, so for N total cycles
+  # set N - 1 here. 29 -> 30 cycles (the priming count).
+  remaining_cycles: 29
+
+defaults:
+  on_fail: abort     # plunger and valve state carry across steps --
+                     # never blindly retry a half-done pump command
+  timeout_s: 30.0
+
+steps:
+  # ── Pre-flight: is the pump actually on this cell? ─────────────────
+  - id: check_diagnose
+    cell: cell1
+    action: diagnose
+    method: GET
+    timeout_s: 15.0
+    save_as: diag
+
+  # present=false means cell1.toml lost its [pump] table again (the
+  # SY-01B's USB link has a history of dropping -- ToDo.md). Catching it
+  # here costs one HTTP call instead of ten 409s.
+  - id: verify_pump_present
+    assert: "${diag.pump.present} == true"
+
+  # ok is the driver's read-only probe (version/status queries answered
+  # sanely) -- the pump is talking, not just enumerated.
+  - id: verify_pump_ok
+    assert: "${diag.pump.ok} == true"
+
+  # ── Initialize: home the plunger and valve ─────────────────────────
+  - id: initialize
+    cell: cell1
+    action: pump/initialize
+    body:
+      force: "${params.init_force}"
+    # A full-stroke plunger home is ~24 s at the init speed; the
+    # driver's own settle timeout is 30 s, so sit above it.
+    timeout_s: 60.0
+    save_as: init
+
+  - id: verify_plunger_homed
+    assert: "${init.plunger_uL} == 0"
+
+  # ── Cycle 1, unrolled and asserted leg by leg ──────────────────────
+  # The valve response is the driver's ?6 readback AFTER its own
+  # arrival poll -- asserting it means the valve reported the port,
+  # not that the command was merely accepted.
+  - id: c1_valve_source
+    cell: cell1
+    action: pump/valve
+    body:
+      port: "${params.source_port}"
+    save_as: v_src
+
+  - id: verify_c1_at_source
+    assert: "${v_src.valve} == ${params.source_port}"
+
+  - id: c1_aspirate
+    cell: cell1
+    action: pump/aspirate
+    body:
+      target_uL: "${params.volume_uL}"
+    save_as: asp
+
+  # aspirate is absolute ("contain this much"), and the response is the
+  # cell's contained-volume state after the driver's ? position poll
+  # confirmed arrival at the converted step target.
+  - id: verify_c1_aspirated
+    assert: "${asp.plunger_uL} == ${params.volume_uL}"
+
+  - id: c1_valve_sink
+    cell: cell1
+    action: pump/valve
+    body:
+      port: "${params.dispense_port}"
+    save_as: v_snk
+
+  - id: verify_c1_at_sink
+    assert: "${v_snk.valve} == ${params.dispense_port}"
+
+  - id: c1_dispense
+    cell: cell1
+    action: pump/dispense
+    body:
+      target_uL: 0
+    save_as: disp
+
+  - id: verify_c1_emptied
+    assert: "${disp.plunger_uL} == 0"
+
+  # ── Cycles 2..N in one call ────────────────────────────────────────
+  # Measured 2026-07-29: ~7.0 s per 100 uL cycle (valve x2 + full
+  # aspirate + dispense), so 29 cycles ≈ 205 s; 600 s is ~3x that
+  # without hiding a hang. Scale this timeout with remaining_cycles.
+  - id: remaining_cycles
+    cell: cell1
+    action: pump/cycle
+    body:
+      cycles: "${params.remaining_cycles}"
+      volume_uL: "${params.volume_uL}"
+      source_port: "${params.source_port}"
+      dispense_port: "${params.dispense_port}"
+    timeout_s: 600.0
+    save_as: cyc
+
+  - id: verify_cycle_count
+    assert: "${cyc.cycles_done} == ${params.remaining_cycles}"
+
+  # The cell queries ?6 after the loop; every cycle ends on the
+  # dispense port, so anything else means the loop broke off early.
+  - id: verify_final_valve
+    assert: "${cyc.final_valve} == ${params.dispense_port}"
+
+  # ── Independent witness ────────────────────────────────────────────
+  # /v1/status re-reads the valve over the wire rather than echoing
+  # what pump/cycle just returned; plunger_uL confirms the syringe was
+  # left empty for whoever runs next.
+  - id: read_back
+    cell: cell1
+    action: status
+    method: GET
+    timeout_s: 15.0
+    save_as: final
+
+  - id: verify_syringe_left_empty
+    assert: "${final.plunger_uL} == 0"
+
+  - id: verify_status_agrees_on_valve
+    assert: "${final.valve} == ${params.dispense_port}"

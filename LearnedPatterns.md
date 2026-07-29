@@ -1158,3 +1158,75 @@ format below. Newest entries at the bottom.
   of the noise; if they never do, look for the shared cache before
   congratulating yourself. Cross-checks only have value where the two
   sides can actually disagree.
+
+## 35. A pump that answers `lsusb` can still be un-openable — watch the devnum, not the presence
+
+- **Problem**: With the SY-01B back on the bench (`lsusb` shows
+  `1a86:7523`), restoring cell1's `[pump]` table made the cell open
+  cleanly — and then every `/v1/diagnose` and `/v1/status` answered 500
+  with `termios.error: (5, 'Input/output error')` on the pump's first
+  serial query. Restarting the server reproduced it exactly. The stale
+  `/dev` tmpfs node was the obvious suspect (this container's known
+  quirk) and was a red herring: the fresh `ttyUSB` node existed with the
+  right major:minor every time.
+- **Cause**: The CH340 link is physically flapping. Watched for 45 s
+  with **nobody holding the port**, the device re-enumerated four times
+  (devnums 054 → 055 → 057 → 058, ~10-15 s apart, 2026-07-29). Any fd
+  opened on it dies EIO within seconds, and because `status()` queries
+  the valve whenever a pump is configured, the dead pump fd took the
+  whole cell's probes down — gantry included. Cable, hub port or pump
+  USB power; not software, and not the stale-node quirk.
+- **Fix**: Reverted `server/nuc1/cell1.toml` to the pumpless shape so
+  cell1 serves its gantry cleanly (the config's header now carries the
+  measurement and the ready-to-restore `[pump]` block). The L2 pump
+  scenario (`scenarios/demo_pump_cycle.yaml`) was validated offline
+  against the fake L1 and dry-run against the live cell instead — the
+  L1 OpenAPI advertises `pump/*` in every shape, so the dry run does
+  not need the pump present.
+- **Rule**: `lsusb` proves enumeration, not a link. Before trusting a
+  USB serial device that has a flapping history, watch its **device
+  number** across a minute of nobody touching it: a devnum that climbs
+  is a link that is dropping, and no amount of node-rebuilding or
+  reopening will hold a session on it. Fix the physical layer first,
+  then confirm the devnum holds still, then wire it into a cell.
+
+## 36. The #35 flapping was the servo-driver power, and the devnum watch proved the fix
+
+- **Problem**: After the bench's servo-driver power wiring was tidied,
+  was the SY-01B's CH340 link (re-enumerating every ~10-15 s untouched,
+  #35) actually fixed, or just quiet for a moment?
+- **Cause**: The flapping had been power-side noise coupled from the
+  servo-driver wiring — not the pump, not the cable's data lines, not
+  the container's stale-node quirk that #35 already ruled out.
+- **Fix**: The same watch that diagnosed #35 verified its resolution:
+  devnum 017 held across a 60 s untouched watch, ~20 min of idle
+  serving, six consecutive valve queries, and then a full 53 s motion
+  run (`20260729T103557Z-demo_pump_cycle`, 19/19 steps, zero EIO).
+  `[pump]` is back in the live cell1.toml.
+- **Rule**: When a USB serial device flaps, look at what shares its
+  power and ground before touching software — and after any physical
+  fix, re-run the exact measurement that characterized the fault (the
+  devnum watch), then a real traffic run, before declaring it fixed. A
+  link that merely *looks* quiet has not earned the `[pump]` table back.
+
+## 37. demo_pump_cycle's remaining_cycles is the desired total MINUS ONE
+
+- **Problem**: An operator wanting 30 pump cycles reads
+  `remaining_cycles` as "the number of cycles" and sets it to 30 —
+  getting 31, or asserts totals that are off by one. The name invites
+  the mistake: nothing at the param site said what it must remain
+  *after*.
+- **Cause**: The scenario language has no loop construct (deliberately —
+  a scenario is data), so the first cycle is unrolled into individually
+  asserted steps and only the remainder runs through one `pump/cycle`
+  call. Total = 1 + remaining_cycles, an invariant that lived in a
+  header comment nobody reads while editing a number.
+- **Fix**: The rule now sits directly on the param ("TOTAL MINUS ONE:
+  for N total cycles set N - 1; 29 -> 30"), in the header, in
+  README.md's scenario tips, and the orchestrator test pins
+  `1 + cycles == 30` so an edit that sets the param to the intended
+  total fails the suite instead of running an extra cycle on hardware.
+- **Rule**: When a scenario splits one logical loop into "unrolled
+  first + batched rest", the batch-count param must carry the off-by-one
+  in its own comment at the definition site — and a test should pin the
+  *total*, not echo the param back at itself.

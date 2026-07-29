@@ -1648,3 +1648,119 @@ change; the reasoning behind it was wrong by four times. Corrected in
       issue's own "the dry run cannot catch this" claim) and the tolerance
       correction, then **closed it** — matching #10's precedent for cell4.
       The remaining bullets above are follow-ups, not part of the bring-up.
+
+## 2026-07-29 — cell1 pump under L1/L2 YAML control (issue #21)
+
+- [x] `scenarios/demo_pump_cycle.yaml`: pump init + 10 aspirate→dispense
+      cycles valve 3 → 1 (1 unrolled + asserted leg by leg, 9 via
+      `pump/cycle`), final `/v1/status` witness. Header documents the
+      M05 gotcha: ports 3/1 are 180° apart = the SAME fluid state, so
+      this validates the control path, not a fluid-path change.
+- [x] `claude_test/conftest.py`: fake L1 gained `/v1/pump/initialize` +
+      `/v1/pump/cycle` (schemas mirrored from `server/schemas.py`, held
+      honest by the OpenAPI drift guard), a `/v1/diagnose` responder,
+      and stateful valve/plunger answers.
+- [x] `claude_test/test_orchestrator.py`: scenario validates, runs to
+      completion (call sequence + 1+9=10 asserted), aborts before
+      `pump/cycle` on an injected aspirate fault.
+- [x] Dry-run against the live cell1: `demo_pump_cycle: ok (19 steps)`.
+- [ ] **Hardware run blocked**: the SY-01B CH340 re-enumerates every
+      ~10-15 s untouched (LearnedPatterns #35), so `[pump]` stays out of
+      `server/nuc1/cell1.toml`. Fix cable/port/power, watch the devnum
+      hold still, restore the table (block is in the config header),
+      then `python -m orchestrator run scenarios/demo_pump_cycle.yaml
+      --step-mode` with a vessel under the tip.
+
+## 2026-07-29 — pump link stabilized; scenario flipped to 1 → 3 (issue #21)
+
+- [x] After the bench's servo-driver power was tidied, the CH340 held one
+      devnum (017) across a 60 s untouched watch AND six /v1/status
+      valve queries — the ~10-15 s flapping of LearnedPatterns #35 is
+      gone. `[pump]` restored in `server/nuc1/cell1.toml`; live
+      diagnose: fw 8.33, 24.0 V, ok=true.
+- [x] `demo_pump_cycle.yaml` ports swapped per request: source 1,
+      dispense 3 (same fluid state either way — M05 gotcha unchanged).
+      Dry-run against live cell1: ok (19 steps); pytest 87 passed.
+- [x] Hardware run: needs the operator at the console for the
+      first-motion gate —
+      `.venv/bin/python -m orchestrator run scenarios/demo_pump_cycle.yaml`
+      → **completed 2026-07-29**, run `20260729T103557Z-demo_pump_cycle`,
+      19/19 steps, ~53 s, link held (devnum 017 throughout). Record:
+      `claude_test/smoke_cell1_pump_20260729.md`.
+
+## 2026-07-29 — valve commands corrected to the fluid-moving pair (issue #21)
+
+- [x] The 1 → 3 run moved no liquid (water oscillating in one line) —
+      the operator's report, exactly LearnedPatterns #1: commands 180°
+      apart share a fluid state. Current plumbing pinned down: reservoir
+      on PHYSICAL port 1, tip on PHYSICAL port 3.
+- [x] `demo_pump_cycle.yaml` switched to the 90° command pair: aspirate
+      **command 1** (syringe↔physical 1, reservoir), dispense
+      **command 2** (syringe↔physical 3, tip); volume 100 µL.
+      CLAUDE.md's valve paragraph updated with the command↔physical
+      mapping and the new plumbing.
+- [x] Hardware run `20260729T104717Z-demo_pump_cycle`: 19/19 steps,
+      ~1 mL moved, **liquid transfer confirmed by the operator's eye**
+      (reservoir drawn down, expelled at the tip). Record updated:
+      `claude_test/smoke_cell1_pump_20260729.md`.
+
+## 2026-07-29 — RS485 EMI evidence pack for the isolator purchase (issue #13)
+
+Operator is buying an RS485 isolator for the UPort 1150 and asked for the
+bench record compiled as a submittable justification.
+
+- [x] **`docs/RS485_EMI_evidence_20260729.xlsx`** — 7 sheets, generated
+      from this repo's own records: summary, the A/B/A switching test,
+      the same-bus device comparison, 16 link-quality measurements, all
+      29 `runs/` executions, the 11 actions already tried plus the
+      remaining ladder, and a source index back to each
+      LearnedPatterns entry.
+- [x] The run history sheet is **extracted mechanically** from
+      `runs/*/meta.json` + `run.jsonl` (state, step counts, failing step,
+      HTTP response, duration), so the numbers are the logs, not prose.
+      Cause classification comes from the contemporaneous diagnosis in
+      LearnedPatterns / ToDo.
+- [x] Headline figures: cell4 20 runs, 5 completed / 15 failed (75%);
+      **9 failures attributable to the RS485/EMI link** (45% of runs,
+      60% of failures). cell1 (no RS485) 9 runs, 9 completed.
+- [x] **Deliberately not attributed to EMI**: 4 balance settle timeouts
+      (all exactly 30.00 s = `SETTLE_TIMEOUT_S`) and 2 Err16.0 overload
+      trips (LP #27) are labelled separate causes. Overstating the EMI
+      share would cost the document its credibility with a reviewer.
+- [x] The workbook records the adapter-replacement recommendation as a
+      **misdiagnosis** (LP #20), so the isolator request reads as the
+      outcome of root-causing rather than parts-swapping.
+- [ ] **Before submitting**: ladder steps 1-2 (amp PE landed, shield
+      terminated one end only, SG run between the ends, 120 Ω once per
+      end) are still recorded as *not yet done*. They are free and a
+      reviewer will ask. Do the inspection, then update sheet 6's status
+      column.
+- [ ] Generator script kept in the session scratchpad
+      (`build_emi_xlsx.py`), not committed — re-run it to refresh the
+      workbook as more runs land. Promote it to `claude_test/` if the
+      workbook needs regenerating routinely.
+
+## 2026-07-29 — new solution primed through the pump (issue #21)
+
+- [x] Fresh solution loaded in the reservoir; three consecutive
+      demo_pump_cycle runs on the 1 → 2 command pair
+      (`20260729T104717Z`, `104844Z`, `105016Z` — all completed) put
+      **30 cycles / ~3 mL** through the reservoir→tip line. Operator
+      declared the syringe pump successfully primed; cell1 is
+      dispense-ready. Recorded in
+      `claude_test/smoke_cell1_pump_20260729.md`.
+
+## 2026-07-29 — docs pass and merge: off-by-one, EMI evidence (issue #21)
+
+- [x] `remaining_cycles` = desired total − 1 recorded at the param site,
+      in the scenario header, README's scenario tips, and
+      LearnedPatterns #37; the orchestrator test now pins the total
+      (1 + 29 = 30). Batched-step timeout raised to 600 s (~3x the
+      measured ~7 s/cycle × 29).
+- [x] `docs/RS485_EMI_evidence_20260729.xlsx` committed — the cell4
+      RS485/EMI case (A/B/A switch tests, per-device comparison, run
+      ledger, isolator purchase request) compiled from LearnedPatterns
+      #15–#26; referenced from README's EMI bench note.
+- [x] README status updated: cell1 is now a finished cell (gantry +
+      pump verified, primed); scenario tip for the off-by-one added.
+- [x] PR #22 merged to main.
