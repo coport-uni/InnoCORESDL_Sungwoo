@@ -995,3 +995,74 @@ def test_dry_run_bounds_cover_both_ends(
     problems = check_body(document, schema, {**body, field: value})
 
     assert any(field in p and expected in p for p in problems)
+
+
+# ── cell1 pump: demo_pump_cycle.yaml ───────────────────────────────────────
+
+PUMP_CYCLE = REPO_ROOT / "scenarios" / "demo_pump_cycle.yaml"
+
+#: The unrolled first cycle's pump calls, in scenario order.
+UNROLLED_CYCLE = [
+    "/v1/pump/valve",
+    "/v1/pump/aspirate",
+    "/v1/pump/valve",
+    "/v1/pump/dispense",
+]
+
+
+async def test_pump_cycle_scenario_validates(engine: Engine) -> None:
+    scenario, issues = await engine.validate(
+        PUMP_CYCLE.read_text(encoding="utf-8")
+    )
+    assert [str(i) for i in issues] == []
+    assert scenario is not None
+    assert scenario.name == "demo_pump_cycle"
+
+
+async def test_pump_cycle_demo(engine: Engine, fake_l1: FakeL1) -> None:
+    """The 10 requested aspirations: 1 unrolled + 9 via pump/cycle."""
+    run = await engine.create_run(PUMP_CYCLE.read_text(encoding="utf-8"))
+    await engine.wait(run.run_id)
+
+    assert run.state is RunState.COMPLETED
+    assert run.error is None
+    assert all(r["ok"] for r in run.records)
+
+    pump = [
+        (path, body)
+        for _cell, _method, path, body in fake_l1.calls
+        if path.startswith("/v1/pump/")
+    ]
+    assert [p for p, _b in pump] == (
+        ["/v1/pump/initialize", *UNROLLED_CYCLE, "/v1/pump/cycle"]
+    )
+    # The unrolled cycle goes source -> sink, 3 -> 1 as requested.
+    assert pump[1][1]["port"] == run.params["source_port"]
+    assert pump[3][1]["port"] == run.params["dispense_port"]
+    assert pump[2][1]["target_uL"] == run.params["volume_uL"]
+    cycle_body = pump[5][1]
+    assert cycle_body == {
+        "cycles": run.params["remaining_cycles"],
+        "volume_uL": run.params["volume_uL"],
+        "source_port": run.params["source_port"],
+        "dispense_port": run.params["dispense_port"],
+    }
+    # 1 unrolled + the batched remainder = the 10 requested aspirations.
+    assert 1 + cycle_body["cycles"] == 10
+
+    # The fake's end state matches what the scenario's witness asserted.
+    assert fake_l1.plunger_uL["cell1"] == 0.0
+    assert fake_l1.valve["cell1"] == str(run.params["dispense_port"])
+
+
+async def test_pump_cycle_aborts_on_a_pump_fault(
+    engine: Engine, fake_l1: FakeL1
+) -> None:
+    """A failed aspirate must abort the run before the batched cycles."""
+    fake_l1.fail_next("cell1", "pump/aspirate")
+    run = await engine.create_run(PUMP_CYCLE.read_text(encoding="utf-8"))
+    await engine.wait(run.run_id)
+
+    assert run.state is RunState.FAILED
+    called = {path for _c, _m, path, _b in fake_l1.calls}
+    assert "/v1/pump/cycle" not in called

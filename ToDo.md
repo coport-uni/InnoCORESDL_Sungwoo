@@ -1648,3 +1648,25 @@ change; the reasoning behind it was wrong by four times. Corrected in
       issue's own "the dry run cannot catch this" claim) and the tolerance
       correction, then **closed it** — matching #10's precedent for cell4.
       The remaining bullets above are follow-ups, not part of the bring-up.
+
+## 2026-07-29 — cell1 pump under L1/L2 YAML control (issue #21)
+
+- [x] `scenarios/demo_pump_cycle.yaml`: pump init + 10 aspirate→dispense
+      cycles valve 3 → 1 (1 unrolled + asserted leg by leg, 9 via
+      `pump/cycle`), final `/v1/status` witness. Header documents the
+      M05 gotcha: ports 3/1 are 180° apart = the SAME fluid state, so
+      this validates the control path, not a fluid-path change.
+- [x] `claude_test/conftest.py`: fake L1 gained `/v1/pump/initialize` +
+      `/v1/pump/cycle` (schemas mirrored from `server/schemas.py`, held
+      honest by the OpenAPI drift guard), a `/v1/diagnose` responder,
+      and stateful valve/plunger answers.
+- [x] `claude_test/test_orchestrator.py`: scenario validates, runs to
+      completion (call sequence + 1+9=10 asserted), aborts before
+      `pump/cycle` on an injected aspirate fault.
+- [x] Dry-run against the live cell1: `demo_pump_cycle: ok (19 steps)`.
+- [ ] **Hardware run blocked**: the SY-01B CH340 re-enumerates every
+      ~10-15 s untouched (LearnedPatterns #35), so `[pump]` stays out of
+      `server/nuc1/cell1.toml`. Fix cable/port/power, watch the devnum
+      hold still, restore the table (block is in the config header),
+      then `python -m orchestrator run scenarios/demo_pump_cycle.yaml
+      --step-mode` with a vessel under the tip.

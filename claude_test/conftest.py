@@ -103,6 +103,25 @@ _SCHEMAS: dict[str, Any] = {
         "properties": {"port": {"type": "integer"}},
         "required": ["port"],
     },
+    "InitializeRequest": {
+        "type": "object",
+        "title": "InitializeRequest",
+        "properties": {
+            "force": {"type": "integer", "default": 2},
+            "ccw": {"type": "boolean", "default": False},
+        },
+    },
+    "CycleRequest": {
+        "type": "object",
+        "title": "CycleRequest",
+        "properties": {
+            "cycles": {"type": "integer", "minimum": 1, "maximum": 50},
+            "volume_uL": {"type": "number", "exclusiveMinimum": 0},
+            "source_port": {"type": "integer", "minimum": 1, "maximum": 4},
+            "dispense_port": {"type": "integer", "minimum": 1, "maximum": 4},
+        },
+        "required": ["cycles", "volume_uL", "source_port", "dispense_port"],
+    },
     "AmbientRequest": {
         "type": "object",
         "title": "AmbientRequest",
@@ -167,9 +186,11 @@ _LINEAR_PATHS: dict[str, Any] = {
 }
 
 _PUMP_PATHS: dict[str, Any] = {
+    "/v1/pump/initialize": _post("initialize", "InitializeRequest"),
     "/v1/pump/valve": _post("valve", "ValveRequest"),
     "/v1/pump/aspirate": _post("aspirate", "VolumeRequest"),
     "/v1/pump/dispense": _post("dispense", "VolumeRequest"),
+    "/v1/pump/cycle": _post("cycle", "CycleRequest"),
 }
 
 _GANTRY_PATHS: dict[str, Any] = {
@@ -248,6 +269,11 @@ class FakeL1:
         self.plate_c: dict[str, float] = dict.fromkeys(shapes, 21.5)
         self.heating: dict[str, bool] = dict.fromkeys(shapes, False)
         self.lamp_on: dict[str, bool] = dict.fromkeys(shapes, False)
+        #: Valve readback (`?6`) and contained volume per cell. "-" is
+        #: what the real cell reports for a pumpless shape; a pump answers
+        #: a port digit only after pump/initialize homes it.
+        self.valve: dict[str, str] = dict.fromkeys(shapes, "-")
+        self.plunger_uL: dict[str, float] = dict.fromkeys(shapes, 0.0)
         #: What the pan is carrying, in grams. Default is an empty,
         #: freshly tared pan. A test that exercises a scenario with an
         #: operator step sets this *while the run is paused* -- which is
@@ -344,12 +370,29 @@ class FakeL1:
                 HTTP_OK,
                 json={
                     "weight_g": 0.0,
-                    "valve": "-",
-                    "plunger_uL": 0.0,
+                    "valve": self.valve[cell],
+                    "plunger_uL": self.plunger_uL[cell],
                     "stage_x_mm": self.position_mm[cell],
                     "stage_z_mm": 0.0,
                     "busy": False,
                     "error": None,
+                },
+            )
+        if action == "diagnose":
+            # Mirrors DiagnoseResponse: presence comes from the cell's
+            # shape, ok is always healthy — failure paths are exercised
+            # through fail_next, not through a sick diagnose.
+            families = _SHAPE_FAMILIES[self.shapes[cell]]
+            return httpx.Response(
+                HTTP_OK,
+                json={
+                    "pump": {"present": "pump" in families, "ok": True},
+                    "balance": {
+                        "present": "balance" in families,
+                        "ok": True,
+                    },
+                    "stage": {"ok": True},
+                    "ok_to_initialize": True,
                 },
             )
         if action == "stop":
@@ -375,8 +418,33 @@ class FakeL1:
             return httpx.Response(
                 HTTP_OK, json={"weight_g": self.pan_g, "stable": True}
             )
-        if action.startswith("pump/"):
-            return httpx.Response(HTTP_OK, json={"plunger_uL": 0.0})
+        if action == "pump/initialize":
+            # Z<force> homes plunger then valve; the valve wakes at port 1.
+            self.valve[cell] = "1"
+            self.plunger_uL[cell] = 0.0
+            return httpx.Response(
+                HTTP_OK, json={"valve": "1", "plunger_uL": 0.0}
+            )
+        if action == "pump/valve":
+            self.valve[cell] = str(body["port"])
+            return httpx.Response(HTTP_OK, json={"valve": self.valve[cell]})
+        if action in ("pump/aspirate", "pump/dispense"):
+            # Both are absolute contained-volume moves on the real pump.
+            self.plunger_uL[cell] = float(body["target_uL"])
+            return httpx.Response(
+                HTTP_OK, json={"plunger_uL": self.plunger_uL[cell]}
+            )
+        if action == "pump/cycle":
+            # Every cycle ends on the dispense port with the syringe empty.
+            self.valve[cell] = str(body["dispense_port"])
+            self.plunger_uL[cell] = 0.0
+            return httpx.Response(
+                HTTP_OK,
+                json={
+                    "cycles_done": body["cycles"],
+                    "final_valve": self.valve[cell],
+                },
+            )
         if action == "zstage/home":
             self.z_mm[cell] = 0.0
             return httpx.Response(HTTP_OK, json={"z_mm": 0.0})

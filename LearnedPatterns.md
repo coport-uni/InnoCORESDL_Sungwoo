@@ -1158,3 +1158,34 @@ format below. Newest entries at the bottom.
   of the noise; if they never do, look for the shared cache before
   congratulating yourself. Cross-checks only have value where the two
   sides can actually disagree.
+
+## 35. A pump that answers `lsusb` can still be un-openable — watch the devnum, not the presence
+
+- **Problem**: With the SY-01B back on the bench (`lsusb` shows
+  `1a86:7523`), restoring cell1's `[pump]` table made the cell open
+  cleanly — and then every `/v1/diagnose` and `/v1/status` answered 500
+  with `termios.error: (5, 'Input/output error')` on the pump's first
+  serial query. Restarting the server reproduced it exactly. The stale
+  `/dev` tmpfs node was the obvious suspect (this container's known
+  quirk) and was a red herring: the fresh `ttyUSB` node existed with the
+  right major:minor every time.
+- **Cause**: The CH340 link is physically flapping. Watched for 45 s
+  with **nobody holding the port**, the device re-enumerated four times
+  (devnums 054 → 055 → 057 → 058, ~10-15 s apart, 2026-07-29). Any fd
+  opened on it dies EIO within seconds, and because `status()` queries
+  the valve whenever a pump is configured, the dead pump fd took the
+  whole cell's probes down — gantry included. Cable, hub port or pump
+  USB power; not software, and not the stale-node quirk.
+- **Fix**: Reverted `server/nuc1/cell1.toml` to the pumpless shape so
+  cell1 serves its gantry cleanly (the config's header now carries the
+  measurement and the ready-to-restore `[pump]` block). The L2 pump
+  scenario (`scenarios/demo_pump_cycle.yaml`) was validated offline
+  against the fake L1 and dry-run against the live cell instead — the
+  L1 OpenAPI advertises `pump/*` in every shape, so the dry run does
+  not need the pump present.
+- **Rule**: `lsusb` proves enumeration, not a link. Before trusting a
+  USB serial device that has a flapping history, watch its **device
+  number** across a minute of nobody touching it: a devnum that climbs
+  is a link that is dropping, and no amount of node-rebuilding or
+  reopening will hold a session on it. Fix the physical layer first,
+  then confirm the devnum holds still, then wire it into a cell.
