@@ -1262,3 +1262,33 @@ format below. Newest entries at the bottom.
   previous command" as wait, not failure. The rail earns the opposite
   policy (abort moves) for the same reason stated backwards: its
   motion is not bounded and its position not re-verifiable mid-flight.
+
+## 39. Under periodic link drops, survivable travel is bounded — start the rail near home
+
+- **Problem**: With the amp on (2026-07-29 evening), four consecutive
+  cell4 runs failed at the `home` step (runs 115949Z/120015Z/120102Z/
+  120320Z): three "linear amp did not answer the position read", one
+  "the amp did not acknowledge the speed command (20 r/min)" — while
+  `/v1/diagnose` and `/v1/status` answered perfectly the whole time.
+  The rail looked "broken again" though nothing had changed since it
+  worked.
+- **Cause**: The amp's conducted noise drops the UPort link every few
+  seconds (worse under traffic — same acceleration the pump showed,
+  #38). Reads survive because the driver retries and reconnects; a
+  homing move from far away is a long closed-loop sequence of speed
+  writes and position polls that cannot fit between two drops, and any
+  move that straddles a drop is stopped and failed BY DESIGN (GAP-1:
+  no software e-stop, so position-unknown travel must never continue).
+  Four failures were four correct aborts.
+- **Fix**: Operator procedure, confirmed on the bench 2026-07-29:
+  **physically push the carriage to (near) the home position before
+  starting the run**. The homing travel then completes inside one
+  quiet window between drops, and the rest of the scenario's moves are
+  short. Interim measure until the RS485 electrical fix ladder /
+  isolated adapter lands (docs/RS485_EMI_evidence_20260729.xlsx).
+- **Rule**: When a link drops on a period, the longest motion that can
+  succeed is what fits between two drops — so shorten the *commanded
+  travel* (start the mechanism near its target by hand), don't raise
+  retry counts on long moves. Retrying a move that cannot fit the
+  window just re-runs the abort; moving the start point changes the
+  window arithmetic.
