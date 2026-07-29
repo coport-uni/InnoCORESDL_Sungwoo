@@ -356,6 +356,13 @@ Things worth knowing before your first scenario:
   cycle 1 is unrolled into asserted steps, the rest run in one
   `pump/cycle` call. For N total cycles set `remaining_cycles: N - 1`
   (29 → 30); setting it to N runs N + 1.
+- **`init_force` is the pump's `Z<force>` homing code**, matched to the
+  syringe size: `0` = full force (≥ 1 mL syringes), `1` = half
+  (250/500 µL), `2` = one-third (50–125 µL), `10`–`40` = an S-code
+  speed (higher = slower). This bench's 125 µL glass syringe takes
+  **2** — at full force the plunger would slam the small barrel's top
+  stop during homing. Set it in the cell config (`[pump] init_force`)
+  and keep the scenario's `init_force` param in agreement.
 
 ### The `/v1` action sets
 

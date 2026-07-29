@@ -10,6 +10,10 @@
 [pump]
 port = "1A86:7523"     # SY-01B CH340 USB-serial (VID:PID)
 syringe_uL = 125
+# Z<force> homing code, matched to the syringe: 0 = full force (>= 1 mL),
+# 1 = half (250/500 uL), 2 = one-third (50-125 uL), 10..40 = S-code speed.
+# This bench's 125 uL syringe takes 2 -- full force would slam the small
+# barrel's top stop during homing.
 init_force = 2
 
 [stage]
