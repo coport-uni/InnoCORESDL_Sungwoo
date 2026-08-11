@@ -3,6 +3,13 @@
     "MAX_THINKING_TOKENS": "10000",
     "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "50"
   },
+  "permissions": {
+    "allow": [
+      "Bash(git status *)",
+      "Bash(git fetch *)",
+      "Bash(git rev-list *)"
+    ]
+  },
   "hooks": {
     "PreToolUse": [
       {

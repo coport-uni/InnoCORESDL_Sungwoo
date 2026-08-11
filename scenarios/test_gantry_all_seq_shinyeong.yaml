@@ -1,0 +1,367 @@
+# Three gantries, two NUCs, one run: cell1 then cell2 then cell3.
+#
+# The first scenario in this repository to name more than one cell. Its
+# purpose is the L2 layer itself -- that the orchestrator drives cells it
+# reaches over the LAN exactly as it drives the one on loopback, that a
+# saved reading from one cell survives into a later cell's asserts, and
+# that the run log tells the three apart. The per-axis exhaustive checks
+# live in the single-cell scenarios (test_gantry_cell2_shinyeong.yaml and
+# test_gantry_cell3_shinyeong.yaml); run those FIRST.
+#
+# ONE CELL MOVES AT A TIME, on purpose. The steps are sequential, so no
+# two gantries are ever in motion together and the operator watches one
+# frame at a time. A `parallel:` variant is the follow-up experiment, not
+# this file.
+#
+# TOPOLOGY
+#   cell1  nuc1 (this NUC)   http://127.0.0.1:17054      pump + gantry
+#   cell2  nuc2 192.168.0.120:17056                      gantry only
+#   cell3  nuc2 192.168.0.120:17058                      gantry only
+#
+# cell2 and cell3 are served by claude_test/test_gantry_server_shinyeong.py.
+# `python -m server` cannot serve them: MKSMotor.open_xz names only the X
+# adapter and takes whichever two FTDI adapters remain, which on nuc2's
+# seven-adapter bus is another cell's Z pair -- and makes running both
+# gantries at once impossible, which is exactly what this run needs.
+#
+# BEFORE THE FIRST RUN -- these are not boilerplate:
+#   1. THREE FRAMES. Clear all three, not just the one you are standing
+#      at. The run moves them in turn without pausing between cells
+#      unless you use --step-mode.
+#   2. Z+ IS DOWNWARD. z = 0 mm is retracted. Each Z leg LOWERS that
+#      cell's head by `max_mm`; clear the deck under all three.
+#   3. E-STOP. One physical stop per frame, in reach of whichever is
+#      moving. POST /v1/stop queues behind the move it means to interrupt
+#      (docs/L1_AUDIT.md GAP-9), and on abort the orchestrator broadcasts
+#      it to every registered cell -- which stops nothing already in
+#      flight. The physical stop is the only immediate one.
+#   4. PAIRED Z. Every cell here has two mechanically coupled Z motors.
+#      Watch the Z legs with your own eyes; Z_DESYNC_LIMIT_MM is a
+#      backstop, not a substitute.
+#   5. Order: dry run -> step-mode -> free run.
+#        python -m orchestrator validate scenarios/test_gantry_all_seq_shinyeong.yaml
+#        python -m orchestrator run scenarios/test_gantry_all_seq_shinyeong.yaml --step-mode
+#        python -m orchestrator run scenarios/test_gantry_all_seq_shinyeong.yaml
+
+name: test_gantry_all_seq_shinyeong
+description: >
+  Sequential three-cell gantry run across two NUCs. Diagnoses cell1,
+  cell2 and cell3 before anything moves, then homes and steps each
+  gantry's X and Z axes in turn, verifying every move against the
+  encoder readback. One cell in motion at a time.
+
+params:
+  # Same step and ceiling as the single-cell scenarios, so a result here
+  # is comparable with theirs.
+  step_mm: 50.0
+  max_mm: 50.0
+  # Must not be tighter than the cell's own ARRIVAL_TOLERANCE_MM, or a
+  # move the cell accepted would fail the assert that follows it.
+  tolerance_mm: 0.5
+  # Slow and gentle: the same speed the driver's own bridge.py uses.
+  speed_pct: 10
+  accel_pct: 0
+
+defaults:
+  on_fail: abort        # a motion step must never be retried blindly
+  timeout_s: 60.0
+
+steps:
+  # ── Pre-flight: all three cells, before anything moves ─────────────
+  # Diagnosing every cell up front is the whole point of doing this in
+  # one run. diagnose() reads all three encoders per cell, so a motor
+  # that is unpowered or off the CAN bus is caught here -- before the
+  # first gantry has homed, rather than after two of them have.
+  - id: diag_cell1
+    cell: cell1
+    action: diagnose
+    method: GET
+    timeout_s: 15.0
+    save_as: d1
+
+  - id: diag_cell2
+    cell: cell2
+    action: diagnose
+    method: GET
+    timeout_s: 15.0
+    save_as: d2
+
+  - id: diag_cell3
+    cell: cell3
+    action: diagnose
+    method: GET
+    timeout_s: 15.0
+    save_as: d3
+
+  - id: verify_cell1_stage
+    assert: "${d1.stage.ok} == true"
+
+  - id: verify_cell2_stage
+    assert: "${d2.stage.ok} == true"
+
+  - id: verify_cell3_stage
+    assert: "${d3.stage.ok} == true"
+
+  # Identity is checked by EYE, not by assert. Each diagnose above saves
+  # its cell's X adapter serial into the runlog (cell1 NTAMU6TO, cell2
+  # NTB19XKA, cell3 NTB3FXCE on this bench), and three different serials
+  # is the evidence that three different gantries answered rather than
+  # one answering three times. It cannot be asserted here: the assert
+  # language is a Python subset whose only permitted bare names are
+  # true/false/null/none (orchestrator/scenario.py ASSERT_NAMES), so an
+  # interpolated string lands as an undefined name and the expression is
+  # rejected at evaluation time -- which a dry run cannot catch, because
+  # asserts are only evaluated once real values exist.
+  #
+  # The guarantee that matters is upstream anyway:
+  # claude_test/test_gantry_server_shinyeong.py names all three adapters
+  # per cell and refuses to start if any is missing, so two servers
+  # cannot open the same adapter in the first place.
+
+  # cell1 carries its syringe pump; the two nuc2 gantries do not. If this
+  # ever flips, the run is not the bench it claims to be.
+  - id: verify_cell1_has_pump
+    assert: "${d1.pump.present} == true"
+
+  - id: verify_cell2_no_pump
+    assert: "${d2.pump.present} == false"
+
+  - id: verify_cell3_no_pump
+    assert: "${d3.pump.present} == false"
+
+  # ── cell1 (nuc1) ───────────────────────────────────────────────────
+  - id: c1_home
+    cell: cell1
+    action: gantry/home
+    # A full seek per axis. ~5.5 s from an already-homed start, but it
+    # scales with how far the axis is from its switch.
+    timeout_s: 180.0
+    save_as: c1_homed
+
+  - id: c1_verify_home
+    assert: "${c1_homed.x_mm} <= ${params.tolerance_mm} and ${c1_homed.z_mm} <= ${params.tolerance_mm}"
+
+  - id: c1_x_out
+    cell: cell1
+    action: gantry/move
+    body:
+      x_mm: "${params.max_mm}"
+      z_mm: 0.0
+      speed_pct: "${params.speed_pct}"
+      accel_pct: "${params.accel_pct}"
+    save_as: c1_x_out
+
+  # Distance travelled, not the endpoint: an axis already at 50 mm, or
+  # one that never moved, fails this where an endpoint check would not.
+  - id: c1_verify_x_step
+    assert: "${c1_x_out.x_mm} - ${c1_homed.x_mm} >= ${params.step_mm} - ${params.tolerance_mm} and ${c1_x_out.x_mm} - ${c1_homed.x_mm} <= ${params.step_mm} + ${params.tolerance_mm}"
+
+  - id: c1_x_back
+    cell: cell1
+    action: gantry/move
+    body:
+      x_mm: 0.0
+      z_mm: 0.0
+      speed_pct: "${params.speed_pct}"
+      accel_pct: "${params.accel_pct}"
+    save_as: c1_x_back
+
+  - id: c1_verify_x_back
+    assert: "${c1_x_back.x_mm} <= ${params.tolerance_mm}"
+
+  - id: c1_z_out
+    cell: cell1
+    action: gantry/move
+    body:
+      x_mm: 0.0
+      z_mm: "${params.max_mm}"
+      speed_pct: "${params.speed_pct}"
+      accel_pct: "${params.accel_pct}"
+    save_as: c1_z_out
+
+  - id: c1_verify_z_step
+    assert: "${c1_z_out.z_mm} - ${c1_x_back.z_mm} >= ${params.step_mm} - ${params.tolerance_mm} and ${c1_z_out.z_mm} - ${c1_x_back.z_mm} <= ${params.step_mm} + ${params.tolerance_mm}"
+
+  - id: c1_park
+    cell: cell1
+    action: gantry/move
+    body:
+      x_mm: 0.0
+      z_mm: 0.0
+      speed_pct: "${params.speed_pct}"
+      accel_pct: "${params.accel_pct}"
+    save_as: c1_parked
+
+  # status() re-reads the encoders instead of echoing what the move
+  # returned, and sets `error` when the Z pair has drifted apart. Null
+  # here is cell1 saying both its Z motors agree, parked.
+  - id: c1_read_back
+    cell: cell1
+    action: status
+    method: GET
+    timeout_s: 15.0
+    save_as: c1_status
+
+  - id: c1_verify_parked
+    assert: "${c1_status.error} == null and ${c1_parked.x_mm} <= ${params.tolerance_mm} and ${c1_parked.z_mm} <= ${params.tolerance_mm}"
+
+  # ── cell2 (nuc2, over the LAN) ─────────────────────────────────────
+  - id: c2_home
+    cell: cell2
+    action: gantry/home
+    timeout_s: 180.0
+    save_as: c2_homed
+
+  - id: c2_verify_home
+    assert: "${c2_homed.x_mm} <= ${params.tolerance_mm} and ${c2_homed.z_mm} <= ${params.tolerance_mm}"
+
+  - id: c2_x_out
+    cell: cell2
+    action: gantry/move
+    body:
+      x_mm: "${params.max_mm}"
+      z_mm: 0.0
+      speed_pct: "${params.speed_pct}"
+      accel_pct: "${params.accel_pct}"
+    save_as: c2_x_out
+
+  - id: c2_verify_x_step
+    assert: "${c2_x_out.x_mm} - ${c2_homed.x_mm} >= ${params.step_mm} - ${params.tolerance_mm} and ${c2_x_out.x_mm} - ${c2_homed.x_mm} <= ${params.step_mm} + ${params.tolerance_mm}"
+
+  - id: c2_x_back
+    cell: cell2
+    action: gantry/move
+    body:
+      x_mm: 0.0
+      z_mm: 0.0
+      speed_pct: "${params.speed_pct}"
+      accel_pct: "${params.accel_pct}"
+    save_as: c2_x_back
+
+  - id: c2_verify_x_back
+    assert: "${c2_x_back.x_mm} <= ${params.tolerance_mm}"
+
+  - id: c2_z_out
+    cell: cell2
+    action: gantry/move
+    body:
+      x_mm: 0.0
+      z_mm: "${params.max_mm}"
+      speed_pct: "${params.speed_pct}"
+      accel_pct: "${params.accel_pct}"
+    save_as: c2_z_out
+
+  - id: c2_verify_z_step
+    assert: "${c2_z_out.z_mm} - ${c2_x_back.z_mm} >= ${params.step_mm} - ${params.tolerance_mm} and ${c2_z_out.z_mm} - ${c2_x_back.z_mm} <= ${params.step_mm} + ${params.tolerance_mm}"
+
+  - id: c2_park
+    cell: cell2
+    action: gantry/move
+    body:
+      x_mm: 0.0
+      z_mm: 0.0
+      speed_pct: "${params.speed_pct}"
+      accel_pct: "${params.accel_pct}"
+    save_as: c2_parked
+
+  - id: c2_read_back
+    cell: cell2
+    action: status
+    method: GET
+    timeout_s: 15.0
+    save_as: c2_status
+
+  - id: c2_verify_parked
+    assert: "${c2_status.error} == null and ${c2_parked.x_mm} <= ${params.tolerance_mm} and ${c2_parked.z_mm} <= ${params.tolerance_mm}"
+
+  # ── cell3 (nuc2, over the LAN) ─────────────────────────────────────
+  - id: c3_home
+    cell: cell3
+    action: gantry/home
+    timeout_s: 180.0
+    save_as: c3_homed
+
+  - id: c3_verify_home
+    assert: "${c3_homed.x_mm} <= ${params.tolerance_mm} and ${c3_homed.z_mm} <= ${params.tolerance_mm}"
+
+  - id: c3_x_out
+    cell: cell3
+    action: gantry/move
+    body:
+      x_mm: "${params.max_mm}"
+      z_mm: 0.0
+      speed_pct: "${params.speed_pct}"
+      accel_pct: "${params.accel_pct}"
+    save_as: c3_x_out
+
+  - id: c3_verify_x_step
+    assert: "${c3_x_out.x_mm} - ${c3_homed.x_mm} >= ${params.step_mm} - ${params.tolerance_mm} and ${c3_x_out.x_mm} - ${c3_homed.x_mm} <= ${params.step_mm} + ${params.tolerance_mm}"
+
+  - id: c3_x_back
+    cell: cell3
+    action: gantry/move
+    body:
+      x_mm: 0.0
+      z_mm: 0.0
+      speed_pct: "${params.speed_pct}"
+      accel_pct: "${params.accel_pct}"
+    save_as: c3_x_back
+
+  - id: c3_verify_x_back
+    assert: "${c3_x_back.x_mm} <= ${params.tolerance_mm}"
+
+  - id: c3_z_out
+    cell: cell3
+    action: gantry/move
+    body:
+      x_mm: 0.0
+      z_mm: "${params.max_mm}"
+      speed_pct: "${params.speed_pct}"
+      accel_pct: "${params.accel_pct}"
+    save_as: c3_z_out
+
+  - id: c3_verify_z_step
+    assert: "${c3_z_out.z_mm} - ${c3_x_back.z_mm} >= ${params.step_mm} - ${params.tolerance_mm} and ${c3_z_out.z_mm} - ${c3_x_back.z_mm} <= ${params.step_mm} + ${params.tolerance_mm}"
+
+  - id: c3_park
+    cell: cell3
+    action: gantry/move
+    body:
+      x_mm: 0.0
+      z_mm: 0.0
+      speed_pct: "${params.speed_pct}"
+      accel_pct: "${params.accel_pct}"
+    save_as: c3_parked
+
+  - id: c3_read_back
+    cell: cell3
+    action: status
+    method: GET
+    timeout_s: 15.0
+    save_as: c3_status
+
+  - id: c3_verify_parked
+    assert: "${c3_status.error} == null and ${c3_parked.x_mm} <= ${params.tolerance_mm} and ${c3_parked.z_mm} <= ${params.tolerance_mm}"
+
+  # ── All three parked, and all three still answering ────────────────
+  # A last cross-cell check: every gantry ended at its origin, and the
+  # LAN cells are still reachable at the end of a run that has been
+  # driving them for minutes. A cell that dropped off mid-run would have
+  # failed its own step, but a cell that dropped off after its last step
+  # would not -- this catches that.
+  - id: final_cell2_status
+    cell: cell2
+    action: status
+    method: GET
+    timeout_s: 15.0
+    save_as: c2_final
+
+  - id: final_cell3_status
+    cell: cell3
+    action: status
+    method: GET
+    timeout_s: 15.0
+    save_as: c3_final
+
+  - id: verify_all_parked
+    assert: "${c2_final.stage_x_mm} <= ${params.tolerance_mm} and ${c3_final.stage_x_mm} <= ${params.tolerance_mm} and ${c2_final.error} == null and ${c3_final.error} == null"
