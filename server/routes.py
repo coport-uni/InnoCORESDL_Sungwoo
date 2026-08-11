@@ -17,6 +17,15 @@ from fastapi.concurrency import run_in_threadpool
 from server.schemas import (
     AmbientRequest,
     AmbientResponse,
+    ArmJogRequest,
+    ArmJogResponse,
+    ArmPrepareResponse,
+    ArmPrefetchRequest,
+    ArmPrefetchResponse,
+    ArmProgramRequest,
+    ArmProgramResponse,
+    ArmReplayRequest,
+    ArmReplayResponse,
     CycleRequest,
     CycleResponse,
     DiagnoseResponse,
@@ -100,6 +109,9 @@ async def diagnose(request: Request) -> DiagnoseResponse:
         balance=report["balance"],
         stage=report["stage"],
         ok_to_initialize=report["ok_to_initialize"],
+        # Arm cells only; absent everywhere else.
+        arm=report.get("arm"),
+        replay=report.get("replay"),
     )
 
 
@@ -469,6 +481,134 @@ async def lamp_switch(request: Request, body: LampRequest) -> LampResponse:
     return LampResponse(**state)
 
 
+# ── Arm (FR5) — cell6 / cell7 ────────────────────────────────────────────────
+#
+# Two motion routes, two different executors: /arm/replay streams a
+# recorded episode from this machine, /arm/program hands a .lua job
+# program to the controller and lets its own planner run it.
+
+
+@router.post(
+    "/arm/prefetch",
+    response_model=ArmPrefetchResponse,
+    tags=["Arm"],
+    summary="Download + describe a dataset episode (no motion)",
+)
+async def arm_prefetch(
+    request: Request, body: ArmPrefetchRequest
+) -> ArmPrefetchResponse:
+    cell = _cell(request)
+    async with request.app.state.lock:
+        out = await run_in_threadpool(
+            lambda: cell.prefetch_episode(body.repo_id, body.episode)
+        )
+    return ArmPrefetchResponse(**out)
+
+
+@router.post(
+    "/arm/enable",
+    response_model=ArmPrepareResponse,
+    tags=["Arm"],
+    summary="Clear faults + energise the arm (no motion, but it powers up)",
+)
+async def arm_enable(request: Request) -> ArmPrepareResponse:
+    """ResetAllError -> RobotEnable(1) -> Mode(0).
+
+    Nothing moves, but holding torque comes on and the next motion
+    command will be accepted. Separate from the motion routes because it
+    is the step that throws away the fault codes — the response carries
+    what they were.
+    """
+    cell = _cell(request)
+    async with request.app.state.lock:
+        out = await run_in_threadpool(cell.prepare_arm)
+    return ArmPrepareResponse(**out)
+
+
+@router.post(
+    "/arm/jog_joint",
+    response_model=ArmJogResponse,
+    tags=["Arm"],
+    summary="Nudge ONE joint by a bounded relative amount — MOTION",
+)
+async def arm_jog_joint(
+    request: Request, body: ArmJogRequest
+) -> ArmJogResponse:
+    """Commissioning jog: one axis, relative, capped.
+
+    Not a pose route — see ``ArmJogRequest``. Short and bounded, so it
+    runs under the command lock like every other motion route.
+    """
+    cell = _cell(request)
+    async with request.app.state.lock:
+        out = await run_in_threadpool(
+            lambda: cell.jog_joint(
+                body.joint, body.delta_deg, speed_pct=body.speed_pct
+            )
+        )
+    return ArmJogResponse(**out)
+
+
+@router.post(
+    "/arm/replay",
+    response_model=ArmReplayResponse,
+    tags=["Arm"],
+    summary="Replay a recorded episode on the arm — MOTION",
+)
+async def arm_replay(
+    request: Request, body: ArmReplayRequest
+) -> ArmReplayResponse:
+    """Launch under the lock, then wait *without* it.
+
+    Every other route holds ``app.state.lock`` for its whole device
+    interaction, which is right when a command lasts a second or two. An
+    episode lasts minutes, and holding the lock across it would put
+    ``POST /v1/stop`` in a queue behind the motion it exists to abort —
+    GAP-9 (LearnedPatterns #9), which spec §6.1 forbids this cell to
+    reproduce. So the lock covers validation, the start-pose approach and
+    the subprocess launch; the episode itself plays out unlocked. A
+    second replay submitted meanwhile passes the lock and is refused by
+    the cell with a 409, which is the same answer the lock would have
+    produced.
+    """
+    cell = _cell(request)
+    async with request.app.state.lock:
+        await run_in_threadpool(
+            lambda: cell.start_replay(body.repo_id, body.episode, body.fps)
+        )
+    result = await run_in_threadpool(cell.await_replay)
+    return ArmReplayResponse(**result)
+
+
+@router.post(
+    "/arm/program",
+    response_model=ArmProgramResponse,
+    tags=["Arm"],
+    summary="Run a .lua job program on the controller — MOTION",
+)
+async def arm_program(
+    request: Request, body: ArmProgramRequest
+) -> ArmProgramResponse:
+    """Load and run a Lua job program; the controller does the planning.
+
+    **The path this takes is not checked here.** A replay is refused when
+    the arm is far from the episode's first frame; a job program's first
+    move goes from wherever the arm is to a point taught inside a script
+    this server never reads, at whatever speed the script asks for. Clear
+    the frame and keep the e-stop in hand — the operator gate is the
+    guard, not the code.
+
+    Same asymmetric locking as ``/arm/replay`` and for the same reason:
+    the lock covers validation, load and start, and the program runs
+    unlocked so ``POST /v1/stop`` is not queued behind it (GAP-9).
+    """
+    cell = _cell(request)
+    async with request.app.state.lock:
+        await run_in_threadpool(lambda: cell.start_program(body.name))
+    result = await run_in_threadpool(cell.await_program)
+    return ArmProgramResponse(**result)
+
+
 # ── Safety ─────────────────────────────────────────────────────────────────
 
 
@@ -481,5 +621,9 @@ async def lamp_switch(request: Request, body: LampRequest) -> LampResponse:
 async def stop(request: Request) -> StopResponse:
     cell = _cell(request)
     async with request.app.state.lock:
-        await run_in_threadpool(cell.stop)
-    return StopResponse(stopped=True)
+        detail = await run_in_threadpool(cell.stop)
+    # The arm cells report which half of the stop worked; the others
+    # return None and either succeeded or raised.
+    return StopResponse(
+        stopped=True, detail=detail if isinstance(detail, dict) else None
+    )

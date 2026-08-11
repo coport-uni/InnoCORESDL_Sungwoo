@@ -1891,3 +1891,265 @@ hardware code that has not passed the gate this entry installs.
       bench and recorded (LearnedPatterns #39, README bench note):
       push the carriage near home by hand before the run so the homing
       travel fits between drops. Interim until the RS485 isolator.
+
+## 2026-08-11 — cell6 / cell7: ArmReplayCell (docs/SPEC_ARM_REPLAY_CELL.md)
+
+Two FR5 arms as L1 cells. Operator-assigned addresses: cell6 =
+synthesis stage `192.168.0.58`, cell7 = analysis stage `192.168.0.59`.
+Replay target chosen by the operator:
+`coport-uni/FR5_task3_turn_the_sliver_air_valve_90_degress_counterclockwise_200`
+episode 10 (200 episodes, 20 fps, ~723 frames ≈ 36 s).
+
+- [x] Pin `external/FR5ControllerVLA` as a submodule (D4) and record the
+      "pinned but not installed" + "own conda env" exceptions in
+      `external/SUBMODULES.md`.
+- [x] `cell/arm_replay_cell.py`: `ArmReplayCell` + `ArmReplayConfig`,
+      `prefetch_episode` / `start_replay` / `await_replay`, two-stage
+      `stop()`, SDK session hand-over around the subprocess.
+- [x] `Cell` protocol + `_no_arm` stubs in the three existing cells.
+- [x] Server: `arm/prefetch` + `arm/replay` routes, schemas,
+      `_load_arm_replay`, `--cell arm_replay`, `[arm]` shape inference.
+- [x] Make the cell imports in `server/__main__.py` lazy — an arm cell
+      has no serial device and must not need `entris_ii` installed.
+- [x] `server/nuc2/cell6.toml.example`, `server/nuc1/cell7.toml.example`.
+- [x] `claude_test/smoke_arm.py` (T1) and `scenarios/demo_arm_replay.yaml`
+      (T4); `arm/` added to the orchestrator's hazard prefixes.
+- [x] T0 unit tests green (61 arm + 57 orchestrator = 118), `ruff check`
+      + `ruff format --check` clean.
+- [x] **Bench, read-only (2026-08-11)**: both controllers reachable;
+      cell6 server up on 17064 against the real arm; `health`,
+      `diagnose`, 10× `status`, the seven wrong-action 409s, the D6
+      prefix 400, the schema 422, the no-env 503 and `stop` (13–33 ms)
+      all verified. Console output kept for the PR.
+- [x] Two real SDK defects found and fixed — `LearnedPatterns.md` #40
+      (joint read via a stream cell6 does not serve; wrapper hard-codes
+      error 0) and #41 (`MoveJ`/`StopMotion` spin forever on a latched
+      `reconnect_flag`; `POST /v1/stop` hung and wedged shutdown).
+- [x] **T1 given a YAML path**: `arm/jog_joint` (ONE joint, RELATIVE,
+      capped at 15° / 30% in the cell) + `scenarios/test_arm_jog10.yaml`,
+      21 steps, dry run 0 issues. A deliberate narrowing of spec D8,
+      which wanted the 10° test kept out of `/v1`: the trade is one
+      bounded route for the orchestrator's operator gate and a runlog.
+      Asserts the MEASURED increment and the other-axis coupling, never
+      an endpoint (LearnedPatterns #33).
+- [x] **T1 first attempt ran (operator, 2026-08-11) and FAILED**:
+      `arm/jog_joint -> HTTP 500: MoveJ rejected with SDK error 154`.
+      Root cause was not the cell: the controller held a latched fault
+      (`GetRobotErrorCode -> main=1 sub=1`) with servos down, and it
+      accepts reads in that state. Fixed by adding a readiness gate
+      (409 naming the cause), `POST /v1/arm/enable` as an explicit
+      fault-clearing action that reports `error_before`, and an honest
+      `diagnose` (`fault` + `ready`, verified on the arm: `ok=True`,
+      `ready=False`, `fault=[1,1]`). LearnedPatterns #42.
+- [x] **`sdl` conda env created** (conda-forge, python 3.12 + fastapi
+      0.141.1 + uvicorn), so CLAUDE.md's documented
+      `python -m server --config …` works on this NUC. The arm cell
+      needs no driver packages thanks to the lazy imports.
+- [x] **T1 second attempt (operator, 2026-08-11): still 154 — and that
+      corrected the diagnosis.** `enable` reported
+      `error_before [1,1] → error_after [0,0]`, then the next
+      `arm/jog_joint` failed in 0.011 s with 154, and a read right after
+      showed `[0,1,1]` again (10/10 polls). ResetAllError only masks the
+      condition. Located by comparing the two arms:
+      cell6 `GetRobotCurJointsConfig -> [14, 0]` (**error 14**,
+      "RobotMotionError" per FR5Controller.py) with 20004 closed, vs
+      cell7 `[0, 7]`, error `[0,0]`, 20004 open. #40's "cell6 does not
+      serve 20004" was the same fault, not a separate quirk.
+      LearnedPatterns #42 corrected.
+- [x] **Scenario bug of mine, found by the real T3 run**:
+      `assert: "${diag.arm.robot_id} == 'fr5_a'"` cannot work —
+      `assert:` interpolates UNQUOTED, so a string becomes a bare name
+      and the grammar allows only comparisons plus
+      true/false/none/null. `validate` cannot catch it (no values to
+      interpolate, so the finished expression is never parsed) —
+      LearnedPatterns #25's shape again. Removed, with the reason in the
+      file.
+- [x] `scenarios/test_arm_jog10_cell7.yaml` + cell7 registered in
+      `orchestrator/config.toml`; cell7's server verified up on 17066
+      with `ok=True, ready=True, fault=[0,0]`.
+- [x] **Third T1 attempt settled it: 154 is NOT the latched fault.**
+      `runs/20260811T031205Z-test_arm_jog10` shows `enable` reading
+      `[1,1] → [0,0]`, the gate reading `(0,0)`, and MoveJ still
+      answering 154. So the code stopped claiming what it cannot know:
+      `prepare_arm` now returns `fault_cleared` + an `error_settled`
+      re-read instead of `ready: true`. LearnedPatterns #42, second
+      correction.
+- [x] **The readiness gate did its job on hardware**: it refused
+      `arm/replay` with a 409 before spawning any subprocess
+      (`runs/20260811T031226Z-demo_arm_replay`), and prefetch in the same
+      run returned `{cached: true, frames: 715, fps: 20}`.
+- [x] **cell6's fault localised to the motion subsystem** (operator
+      reported a joint command-point error on the pendant). Sharp
+      pattern: every motion query answers **error 14**
+      (`GetRobotCurJointsConfig`, `GetTargetPayload`) while every state
+      and kinematics query answers 0 — joint reads, torques, speeds,
+      soft limits, and both `GetForwardKin` and `GetInverseKin` on the
+      exact rejected target. The commanded point is kinematically valid
+      and inside the soft limits; the subsystem refuses *any* target.
+- [x] **Found while diagnosing: the two arms have different joint-6 soft
+      limits** — cell6 `[-175, +175]`, cell7 `[-360, +360]`, everything
+      else identical. A dataset recorded on cell7 can contain a wrist
+      angle cell6 refuses mid-trajectory. LearnedPatterns #43.
+- [ ] Consider pre-scanning an episode's joint column against
+      `GetJointSoftLimitDeg` in the probe, if cross-arm replay is
+      wanted. One extra XMLRPC call; the action column is already read.
+- [ ] **cell6's CONTROLLER is down, not just faulted**: error 14 on
+      motion queries, a fault that re-latches after every refused MoveJ,
+      no port 20004 ever, and by the end of the session no port 20003
+      either (ConnectionRefused while ICMP still replied). Needs a power
+      cycle and the teach pendant. Not a software problem.
+- [x] **T1 PASSED ON cell7, 3/3** (operator, run
+      `20260811T031924Z-test_arm_jog10_cell7`). Worst increment error
+      **0.0013°** against ±0.5° (~380x margin), worst other-axis
+      movement 0.0004°, `arm/enable` clean before/after/settled. Report
+      committed at `claude_test/smoke_arm_fr5_b_20260811T031924Z.md`.
+      This proves the whole motion path on real hardware: the
+      `arm/jog_joint` route, the XMLRPC `GetForwardKin` → `MoveJ` path
+      that replaced the unusable SDK wrappers (#40/#41), the encoder
+      read-back, and the increment-based verdict.
+- [x] **`SDK error 154` root-caused and fixed: a hard-coded `tool=0`.**
+      `GetForwardKin` answers in the controller's ACTIVE tool frame, so
+      the `desc_pos` passed to `MoveJ` alongside the joint target lives
+      in that frame. `GetActualTCPNum(1)` → cell6 **1**, cell7 **0**. On
+      cell7 the literal happened to match and the point was accepted; on
+      cell6 the joint target and the Cartesian pose described points in
+      different frames, which the pendant shows as a joint command-point
+      error. `_move_j` now reads the frame and raises rather than
+      guessing. LearnedPatterns #44 — and note two earlier diagnoses of
+      154 (latched fault, controller down) were wrong; both were real
+      conditions, neither was the cause.
+- [x] **T1 ACCEPTANCE MET — both arms 3/3** (spec §7 T1):
+      cell7 `20260811T031924Z-test_arm_jog10_cell7`, worst increment
+      error 0.0013°; cell6 `20260811T033622Z-test_arm_jog10`, worst
+      0.0010° (best round 0.00005°). Reports committed at
+      `claude_test/smoke_arm_fr5_b_20260811T031924Z.md` and
+      `claude_test/smoke_arm_fr5_a_20260811T033622Z.md`.
+- [ ] DoD items still open: T3 (replay E2E + stop measurement), T4
+      (step-mode scenario run), and the `docs/L1_AUDIT.md` entry.
+- [ ] T3 replay: blocked behind the same cell6 fault; re-target at cell7
+      or wait for cell6. Needs the operator
+      at the bench with the hardware e-stop. This is the spec's
+      acceptance test; nothing merges without it.
+- [x] **lerobot env built (2026-08-11)**: conda's Anaconda ToS gate
+      (LearnedPatterns #28) sidestepped by using conda-forge only —
+      the ToS is the user's to accept, not mine. Needed a compiler too:
+      this NUC has no `gcc`, and `evdev` is a hard Linux dep of lerobot,
+      so `c-compiler` (gcc 14.4.0) went into the env from conda-forge.
+      `lerobot 0.5.1 + torch 2.10.0`, `lerobot-replay` on PATH. Installed
+      non-editable on purpose so the submodule stays clean.
+- [x] **`arm/prefetch` verified on the real network**: episode 10 →
+      `{cached: true, frames: 715, fps: 20, duration_s: 35.75}` in 22 s.
+      Cross-checked against the dataset's own `meta/episodes` parquet
+      read straight from HuggingFace: 715 frames — the two agree, so the
+      number is not just the cell repeating itself.
+- [ ] **T3 replay — NOT RUN**: it is motion, so same gate as T1.
+      Note the cell's computed budget for this episode: 715/20 × 1.5 =
+      **53.6 s**.
+- [x] **Approach cap added after a real measurement**: the arm sat
+      **97.2 deg** from episode 10's first frame (joint 6 at −98.1 vs
+      −1.0). The spec's step-4 pre-move would have answered a replay
+      request with a right-angle wrist swing, so `start_replay` now
+      refuses past `MAX_START_APPROACH_DEG` (30°) and names the pose to
+      jog to. Same reasoning as LearnedPatterns #39.
+- [ ] T4 step-mode run of `demo_arm_replay.yaml` (follows T3).
+- [x] **`scenarios/demo_arm_replay_cell7.yaml` written** — T4 re-targeted
+      at cell7, since cell6 is blocked on its controller fault (#42). A
+      separate file, not a param: `cell:` is resolved against the
+      registry before interpolation, same reason `test_arm_jog10_cell7`
+      exists. Adds one assert the cell6 file does not have,
+      `diag.arm.ready == True`, so a latched fault fails the run at a
+      read instead of at the replay launch; clearing it stays manual
+      (`POST /v1/arm/enable`), because a scenario that cleared faults on
+      its way past them would re-issue the move that caused one.
+      `validate` passes (9 steps).
+- [x] **T4 on cell7 RAN, and FAILED — correctly** (operator, run
+      `20260811T033044Z-demo_arm_replay_cell7`).
+      `replay ended 12.68 deg from the episode's last frame`. The arm
+      did not move at all: `lerobot-replay` exited 0 after the full
+      38 s, the gripper cycled the whole time, and every ServoJ tick
+      raised `Fault -502: 'Format string requests 8 items from array,
+      but array has only 7 items.'` The cell's encoder check is the only
+      thing that caught it. Full write-up: LearnedPatterns #45.
+- [ ] **Fix upstream in `external/FR5ControllerVLA`** (its own repo, its
+      own ToDo + issue): `fairino_follower.py:437` sends 7 params to
+      `ServoJ`; cell7's controller (`v3.9.3.1` / `V3.9.15-QX`) wants 8,
+      cell6's (`v3.8.1` / `V3.7.78`) is the one the 7-param form was
+      pinned for. Probe the arity once at `connect()` and cache it — a
+      blind switch to 8 just moves the breakage to the other arm. Then
+      bump the submodule pin here and re-run T4.
+- [x] **`claude_test/episode_joint_range.py`** — answers #43's question
+      before anything moves: per-joint travel of an episode vs the
+      target controller's soft limits, read-only, exit 1 when a joint
+      leaves them. Run against **cell6** 2026-08-11: episode 10 of the
+      task3 dataset is **within limits**, worst margin +26.46° (joint
+      1). So cell6 is a legitimate host for the arity experiment above —
+      the #43 hazard does not bite for this episode. Indexed in
+      `claude_test/README.md`; `ruff check` + `ruff format --check`
+      pass.
+- [ ] **T4 on cell7 — still unproven, and blocked on the arm's position
+      once the ServoJ arity is fixed.** The
+      dataset is a SYNTHESIS-stage recording; on the analysis arm it
+      plays the same joint trajectory into a different workcell, so the
+      reach has to be walked before the confirmation is given. The arm
+      also has to be parked within 30° of episode 10's first frame or
+      `arm/replay` refuses (it was 97.2° away when last measured) —
+      `arm/jog_joint`, 15° per step, is the way in. Operator at the
+      bench with the hardware e-stop.
+- [x] GitHub issue registered: **#30** "cell6/cell7: ArmReplayCell — two
+      FR5 arms as L1 cells (SPEC_ARM_REPLAY_CELL)", opened 2026-08-11.
+      Every item in this section — T1, T3, T4, the approach cap, the
+      cell7 scenario — belongs to it; do not open a second one.
+- [x] **T1's two per-arm scenarios merged into one** (user request):
+      `scenarios/test_arm_jog10.yaml` now drives cell6 then cell7 in a
+      single run, 42 steps, `validate` clean. `test_arm_jog10_cell7.yaml`
+      deleted. Rationale: the spec's acceptance is "each arm 3/3", so one
+      runlog covering both is the artifact that proves it, instead of two
+      files someone has to remember to run in pairs. The arms stay
+      STRICTLY SEQUENTIAL — never a `parallel` block, since their reach
+      overlap is unmeasured (GAP-8). Confirmed there is no way to
+      parameterise this: `step.cell` is checked against the registry
+      before any interpolation, and the loader has no repeat construct.
+      T4's two files stay split on purpose — a replay is episode-specific
+      and the arms differ in joint-6 limits and tool frame (#43, #44), so
+      pairing them would imply a compatibility nobody has established.
+- [x] **`scenarios/test_arm_jog30_par.yaml`** (user request): both arms
+      jog joint 1 by ±30° **at the same time**, twice, 27 steps,
+      `validate` clean. Written as a SIBLING file, not an edit to
+      `test_arm_jog10.yaml`: that file is the T1 acceptance artifact and
+      two committed bench reports name the runs it produced, so turning
+      it parallel would break that correspondence.
+      **This file knowingly breaks GAP-8** (spec §8.4), which forbids
+      cell6 and cell7 in one `parallel:` block until their reach overlap
+      is measured. It cannot be checked in software: each controller
+      reports poses in its OWN base frame (`GetRobotInstallAngle` is
+      [0, 135] on both — a mounting ANGLE, not a position), so nothing
+      can compute the distance between the two arms. Running the file
+      asserts, on the operator's eye alone, that they cannot touch in a
+      ±30° joint-1 sweep. The file says so in a box at the top and
+      carries a `pause:` before EACH concurrent block, because
+      `confirm_first_motion` fires once per run and is spent on the first
+      `arm/enable`. Enables and diagnoses stay one-at-a-time; only the
+      jogs are concurrent.
+- [x] **`MAX_JOG_DEG` raised 15° → 30°** (user request) plus the schema
+      bound, after T1 passed 3/3 on both arms at 10° with a worst
+      increment error of 0.0013°. Still a real cap — a bound a request
+      can lift is not a bound. Joint 1 is the base rotation, so 30° is a
+      substantial sweep and the operator gate does the real work.
+      Added the tests the cap never had: 30° exactly is accepted, past it
+      is `InvalidArgError` with nothing commanded, and an over-speed
+      request is **clamped** rather than rejected (the safe answer to "go
+      faster than allowed" on a commissioning move is "go at the limit",
+      not a 400 that tempts someone to raise the limit).
+      Caught by the dry run first: the running servers were still serving
+      `±15`, so `validate` failed with `body_mismatch` until they were
+      restarted — the dry run doing exactly its job.
+- [x] **Parallel ±30° jog VERIFIED on hardware** (operator, run
+      `20260811T040822Z-test_arm_jog30_par`): 2/2 rounds, all 8 moves,
+      worst increment error **0.0007°** at triple T1's displacement,
+      worst other-axis movement 0.0004°. Report at
+      `claude_test/smoke_arm_par30_20260811T040822Z.md`. Concurrency is
+      proven from the runlog rather than assumed — each pair took the
+      *same* 18.8 s instead of summing, and the children finished out of
+      submission order. This also exercises the raised 30° cap on real
+      hardware. It still does NOT measure reach overlap, so GAP-8 stands.
+

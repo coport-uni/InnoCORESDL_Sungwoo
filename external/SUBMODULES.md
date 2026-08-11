@@ -39,6 +39,32 @@ Not installed as packages — imported by path or not yet used:
 |---|---|---|
 | `CommonClaude/` | coport-uni/CommonClaude | shared ruleset; source of `.claude/` hooks + `settings.json`. |
 
+## FR5ControllerVLA — pinned, deliberately NOT installed
+
+| Path | Upstream | Purpose |
+|---|---|---|
+| `FR5ControllerVLA/` | coport-uni/FR5ControllerVLA | huggingface/lerobot fork carrying the `fairino_follower` robot and the `lerobot-replay` CLI that cell6/cell7 drive. |
+
+Two exceptions to the usual submodule rules apply here, both from
+`docs/SPEC_ARM_REPLAY_CELL.md`:
+
+- **D4 — pinned but not editable-installed.** There is no
+  `-e ./external/FR5ControllerVLA` line in `requirements.txt` and there
+  must not be. The submodule exists to *pin the version* of the replay
+  code; it is not imported by anything in `cell/` or `server/`.
+- **D3 — it runs in its own conda env.** `ArmReplayCell` shells out to
+  `lerobot-replay` under the `[arm] conda_env` named in the cell's TOML
+  (default `lerobot`). lerobot pulls in torch; the SDL venv must not.
+  The subprocess boundary is also what makes the cell's `stop()` real —
+  killing a process stops the ServoJ stream in a way no in-process flag
+  could.
+
+The arm's *read* path is separate and does not involve this repo: the
+cell talks to the controller through `FR5Controller/fairino`, over
+XMLRPC on port 20003. Note that the vendored SDK's convenience wrappers
+are unusable on this firmware — see `LearnedPatterns.md` #40 and #41 —
+so `cell/arm_replay_cell.py` calls the XMLRPC methods directly.
+
 ## Updating a driver
 
 ```bash

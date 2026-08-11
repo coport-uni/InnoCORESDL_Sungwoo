@@ -29,6 +29,15 @@ class DiagnoseResponse(BaseModel):
     balance: dict = Field(description="Balance model + serial number.")
     stage: dict = Field(description="Stage status (per-axis).")
     ok_to_initialize: bool
+    # cell6 / cell7 only; None on cells without an arm.
+    arm: dict | None = Field(
+        default=None,
+        description="Arm identity + reachability (robot_id, ip, gripper).",
+    )
+    replay: dict | None = Field(
+        default=None,
+        description="Replay subprocess state and the last episode's summary.",
+    )
 
 
 class StatusResponse(BaseModel):
@@ -50,6 +59,12 @@ class StatusResponse(BaseModel):
     heating: bool | None = None
     stirring: bool | None = None
     lamp_on: bool | None = None
+    # cell6 / cell7 (arm) only; None on cells without an arm. Degrees,
+    # joint 1 first, read from the encoder — except while a replay owns
+    # the controller, when it is the last reading taken before the
+    # hand-over (the servo session has one owner; see ArmReplayCell).
+    joints_deg: list[float] | None = None
+    last_replay: dict | None = None
 
 
 class ErrorResponse(BaseModel):
@@ -240,8 +255,144 @@ class LampResponse(BaseModel):
     devices: list[str] = Field(default_factory=list)
 
 
+# ── Arm (FR5, replay-only) — cell6 / cell7 ───────────────────────────────────
+# Not a pose interface on purpose: a request names a recorded dataset
+# episode. Prefetch and replay are separate routes so a slow download
+# cannot look like a stalled arm (spec D7).
+
+
+class ArmPrefetchRequest(BaseModel):
+    repo_id: str = Field(
+        description="HuggingFace dataset id; must match the cell's "
+        "allowed_repo_prefixes."
+    )
+    episode: int = Field(ge=0, description="Episode index in the dataset.")
+
+
+class ArmPrefetchResponse(BaseModel):
+    cached: bool
+    frames: int
+    fps: int
+    duration_s: float
+
+
+class ArmPrepareResponse(BaseModel):
+    """Result of clearing faults + energising the arm.
+
+    ``error_before`` is the point of the response: it records what was
+    wrong at the moment the operator chose to clear it, so a runlog does
+    not lose that. ``[0, 0]`` means there was nothing latched.
+    """
+
+    error_before: list[int] = Field(
+        description="Controller fault as [main_code, sub_code] BEFORE reset."
+    )
+    error_after: list[int]
+    error_settled: list[int] = Field(
+        description="Re-read a second later, to catch a re-latching fault."
+    )
+    # NOT `ready`. Measured 2026-08-11: cell6 reported [0, 0] here and
+    # still answered `MoveJ ... SDK error 154`. A cleared fault code does
+    # not promise the controller will accept motion, so this field claims
+    # only what was done.
+    fault_cleared: bool
+    joints_deg: list[float]
+
+
+class ArmJogRequest(BaseModel):
+    """One bounded, RELATIVE nudge of a single joint.
+
+    Deliberately not a pose: the arm action set stays replay-only (spec
+    D8). This exists so the T1 acceptance test (joint 1 +10 deg) can run
+    as a scenario, with the orchestrator's operator gate and runlog,
+    instead of a standalone script. The cell caps the magnitude again —
+    a 422 here and a 400 there.
+    """
+
+    joint: int = Field(ge=1, le=6, description="1-based joint index.")
+    delta_deg: float = Field(
+        ge=-30.0,
+        le=30.0,
+        description="Relative degrees; the cell caps at 30 as well.",
+    )
+    speed_pct: float | None = Field(default=None, gt=0, le=30.0)
+
+
+class ArmJogResponse(BaseModel):
+    joint: int
+    before_deg: list[float]
+    after_deg: list[float]
+    target_delta_deg: float
+    # MEASURED, not commanded. A scenario asserts on this and on
+    # max_other_axis_delta_deg, never on an endpoint (LearnedPatterns #33).
+    achieved_delta_deg: float
+    max_other_axis_delta_deg: float
+    joints_deg: list[float]
+
+
+class ArmReplayRequest(BaseModel):
+    repo_id: str
+    episode: int = Field(ge=0)
+    # Null adopts the recorded rate. Any other value must equal it: a
+    # re-timed replay compresses the ServoJ interval (spec D5).
+    fps: int | None = Field(default=None, ge=1)
+
+
+class ArmReplayResponse(BaseModel):
+    completed: bool
+    frames: int
+    fps: int
+    elapsed_s: float
+    # Null when the dataset exposed no last frame to compare against —
+    # reporting 0.0 there would be a fabricated pass.
+    final_joint_error_deg: float | None
+    joints_deg: list[float] = Field(
+        description="Encoder reading taken after the replay, degrees."
+    )
+
+
+class ArmProgramRequest(BaseModel):
+    """Run a ``.lua`` job program the controller already holds.
+
+    Only a bare file name: it is resolved under the cell's
+    ``program_dir`` (``/fruser``), and the cell rejects anything with a
+    path separator so a request cannot steer ``ProgramLoad`` elsewhere.
+    Nothing in this API uploads, edits or deletes a program — authoring
+    is teach-pendant / WebApp work (docs/SPEC_ARM_LUA_PROGRAM.md §2).
+    """
+
+    name: str = Field(
+        min_length=1,
+        max_length=128,
+        description='Program file name, e.g. "test1.lua".',
+    )
+
+
+class ArmProgramResponse(BaseModel):
+    # NOT the same claim as ArmReplayResponse.completed. It means the
+    # controller returned to the stopped state with no latched fault and
+    # the encoder answered afterwards — not that the arm reached an
+    # intended pose. The cell never reads the script, so it has no
+    # expected end pose to check (docs/SPEC_ARM_LUA_PROGRAM.md §6.4);
+    # judging joints_deg is the caller's job.
+    completed: bool
+    name: str
+    elapsed_s: float
+    # Last line the controller reported executing. Null when the
+    # controller would not answer GetCurrentLine — progress is
+    # informational, so an unreadable line does not fail the run.
+    last_line: int | None
+    joints_deg: list[float] = Field(
+        description="Encoder reading taken after the program, degrees."
+    )
+
+
 # ── Safety ─────────────────────────────────────────────────────────────────
 
 
 class StopResponse(BaseModel):
     stopped: bool
+    # Per-stage outcome from the cells whose stop has independent stages
+    # (cell6 / cell7: kill the replay, stop the job program, then stop the
+    # controller). None on the cells whose stop() is all-or-nothing.
+    detail: dict | None = None

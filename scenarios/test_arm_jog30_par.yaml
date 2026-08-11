@@ -1,0 +1,352 @@
+# BOTH FR5 ARMS MOVING AT THE SAME TIME, joint 1 +/-30 deg.
+#
+# Requested by the operator 2026-08-11. This is NOT the T1 acceptance
+# test — that is `scenarios/test_arm_jog10.yaml`, which drives the two
+# arms in SEQUENCE at 10 deg and passed 3/3 on both
+# (`claude_test/smoke_arm_fr5_a_20260811T033622Z.md`,
+# `claude_test/smoke_arm_fr5_b_20260811T031924Z.md`). That file is left
+# alone so those reports keep naming the run that produced them.
+#
+# ┌──────────────────────────────────────────────────────────────────────┐
+# │ READ THIS BEFORE THE FIRST RUN — spec §8.4 / docs/L1_AUDIT.md GAP-8  │
+# │                                                                      │
+# │ Every other scenario in this repo refuses to put cell6 and cell7 in  │
+# │ one `parallel:` block, because their reach overlap has never been    │
+# │ MEASURED. This file breaks that rule on purpose, at the operator's   │
+# │ request, and it cannot be checked in software: each controller       │
+# │ reports poses in its OWN base frame (`GetRobotInstallAngle` is       │
+# │ [0, 135] on both — a mounting ANGLE, not a position), so nothing     │
+# │ here can compute the distance between the two arms. Running this     │
+# │ file asserts, on the operator's eye alone, that the two arms cannot  │
+# │ touch each other anywhere in a +/-30 deg joint-1 sweep.              │
+# │                                                                      │
+# │ If that is not certain, run test_arm_jog10.yaml instead. A sequential│
+# │ run proves the same motion path and cannot collide two arms.         │
+# └──────────────────────────────────────────────────────────────────────┘
+#
+# WHY 30 deg IS A BIGGER ASK THAN IT LOOKS
+#   Joint 1 is the base rotation, so the whole arm sweeps and the tool
+#   travels furthest of any joint per degree. 30 deg is triple what T1
+#   used. The cell's `MAX_JOG_DEG` was raised 15 -> 30 for this; it is
+#   still a cap, and 30 is now the ceiling a request cannot lift.
+#
+# THE OPERATOR PROBLEM, STATED PLAINLY
+#   One person cannot watch two arms at once. No code here fixes that.
+#   What this file does instead:
+#     * `pause:` immediately before EACH concurrent block, so the run
+#       stops and waits while you look — `confirm_first_motion` fires
+#       only once per run and is spent on the first `arm/enable`;
+#     * the arms are enabled and diagnosed ONE AT A TIME above, so only
+#       the two jogs are concurrent;
+#     * each arm verifies its own move by encoder readback before the
+#       run continues, so an arm that did not travel fails the run even
+#       though its parallel sibling succeeded.
+#   If you cannot see both arms from where you stand, use the sequential
+#   scenario. There is no shame in that result.
+#
+# WHAT IS ASSERTED, AND WHY IT IS NOT THE ENDPOINT
+#   `achieved_delta_deg` is the MEASURED increment, from two encoder
+#   reads either side of the move (LearnedPatterns #33). Joints 2-6 are
+#   checked for coupling via `max_other_axis_delta_deg`. Both come from
+#   the cell, computed from the same pair of reads.
+#
+# ON ABORT
+#   `stop_on_failure` broadcasts POST /v1/stop to every REGISTERED cell.
+#   For an arm cell that stop is real — the route holds no lock while a
+#   replay plays and the cell kills the subprocess directly — but a jog
+#   is a blocking MoveJ, so a stop arriving mid-jog does NOT preempt it.
+#   The hardware e-stop is the stop that counts.
+#
+# The two arms are NOT interchangeable: different joint-6 soft limits
+# (cell6 +/-175, cell7 +/-360) and different active tool frames (1 vs 0).
+# LearnedPatterns #43, #44. Irrelevant to a joint-1 jog, but it is why
+# "it worked on one arm" is never evidence about the other.
+#
+# ── Running this scenario ───────────────────────────────────────────────
+#
+# 1. One cell server per cell this scenario names. Each is its own
+#    process and owns its devices — start them in separate terminals
+#    (or as `deploy/systemd/cell@.service` units) and leave them up.
+#    `--cell` is not needed: the shape is inferred from the config's
+#    device tables.
+#
+#      conda activate sdl
+#      cd ~/workspace/InnoCOREServer/InnoCORESDL_Sungwoo
+#      python -m server --config server/nuc2/cell6.toml
+#      python -m server --config server/nuc1/cell7.toml
+#
+#    Ports: cell6=17064, cell7=17066. cell6 = FR5 arm, synthesis stage;
+#    cell7 = FR5 arm, analysis stage.
+#
+# 2. Check each server is up and sees its hardware BEFORE any motion.
+#    `diagnose` is the last gate that can catch a device that answers
+#    reads but will not move:
+#
+#      curl -s localhost:17064/v1/diagnose | python3 -m json.tool
+#      curl -s localhost:17066/v1/diagnose | python3 -m json.tool
+#
+#    Both must report `arm.ready == true` and `arm.fault == [0, 0]`.
+#
+# 3. Both cells must be registered AND UNCOMMENTED in
+#    orchestrator/config.toml:
+#
+#      [cells.cell6]
+#      base_url = "http://127.0.0.1:17064"
+#      [cells.cell7]
+#      base_url = "http://127.0.0.1:17066"
+#
+# 4. Dry run first — it validates every action and body field against
+#    each cell's live OpenAPI, and moves nothing:
+#
+#      python -m orchestrator validate scenarios/test_arm_jog30_par.yaml
+#
+# 5. Then the real run.
+#
+#      python -m orchestrator run scenarios/test_arm_jog30_par.yaml
+#
+#    A runlog is written to `runs/<UTC>-<name>/` (gitignored).
+#
+# Stopping a server: Ctrl-C in its terminal, or find the pid with
+# `pgrep -af 'm server --config'` and `kill <pid>`. Do NOT use
+# `pkill -f 'server --config'` — the pattern matches your own shell.
+#
+# ──────────────────────────────────────────────────────────────────────────
+
+name: test_arm_jog30_par
+description: >
+  Both FR5 arms jog joint 1 by +30 deg and back, AT THE SAME TIME, twice,
+  each arm verified on its own encoder by the increment it achieved.
+  Exercises the orchestrator's parallel path across two arm cells. NOT
+  the T1 acceptance test — see test_arm_jog10.yaml for that.
+
+params:
+  joint: 1
+  jog_deg: 30.0
+  jog_back_deg: -30.0
+  # Same band T1 used and passed with ~380x margin at 10 deg.
+  tolerance_deg: 0.5
+  coupling_deg: 0.5
+  # Deliberately not raised with the angle: a bigger sweep at the same
+  # speed takes longer, which is what you want when watching two arms.
+  speed_pct: 10.0
+
+defaults:
+  on_fail: abort
+  timeout_s: 30.0
+
+steps:
+  # ── Pre-flight: each arm on its own, before anything moves ──────────
+  - id: diag_cell6
+    cell: cell6
+    action: diagnose
+    method: GET
+    timeout_s: 15.0
+    save_as: d6
+
+  - id: diag_cell7
+    cell: cell7
+    action: diagnose
+    method: GET
+    timeout_s: 15.0
+    save_as: d7
+
+  # `ready` is separate from `ok` on purpose: an arm can answer every
+  # read and still refuse motion (LearnedPatterns #42, #44). Fail here,
+  # at a read, rather than at the first concurrent MoveJ.
+  - id: assert_both_ready
+    assert: "${d6.arm.ready} == True and ${d7.arm.ready} == True"
+
+  - id: assert_both_idle
+    assert: "${d6.replay.running} == False and ${d7.replay.running} == False"
+
+  # ── Enable, ONE AT A TIME ───────────────────────────────────────────
+  # Not parallel: this energises an arm, and two arms coming up together
+  # is a needless simultaneity. Clearing a latched fault also discards
+  # evidence, so the response records `error_before` per arm.
+  - id: enable_cell6
+    cell: cell6
+    action: arm/enable
+    timeout_s: 30.0
+    save_as: en6
+
+  - id: assert_cell6_cleared
+    assert: "${en6.fault_cleared} == True"
+
+  - id: enable_cell7
+    cell: cell7
+    action: arm/enable
+    timeout_s: 30.0
+    save_as: en7
+
+  - id: assert_cell7_cleared
+    assert: "${en7.fault_cleared} == True"
+
+  # ── Round 1: out ──────────────────────────────────────────────
+  - id: r1_out
+    pause: >
+      BOTH ARMS ARE ABOUT TO MOVE AT THE SAME TIME. Joint 1 sweeps
+      OUT 30 deg on cell6 (192.168.0.58) and cell7 (192.168.0.59)
+      together. Check BOTH frames are clear, decide which arm you are
+      watching, and keep the hardware e-stop in your hand. Round 1.
+    parallel:
+      - id: r1_out_c6
+        cell: cell6
+        action: arm/jog_joint
+        body:
+          joint: "${params.joint}"
+          delta_deg: "${params.jog_deg}"
+          speed_pct: "${params.speed_pct}"
+        timeout_s: 90.0
+        save_as: r1o6
+      - id: r1_out_c7
+        cell: cell7
+        action: arm/jog_joint
+        body:
+          joint: "${params.joint}"
+          delta_deg: "${params.jog_deg}"
+          speed_pct: "${params.speed_pct}"
+        timeout_s: 90.0
+        save_as: r1o7
+
+  # Measured minus measured, per arm. An arm that never moved fails here
+  # even though its parallel sibling succeeded.
+  - id: r1_out_assert_cell6
+    assert: "${r1o6.achieved_delta_deg} >= ${params.jog_deg} - ${params.tolerance_deg} and ${r1o6.achieved_delta_deg} <= ${params.jog_deg} + ${params.tolerance_deg}"
+
+  - id: r1_out_assert_cell7
+    assert: "${r1o7.achieved_delta_deg} >= ${params.jog_deg} - ${params.tolerance_deg} and ${r1o7.achieved_delta_deg} <= ${params.jog_deg} + ${params.tolerance_deg}"
+
+  - id: r1_out_assert_no_coupling
+    assert: "${r1o6.max_other_axis_delta_deg} <= ${params.coupling_deg} and ${r1o7.max_other_axis_delta_deg} <= ${params.coupling_deg}"
+
+  # ── Round 1: home ──────────────────────────────────────────────
+  - id: r1_home
+    pause: >
+      BOTH ARMS ARE ABOUT TO MOVE AT THE SAME TIME. Joint 1 sweeps
+      BACK 30 deg on cell6 (192.168.0.58) and cell7 (192.168.0.59)
+      together. Check BOTH frames are clear, decide which arm you are
+      watching, and keep the hardware e-stop in your hand. Round 1.
+    parallel:
+      - id: r1_home_c6
+        cell: cell6
+        action: arm/jog_joint
+        body:
+          joint: "${params.joint}"
+          delta_deg: "${params.jog_back_deg}"
+          speed_pct: "${params.speed_pct}"
+        timeout_s: 90.0
+        save_as: r1h6
+      - id: r1_home_c7
+        cell: cell7
+        action: arm/jog_joint
+        body:
+          joint: "${params.joint}"
+          delta_deg: "${params.jog_back_deg}"
+          speed_pct: "${params.speed_pct}"
+        timeout_s: 90.0
+        save_as: r1h7
+
+  # Measured minus measured, per arm. An arm that never moved fails here
+  # even though its parallel sibling succeeded.
+  - id: r1_home_assert_cell6
+    assert: "${r1h6.achieved_delta_deg} >= ${params.jog_back_deg} - ${params.tolerance_deg} and ${r1h6.achieved_delta_deg} <= ${params.jog_back_deg} + ${params.tolerance_deg}"
+
+  - id: r1_home_assert_cell7
+    assert: "${r1h7.achieved_delta_deg} >= ${params.jog_back_deg} - ${params.tolerance_deg} and ${r1h7.achieved_delta_deg} <= ${params.jog_back_deg} + ${params.tolerance_deg}"
+
+  - id: r1_home_assert_no_coupling
+    assert: "${r1h6.max_other_axis_delta_deg} <= ${params.coupling_deg} and ${r1h7.max_other_axis_delta_deg} <= ${params.coupling_deg}"
+
+  # ── Round 2: out ──────────────────────────────────────────────
+  - id: r2_out
+    pause: >
+      BOTH ARMS ARE ABOUT TO MOVE AT THE SAME TIME. Joint 1 sweeps
+      OUT 30 deg on cell6 (192.168.0.58) and cell7 (192.168.0.59)
+      together. Check BOTH frames are clear, decide which arm you are
+      watching, and keep the hardware e-stop in your hand. Round 2.
+    parallel:
+      - id: r2_out_c6
+        cell: cell6
+        action: arm/jog_joint
+        body:
+          joint: "${params.joint}"
+          delta_deg: "${params.jog_deg}"
+          speed_pct: "${params.speed_pct}"
+        timeout_s: 90.0
+        save_as: r2o6
+      - id: r2_out_c7
+        cell: cell7
+        action: arm/jog_joint
+        body:
+          joint: "${params.joint}"
+          delta_deg: "${params.jog_deg}"
+          speed_pct: "${params.speed_pct}"
+        timeout_s: 90.0
+        save_as: r2o7
+
+  # Measured minus measured, per arm. An arm that never moved fails here
+  # even though its parallel sibling succeeded.
+  - id: r2_out_assert_cell6
+    assert: "${r2o6.achieved_delta_deg} >= ${params.jog_deg} - ${params.tolerance_deg} and ${r2o6.achieved_delta_deg} <= ${params.jog_deg} + ${params.tolerance_deg}"
+
+  - id: r2_out_assert_cell7
+    assert: "${r2o7.achieved_delta_deg} >= ${params.jog_deg} - ${params.tolerance_deg} and ${r2o7.achieved_delta_deg} <= ${params.jog_deg} + ${params.tolerance_deg}"
+
+  - id: r2_out_assert_no_coupling
+    assert: "${r2o6.max_other_axis_delta_deg} <= ${params.coupling_deg} and ${r2o7.max_other_axis_delta_deg} <= ${params.coupling_deg}"
+
+  # ── Round 2: home ──────────────────────────────────────────────
+  - id: r2_home
+    pause: >
+      BOTH ARMS ARE ABOUT TO MOVE AT THE SAME TIME. Joint 1 sweeps
+      BACK 30 deg on cell6 (192.168.0.58) and cell7 (192.168.0.59)
+      together. Check BOTH frames are clear, decide which arm you are
+      watching, and keep the hardware e-stop in your hand. Round 2.
+    parallel:
+      - id: r2_home_c6
+        cell: cell6
+        action: arm/jog_joint
+        body:
+          joint: "${params.joint}"
+          delta_deg: "${params.jog_back_deg}"
+          speed_pct: "${params.speed_pct}"
+        timeout_s: 90.0
+        save_as: r2h6
+      - id: r2_home_c7
+        cell: cell7
+        action: arm/jog_joint
+        body:
+          joint: "${params.joint}"
+          delta_deg: "${params.jog_back_deg}"
+          speed_pct: "${params.speed_pct}"
+        timeout_s: 90.0
+        save_as: r2h7
+
+  # Measured minus measured, per arm. An arm that never moved fails here
+  # even though its parallel sibling succeeded.
+  - id: r2_home_assert_cell6
+    assert: "${r2h6.achieved_delta_deg} >= ${params.jog_back_deg} - ${params.tolerance_deg} and ${r2h6.achieved_delta_deg} <= ${params.jog_back_deg} + ${params.tolerance_deg}"
+
+  - id: r2_home_assert_cell7
+    assert: "${r2h7.achieved_delta_deg} >= ${params.jog_back_deg} - ${params.tolerance_deg} and ${r2h7.achieved_delta_deg} <= ${params.jog_back_deg} + ${params.tolerance_deg}"
+
+  - id: r2_home_assert_no_coupling
+    assert: "${r2h6.max_other_axis_delta_deg} <= ${params.coupling_deg} and ${r2h7.max_other_axis_delta_deg} <= ${params.coupling_deg}"
+
+  # ── Both arms back where they started, read independently ───────────
+  - id: final_cell6
+    cell: cell6
+    action: status
+    method: GET
+    timeout_s: 15.0
+    save_as: post6
+
+  - id: final_cell7
+    cell: cell7
+    action: status
+    method: GET
+    timeout_s: 15.0
+    save_as: post7
+
+  - id: assert_both_idle_after
+    assert: "${post6.busy} == False and ${post7.busy} == False"

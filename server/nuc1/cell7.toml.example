@@ -1,0 +1,52 @@
+# cell7 — FR5 robot arm, ANALYSIS stage (docs/SPEC_ARM_REPLAY_CELL.md).
+#
+# Copy to server/nuc1/cell7.toml and edit. The real .toml is gitignored.
+# Same shape as cell6, config apart (spec D1):
+#
+#     python -m server --config server/nuc1/cell7.toml
+#
+# SAFETY (spec §8): every replay is motion. Operator at the bench,
+# e-stop in hand, arm's reach clear. Do NOT put cell6 and cell7 in the
+# same parallel block of a scenario until their reach overlap has been
+# measured (spec §8.4, GAP-8).
+
+[server]
+port = 17066
+host = "0.0.0.0"
+log_level = "info"
+
+[arm]
+robot_id = "fr5_b"
+# Analysis-stage arm. Must differ from cell6's 192.168.0.58; changed on
+# the teach pendant before both arms join the LAN (spec §8.3).
+ip_address = "192.168.0.59"
+gripper_enabled = true
+
+# --- lerobot side (spec D3) --------------------------------------------
+conda_sh = "/home/inno-controller/anaconda3/etc/profile.d/conda.sh"
+conda_env = "lerobot"
+lerobot_root = "external/FR5ControllerVLA"
+dataset_root = ""
+
+# --- what a request may ask for ----------------------------------------
+allowed_repo_prefixes = ["coport-uni/"]
+cache_dir = ""
+offline_only = false
+
+# --- motion envelope ----------------------------------------------------
+max_replay_s = 300.0
+replay_timeout_factor = 1.5
+start_pose_tolerance_deg = 2.0
+final_pose_tolerance_deg = 1.0
+jog_speed_pct = 10.0
+
+# --- Lua job programs (the second motion path) --------------------------
+# docs/SPEC_ARM_LUA_PROGRAM.md. See cell6.toml.example for the annotated
+# version of these four keys.
+program_dir = "/fruser"
+# Empty until this arm's programs are known. Discover them with
+# `python claude_test/probe_arm_lua.py --ip 192.168.0.59 --robot-id fr5_b`
+# (read-only, no motion), then name them here.
+allowed_programs = []
+max_program_s = 300.0
+program_poll_s = 0.5

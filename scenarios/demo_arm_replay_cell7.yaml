@@ -1,0 +1,238 @@
+# T4 for the ANALYSIS arm (cell7, controller 192.168.0.59). Same replay
+# as demo_arm_replay.yaml, different arm — the orchestrator does not
+# substitute `cell:` from params (a step's `cell` is resolved against the
+# registry before interpolation), so it is a separate file.
+#
+# NOTE: T1 took the other road — `scenarios/test_arm_jog10.yaml` now
+# drives BOTH arms in one run, in sequence, because its acceptance is
+# "each arm 3/3" and one runlog covering both is the artifact that
+# proves it. The two files here stay split for now because a replay is
+# episode-specific: the same dataset is not necessarily valid on both
+# arms (different joint-6 soft limits and active tool frames —
+# LearnedPatterns #43, #44), so pairing them in one run would imply a
+# compatibility that has not been established.
+#
+# Action paths and body fields were checked against the L1 code, not the
+# spec draft: server/routes.py exposes POST /v1/arm/prefetch and POST
+# /v1/arm/replay, and the request models are ArmPrefetchRequest
+# {repo_id, episode} and ArmReplayRequest {repo_id, episode, fps}.
+#
+# BEFORE THE RUN, two things that are not in this file:
+#
+#   1. CHECK THE cell7 SERVER IS RUNNING THE CURRENT CODE. Measured
+#      2026-08-11: a server started at 12:03:38 held code older than the
+#      12:14:31 edit and failed a run on `'en' has no field
+#      'fault_cleared'`. A stale build also predates `_move_j`'s raw
+#      XMLRPC path, so its start-pose approach would go through the SDK
+#      wrapper that spins forever on a latched `reconnect_flag`
+#      (LearnedPatterns #41) — which is the one failure mode that leaves
+#      a motion route hung rather than answered. Satisfied as of the
+#      12:18:34 restart; re-check after any edit under `cell/` or
+#      `server/`, because nothing else will tell you.
+#
+#   2. PARK THE ARM NEAR THE EPISODE'S FIRST FRAME. The cell drives the
+#      approach itself only while the gap is under MAX_START_APPROACH_DEG
+#      (30 deg); past that `arm/replay` is refused, on purpose, because
+#      the alternative is a large unrequested multi-joint swing. Measured
+#      2026-08-11 on the bench arm: the gap to episode 10 of this dataset
+#      was 97.2 deg (joint 6 at -98.1 against a first frame of -1.0), so
+#      the refusal is the expected answer from a parked arm, not a
+#      surprise. There is no L1 route that reports an episode's first
+#      frame — `arm/prefetch` answers cached/frames/fps/duration_s only —
+#      so this cannot be asserted here; the refusal message names the
+#      worst joint and its target, and `arm/jog_joint` (capped at 15 deg
+#      per step) is how you close the gap.
+#
+# SAFETY (spec §8):
+#   1. Every replay is motion. Operator at the bench, e-stop in hand, the
+#      arm's reach clear. `arm/` is in the orchestrator's
+#      hazard_prefixes, so the replay step waits for a console
+#      confirmation on the first run.
+#   2. ONE ARM. cell6 and cell7 must not appear in the same parallel
+#      block until their reach overlap has been measured (GAP-8). This
+#      file drives cell7 only; the synthesis arm has its own run.
+#   3. THE EPISODE WAS NOT RECORDED ON THIS ARM. The dataset is a
+#      synthesis-stage recording; replaying it on the analysis arm plays
+#      the same joint trajectory into a different workcell. Whether the
+#      analysis arm's surroundings are clear of that trajectory is an
+#      operator judgement this file cannot make — walk the reach before
+#      confirming.
+#   4. Unlike cell4's rail, POST /v1/stop DOES stop this cell: the route
+#      holds no lock while the episode plays, and the cell kills the
+#      replay subprocess directly (spec §6.1).
+#
+# Run it as: dry run -> real step_mode -> real.
+#   python -m orchestrator validate scenarios/demo_arm_replay_cell7.yaml
+#   python -m orchestrator run scenarios/demo_arm_replay_cell7.yaml --step-mode
+#   python -m orchestrator run scenarios/demo_arm_replay_cell7.yaml
+
+# ── Running this scenario ───────────────────────────────────────────────
+#
+# 1. One cell server per cell this scenario names. Each is its own
+#    process and owns its devices — start them in separate terminals
+#    (or as `deploy/systemd/cell@.service` units) and leave them up.
+#    `--cell` is not needed: the shape is inferred from the config's
+#    device tables.
+#
+#      conda activate sdl
+#      cd ~/workspace/InnoCOREServer/InnoCORESDL_Sungwoo
+#      python -m server --config server/nuc1/cell7.toml
+#
+#    Ports: cell7=17066. cell7 = FR5 arm, analysis stage.
+#
+# 2. Check each server is up and sees its hardware BEFORE any motion.
+#    `diagnose` is the last gate that can catch a device that answers
+#    reads but will not move:
+#
+#      curl -s localhost:17066/v1/health
+#      curl -s localhost:17066/v1/diagnose | python3 -m json.tool
+#
+# 3. The orchestrator reads its cell list from orchestrator/config.toml.
+#    Every cell above must be registered AND UNCOMMENTED there:
+#
+#      [cells.cell7]
+#      base_url = "http://127.0.0.1:17066"
+#
+#    Some cells ship commented out on purpose, with the reason next to
+#    them — a registered-but-down cell costs a connect timeout on every
+#    `/v1/cells` probe and on every `stop_on_failure` broadcast, because
+#    the engine POSTs /v1/stop to every REGISTERED cell, not only the
+#    ones a run touched. So uncomment a cell together with its server,
+#    and comment it back out when you power that bench down.
+#
+# 4. Dry run first — it validates every action and body field against
+#    each cell's live OpenAPI, and moves nothing:
+#
+#      python -m orchestrator validate scenarios/demo_arm_replay_cell7.yaml
+#
+# 5. Then the real run. The first hardware-touching step waits for
+#    an operator confirmation.
+#
+#      python -m orchestrator run scenarios/demo_arm_replay_cell7.yaml
+#
+#    Add `--step-mode` to pause before EVERY step. Use it only
+#    when debugging: thirteen prompts of which one matters is how
+#    an operator stops reading them.
+#
+#    A runlog is written to `runs/<UTC>-<name>/` (gitignored):
+#    meta.json, run.jsonl, scenario.yaml, vars.json.
+#
+# Stopping a server: Ctrl-C in its terminal, or find the pid with
+# `pgrep -af 'm server --config'` and `kill <pid>`. Do NOT use
+# `pkill -f 'server --config'` — the pattern matches your own shell.
+#
+# ──────────────────────────────────────────────────────────────────────────
+
+name: demo_arm_replay_cell7
+description: >
+  L2 replays one recorded episode on cell7's FR5 arm (analysis stage).
+  The orchestrator checks the arm is reachable and unfaulted, prefetches
+  the episode over the network, replays it, and verifies on the encoder
+  that the arm ended where the episode did. Single cell, single arm, no
+  lock contention.
+
+params:
+  # Chosen by the operator, 2026-08-11. Checked against the HuggingFace
+  # copy the same day: codebase_version v3.0, robot_type
+  # fairino_follower, total_episodes 200, fps 20, action features
+  # joint1.pos..joint6.pos + gripper.pos. Episode 10 is in range, and
+  # `arm/prefetch` measured it on the real network: 715 frames at 20 fps
+  # = 35.75 s, cross-checked against the dataset's own `meta/episodes`
+  # parquet read straight from HuggingFace (also 715).
+  repo: "coport-uni/FR5_task3_turn_the_sliver_air_valve_90_degress_counterclockwise_200"
+  ep: 10
+  # Pass band on final_joint_error_deg, matching the cell's
+  # final_pose_tolerance_deg. The cell reports the number and this
+  # decides; the cell only faults on a runaway (10x this).
+  tolerance_deg: 1.0
+
+defaults:
+  on_fail: abort        # a motion step must never be retried blindly
+  timeout_s: 30.0
+
+steps:
+  - id: check_arm
+    cell: cell7
+    action: diagnose
+    method: GET
+    save_as: diag
+
+  # diagnose does not probe the controller while a replay is in flight,
+  # so this also asserts that the cell is idle.
+  - id: assert_ready
+    assert: "${diag.arm.ok} == True and ${diag.replay.running} == False"
+
+  # Reachable is not ready. Measured 2026-08-11: an arm answered every
+  # read while holding main=1 sub=1 and refusing MoveJ with SDK error
+  # 154, so `arm.ok` alone said "healthy" about an arm that could not
+  # move. `arm.ready` is `reachable and fault == [0, 0]`, and asserting
+  # it here fails the run at a read instead of at the replay launch.
+  #
+  # If this fails, the cure is deliberate and manual: look at WHY it
+  # faulted, then POST /v1/arm/enable. It is not in this file on
+  # purpose — a scenario that clears faults on its way past them would
+  # re-issue the move that caused one.
+  - id: assert_unfaulted
+    assert: "${diag.arm.ready} == True"
+
+  # NOTE: there is deliberately no `robot_id == 'fr5_b'` assert here.
+  # `assert:` interpolates values UNQUOTED (scenario.py `_stringify` is
+  # `str(value)`), so a string lands in the expression as a bare name and
+  # the grammar — comparisons and the literals true/false/none/null only —
+  # rejects it. The real run failed on exactly that; `validate` did not
+  # catch it, because a dry run has no values to interpolate and so never
+  # parses the finished expression (LearnedPatterns #25's shape again).
+  # Which arm this is, is pinned by `cell: cell7` above, and the runlog
+  # records `diag.arm.robot_id` either way.
+
+  # Separate from the replay on purpose (spec D7): this is the step that
+  # touches the network, so a slow download cannot be mistaken for a
+  # stalled arm, and its timeout has nothing to do with motion.
+  - id: prefetch
+    cell: cell7
+    action: arm/prefetch
+    body:
+      repo_id: "${params.repo}"
+      episode: "${params.ep}"
+    timeout_s: 900.0
+    save_as: pre
+
+  - id: assert_cached
+    assert: "${pre.cached} == True and ${pre.frames} > 0"
+
+  # MOTION. First hazardous step of the run, so this is where the
+  # operator confirmation lands. `fps` is omitted: the cell adopts the
+  # recorded rate, and any other value is refused (spec D5).
+  #
+  # This step is also where a badly parked arm is refused — the cell
+  # checks the gap to the first frame before it spawns anything. A 409
+  # here moved nothing; jog the arm closer and run again.
+  - id: run
+    cell: cell7
+    action: arm/replay
+    body:
+      repo_id: "${params.repo}"
+      episode: "${params.ep}"
+    # Above the cell's own max_replay_s (300 s) so the cell's timeout is
+    # the one that fires: it kills the subprocess, where an L2 timeout
+    # would only drop the connection and leave the arm streaming. The
+    # episode itself is 35.75 s, so the cell's computed budget is
+    # 53.6 s (715 frames / 20 fps x 1.5).
+    timeout_s: 360.0
+    save_as: rep
+
+  - id: assert_arrived
+    assert: "${rep.completed} == True and ${rep.final_joint_error_deg} <= ${params.tolerance_deg}"
+
+  # A 200 already means the encoder was re-read (spec §6.2 step 7). This
+  # reads it again through a different route, so the verdict does not
+  # rest on one reading (LearnedPatterns #34).
+  - id: read_back
+    cell: cell7
+    action: status
+    method: GET
+    timeout_s: 15.0
+    save_as: post
+
+  - id: assert_idle_after
+    assert: "${post.busy} == False"

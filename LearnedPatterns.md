@@ -1292,3 +1292,328 @@ format below. Newest entries at the bottom.
   retry counts on long moves. Retrying a move that cannot fit the
   window just re-runs the abort; moving the start point changes the
   window arithmetic.
+
+## 40. The FR5 SDK reads joints from a stream one arm doesn't serve — and always says "error 0"
+
+- **Problem**: Bringing up cell6/cell7 (2026-08-11), an identical
+  read against the two arms gave opposite results. cell7
+  (192.168.0.59) returned six joint angles; cell6 (192.168.0.58) died
+  in the SDK with `TypeError: '_ctypes.CField' object is not
+  subscriptable`. Both controllers answered `ping` and both accepted
+  XMLRPC on port 20003, so "the arm is down" was not the explanation.
+- **Cause**: Two things stacked. (1) `Robot.RPC.GetActualJointPosDegree()`
+  in `external/FR5Controller/fairino/Robot.py` reads **only**
+  `self.robot_state_pkg`, the port-20004 real-time struct — its XMLRPC
+  branch is commented out upstream. `__init__` sets
+  `self.robot_state_pkg = RobotStatePkg`, the ctypes *class*, and a
+  background thread swaps in a populated instance once 20004 delivers.
+  cell6's controller never delivers, so the read subscripts a CField
+  descriptor on the class. (2) The same method ends in
+  `return 0, [...]` — the error code is a hard-coded literal, so a read
+  that fails cannot report a code at all; the only signal is the
+  exception. `GetSafetyCode()` reads the same struct, so on cell6 it
+  silently returns "no safety stop" forever.
+- **Fix**: Read through the XMLRPC proxy instead —
+  `rpc.robot.GetActualJointPosDegree(1)` returns `[error, j1..j6]` with
+  the controller's **real** error code, and answered on both arms.
+  `cell/arm_replay_cell.py::_read_joints` and
+  `claude_test/smoke_arm.py::read_joints` both do this and both check
+  `result[0]`. Same path lerobot's `fairino_follower` falls back to
+  (`_use_xmlrpc_reads`).
+- **Rule**: A driver call that hard-codes its success code cannot fail,
+  and a wrapper that reads a cached struct is not a device read. Before
+  trusting a vendor getter, look at what it actually returns — if the
+  error code is a literal in the source, the value beside it is not
+  evidence the hardware answered.
+
+## 41. A vendor `while` loop with no exit turned `POST /v1/stop` into a permanent hang
+
+- **Problem**: With cell6's server up and the arm idle, `POST /v1/stop`
+  never returned. Not slow — never. Worse, the server then could not
+  shut down either: uvicorn sat at "Waiting for background tasks to
+  complete" and needed `kill -9`. Nothing was moving; the arm was
+  parked.
+- **Cause**: `Robot.RPC.StopMotion()` opens with
+  `while self.reconnect_flag: time.sleep(0.1)` and has no timeout.
+  `reconnect_flag` is a **class** attribute the SDK's state thread
+  latches when the port-20004 stream drops — which on cell6 is the
+  permanent condition (#40). So the worker thread spun forever inside
+  the SDK, holding the request and, because it is a plain Python loop,
+  ignoring shutdown. `MoveJ` and `ResetAllError` carry the identical
+  spin, so the same trap sat directly in the motion path.
+- **Fix**: Call the raw XMLRPC methods instead of the SDK wrappers:
+  `rpc.robot.StopMotion()` and `rpc.robot.MoveJ(joint_pos, desc_pos,
+  tool, user, vel, acc, ovl, exaxis_pos, blendT, offset_flag,
+  offset_pos)`, deriving `desc_pos` with `rpc.robot.GetForwardKin()`
+  exactly as the wrapper does. Measured after the change: stop answers
+  in 13–33 ms, repeatably. The wrappers are unused in `cell/` now.
+- **Rule**: An e-stop path may not contain an unbounded wait, and a
+  vendor SDK is where one hides. Grep a driver for `while` before
+  putting it under a route that has to answer — especially a stop
+  route, where "no answer" is the worst possible answer. The hardware
+  e-stop is the real stop, but software stop must still *return*.
+
+## 42. "MoveJ rejected with SDK error 154" was a de-energised arm, and diagnose called it healthy
+
+- **Problem**: The first real T1 run of `scenarios/test_arm_jog10.yaml`
+  failed on its first motion step: `cell6 POST arm/jog_joint -> HTTP
+  500: MoveJ rejected with SDK error 154`. Everything read fine before
+  it — `/v1/health` 200, `/v1/diagnose` `arm.ok=true`, ten `/v1/status`
+  polls returning live joint angles with real encoder jitter. The number
+  154 appears nowhere in the vendored SDK, its README, or the fork.
+- **Cause**: The controller had a **latched fault and its servos were
+  down**. `GetRobotErrorCode()` over XMLRPC answered
+  `[0, 1, 1]` — `main_code=1, sub_code=1`. In that state the controller
+  accepts every read and refuses every motion command. lerobot's
+  `fairino_follower` never hits this because its `connect()` runs
+  `ServoMoveEnd → RobotEnable(0) → ResetAllError → RobotEnable(1) →
+  Mode(0) → ServoMoveStart` before it ever commands anything; the cell
+  called `MoveJ` cold. Compounding it, `diagnose()` derived `arm.ok`
+  from reachability alone, so the last gate before an operator commands
+  motion reported "healthy" about an arm that could not move — the same
+  shape as #14 and as `test_balance_linear_cell.py`'s lesson.
+- **Fix**: Three parts, and the split matters.
+  1. `_require_ready()` reads the fault code before every motion path
+     (`jog_joint`, and the replay's start-pose approach) and raises
+     `WrongStateError` naming the codes, the SDK number, and the cure.
+     A 409 that says why beats a 500 that says `154`.
+  2. `prepare_arm()` / `POST /v1/arm/enable` runs
+     `ResetAllError → RobotEnable(1) → Mode(0)` (`Mode(0)` is automatic,
+     `RobotEnable(1)` energises) — as its **own** action, never folded
+     into `open()` or into the jog. Clearing a robot fault discards
+     evidence, so the response reports `error_before` and the runlog
+     keeps it. If the fault was a joint against a limit, a silent reset
+     plus a re-issued move repeats the crash.
+  3. `diagnose()` now reports `fault` and a separate `ready`. `ok`
+     still means "reachable" so `/v1/health` keeps one meaning.
+- **CORRECTION, same day**: the fix above did **not** make the arm
+  move. With `enable` succeeding (`error_before [1,1] → error_after
+  [0,0]`), the very next `arm/jog_joint` still answered `154`, in
+  **0.011 s** — and a read straight afterwards showed `[0, 1, 1]` again,
+  persistent over 10 polls. So `ResetAllError` masks the condition for a
+  moment and it re-latches; clearing it was never the cure. The
+  cell6-vs-cell7 comparison is what actually located the fault:
+
+  | | cell6 (.58) | cell7 (.59) |
+  |---|---|---|
+  | `GetRobotErrorCode()` | `[0, 1, 1]` persistent | `[0, 0, 0]` |
+  | `GetRobotCurJointsConfig()` | `[14, 0]` — **error 14** | `[0, 7]` |
+  | port 20004 state stream | **closed** | open |
+
+  Error 14 is the one `FR5Controller.py::run_error_analyze` spells out
+  as *"RobotMotionError. Clear Error!"*. And #40's "cell6 does not serve
+  20004" was never a separate quirk — the controller does not run its
+  real-time state server while it sits in this state. One fault
+  explains all three readings.
+- **SECOND CORRECTION, same day — the fault is not the cause either.**
+  The operator's next run is in `runs/20260811T031205Z-test_arm_jog10`
+  and its timeline settles it: `enable` read
+  `error_before [1,1] → error_after [0,0]`, the readiness gate then read
+  `(0, 0)` and let the jog through, and MoveJ **still** answered `154`.
+  So a cleared main/sub code does not mean the controller will move, and
+  `154` is not the latched fault reporting itself. What cell6 really is:
+
+  * `GetRobotCurJointsConfig()` → `[14, 0]` — error 14, motion error,
+    while cell7 answers `[0, 7]`. So does `GetTargetPayload()`:
+    `[14, 0.0]` on cell6, `[0, 0.0]` on cell7. The pattern is sharp —
+    **every motion-subsystem query answers 14, while pure state and
+    kinematics answer 0**: joint reads, `GetJointTorques`,
+    `GetActualJointSpeedsDegree`, `GetJointSoftLimitDeg`, and both
+    `GetForwardKin` and `GetInverseKin` on the exact rejected target all
+    succeed. The commanded point is *kinematically valid* — inside the
+    soft limits, and IK round-trips it back to the same joints. Nothing
+    is wrong with the target; the motion subsystem is refusing to accept
+    any target. (The operator's pendant showed it as a joint
+    command-point error.)
+  * the fault re-latches after each refused MoveJ (`[1,1]` again by the
+    next run, 20 s later).
+  * it never served port 20004 at all.
+  * and by the end of the session **20003 stopped answering too**
+    (`ConnectionRefused`, while ICMP still replied) — the control
+    application had gone down, not the box.
+
+  One controller in a bad state explains every reading. cell7, the same
+  hardware and firmware, answered every one of these calls cleanly
+  throughout. So `154`'s real meaning is still unknown, and finding it
+  out is not the next step — the arm is.
+- **What the code kept, and what it gave up.** The readiness gate stays:
+  it turned an opaque `500: SDK error 154` into a `409` naming the state,
+  and it correctly refused a *replay* before spawning any subprocess
+  (measured, `runs/20260811T031226Z-demo_arm_replay`). What went is the
+  claim: `prepare_arm` used to answer `ready: true` on the strength of a
+  single `(0, 0)` read. It now answers `fault_cleared` plus an
+  `error_settled` re-read a second later, and says in the schema that a
+  cleared code promises nothing about motion.
+- **Rule**: On a robot controller, "answers reads" and "will move" are
+  two different questions — ask both before commanding motion, and let
+  the *operator* be the one who clears a fault. When a vendor error
+  number is not in the vendor's own source, stop looking it up and go
+  read the device's state instead: `154` was unsearchable, `main=1
+  sub=1` was one call away. And when a reset "succeeds" but the symptom
+  does not move, **re-read the state after the failure, not just before
+  it** — the second read is what showed the fault returning. A second,
+  known-good unit of the same hardware is the cheapest diagnostic there
+  is: cell7 answered every one of these calls cleanly, which turned
+  "my code is wrong" into "this arm is faulted" in one command.
+
+## 43. The two FR5 arms do not have the same joint-6 soft limits — a dataset recorded on one may be unreplayable on the other
+
+- **Problem**: While diagnosing cell6's refusal to move (#42), a
+  side-by-side read of both controllers turned up a configuration
+  difference nobody had recorded. `GetJointSoftLimitDeg(1)`:
+
+  | joint | cell6 (fr5_a, .58) | cell7 (fr5_b, .59) |
+  |---|---|---|
+  | 1-5 | identical | identical |
+  | **6** | **[-175, +175]** | **[-360, +360]** |
+
+  Everything else matched, including `GetRobotInstallAngle`
+  (`[0.0, 135.0]`) and joints 1-5.
+- **Cause**: Per-controller parameter, set at commissioning. Not
+  something the cell config, the dataset, or `lerobot-replay` knows
+  about. cell7's wrist can turn more than twice as far as cell6's.
+- **Fix**: Nothing to fix in code today, but two consequences to design
+  around, both about **replay**, which streams recorded joint angles
+  without checking reachability:
+  1. An episode recorded on **cell7** can contain a joint-6 angle beyond
+     ±175°, which **cell6 will refuse** — and it will refuse it partway
+     through a trajectory, with the arm already moving.
+  2. So "this dataset replayed fine" is a claim about *one arm*. The
+     `demo_arm_replay.yaml` note "the dataset must have replayed
+     successfully on this arm before" is not paperwork; this is the
+     mechanism behind it.
+  The cell already refuses to *start* a replay more than
+  `MAX_START_APPROACH_DEG` from the first frame, which catches the
+  gross case. It does **not** pre-scan the episode's whole joint
+  trajectory against the controller's soft limits — worth adding to the
+  probe if cross-arm replay is ever wanted (the limits are one XMLRPC
+  call, and the episode's action column is already being read).
+- **Rule**: Two units of the same model are not the same machine. Before
+  moving a recorded trajectory from one to the other, diff their limits
+  — `GetJointSoftLimitDeg` is one call and it is cheaper than finding
+  out mid-motion. And when comparing two devices to isolate a fault,
+  read *everything* off both: the joint-6 divergence was found by a
+  probe aimed at something else entirely.
+
+## 44. "SDK error 154" was a hard-coded `tool=0`, and one arm forgave it
+
+- **Problem**: `arm/jog_joint` answered `HTTP 500: MoveJ rejected with
+  SDK error 154` on cell6, in 0.01 s, across four attempts — while the
+  *identical* code path passed 3/3 on cell7 with 0.0013 deg accuracy.
+  Two wrong diagnoses were published before the right one (#42): the
+  latched fault, then the controller being down. Both were real
+  conditions and neither was the cause. The final run had cell6
+  completely clean — `fault [0,0]` before, after and settled,
+  `ready=True`, port 20004 up, every motion query answering 0 — and
+  MoveJ still refused.
+- **Cause**: `_move_j` passed `tool=0` as a literal. `GetForwardKin`
+  answers in the controller's **active** tool frame, so the `desc_pos`
+  handed to `MoveJ` alongside the joint target is expressed in whatever
+  frame is live. `GetActualTCPNum(1)`:
+
+  | | cell6 (fr5_a) | cell7 (fr5_b) |
+  |---|---|---|
+  | active tool | **1** | **0** |
+
+  On cell7 the literal happened to match the live frame, so the joint
+  target and the Cartesian pose agreed and the point was accepted. On
+  cell6 they described points in *different* frames — an inconsistent
+  pair, which the pendant renders as a joint command-point error and the
+  RPC returns as 154. Confirmed by construction: FK and
+  `GetActualTCPPose` agree to 0.000 mm on both arms, so FK really is
+  reporting the active-tool pose. This is also why the bench's older
+  `FR5Controller.py` hard-codes `tool=1` — it was written for cell6.
+- **Fix**: read the frame instead of assuming it —
+  `tool_num = rpc.robot.GetActualTCPNum(1)[1]`, passed to `MoveJ`, and a
+  `DeviceFaultError` if that read fails rather than falling back to a
+  guess. `user` stays 0 because `GetActualWObjNum` reads 0 on both arms.
+  Verified: after the change cell6 passed T1 3/3, worst increment error
+  **0.0010 deg** (best round 0.00005), so both arms now meet the spec's
+  acceptance.
+- **Rule**: When a controller hands you two descriptions of the same
+  target — joint angles and a Cartesian pose — the frame they are
+  expressed in is part of the command, not a default. Never hard-code a
+  frame, tool, or unit index that the device can be asked for.
+  And: **a second unit that passes is not proof the code is right.**
+  cell7 passed for two days on a latent bug because its active tool
+  happened to be the number I had guessed; the arm that failed was the
+  one telling the truth. When two supposedly identical units disagree,
+  the difference is the evidence — diff every register, not just the one
+  the error message points at.
+
+## 45. A replay that exited 0, moved the gripper, and never once moved a joint
+
+- **Problem**: `demo_arm_replay_cell7.yaml` on cell7 failed at
+  `arm/replay` with `HTTP 500: replay ended 12.68 deg from the episode's
+  last frame (runaway limit 10.00 deg)` (run
+  `20260811T033044Z-demo_arm_replay_cell7`). `lerobot-replay` had run
+  for the episode's full 38 s and **exited 0**. The joints before and
+  after were the same reading to the fourth decimal:
+
+  | | before (`check_arm`) | after (`/v1/status`) |
+  |---|---|---|
+  | J1 | -137.1283 | -137.1281 |
+  | J2 | -90.5154 | -90.5136 |
+  | J6 | -0.9766 | -0.9764 |
+
+  The arm never moved at all. The **gripper did** — the log shows it
+  cycling 0 % → 99 % → 70 % → 29 % → 100 % throughout — so the
+  subprocess was alive, connected, and streaming the episode.
+- **Cause**: one line in the log, printed exactly once:
+
+  ```
+  WARNING [Fairino] ServoJ exception:
+      Fault: <Fault -502: 'Format string requests 8 items from array,
+      but array has only 7 items.'>
+  ```
+
+  `fairino_follower.py:437` calls the controller's XMLRPC `ServoJ` with
+  **7** parameters, dropping the trailing `id`. That is deliberate
+  upstream — FR5ControllerVLA's own LearnedPatterns Q1 pins it, because
+  the arm it was written on rejects the 8-param form. cell7's controller
+  demands 8; the vendored SDK's own wrapper
+  (`external/FR5Controller/fairino/Robot.py:1597`) passes 8. So **every
+  tick of the 715-frame episode raised, and not one joint command
+  reached the arm.** Two things hid it:
+  1. `_log_servoj_state_change` is edge-triggered — it logs an outcome
+     only when it *differs* from the last one. One warning line does not
+     mean one failed tick; it means the failure never stopped. The
+     absence of the matching `ServoJ recovered` line is what proves it.
+  2. The gripper runs on a worker thread through `MoveGripper`, not
+     `ServoJ`. It kept working, so the log, the runtime, and the exit
+     code all looked like a replay.
+
+  The two controllers are on different software, which is the real
+  divergence (`GetSoftwareVersion`, both read the same minute):
+
+  | | cell6 (192.168.0.58) | cell7 (192.168.0.59) |
+  |---|---|---|
+  | software | `v3.8.1` | `v3.9.3.1` |
+  | firmware | `V3.7.78` | `V3.9.15-QX` |
+
+  Resist the tempting second inference. It looked as though the version
+  gap also explained the fork's Q2 ("MoveJ returns error 101/154") given
+  that our `arm/jog_joint` drives cell7 through MoveJ perfectly well —
+  i.e. that each controller accepts what the other refuses. **That is
+  wrong**: #44 root-caused cell6's 154 to a hard-coded `tool=0`, and
+  once the frame was read rather than assumed, cell6 passed T1 3/3 on
+  MoveJ too. So the table above proves only that these are two different
+  machines. Whether cell6's controller wants 7 arguments, 8, or accepts
+  either is **untested** — which is exactly why the fix below has to ask
+  rather than assume.
+- **Fix**: Not yet applied — it belongs upstream in
+  `external/FR5ControllerVLA`, and it must **not** be a blind change to
+  8 params, which would break the arm the 7-param form was pinned for.
+  The shape that works for both: try the call once at `connect()`, catch
+  `Fault -502`, and cache the arity on the follower — the controller
+  tells you which one it wants, so nothing has to be configured per arm.
+  Nothing in this repo (`cell/`, `scenarios/`) is at fault.
+- **Rule**: A subprocess exit code is a claim about the process, never
+  about the mechanism — only the encoder can say the arm moved, and this
+  is the second time that read has caught a "success" that moved nothing
+  (see #24). When a driver logs on *state change*, one warning line is
+  the start of a condition, not an instance of it; look for the recovery
+  line before assuming it cleared. And before trusting any per-firmware
+  workaround written for one unit, read `GetSoftwareVersion` off both —
+  same model, same room, two different machines (see #43).
+

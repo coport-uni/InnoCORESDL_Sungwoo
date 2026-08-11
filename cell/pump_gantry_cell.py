@@ -733,6 +733,32 @@ class PumpGantryCell(Cell):
     def set_lamp(self, *, enabled: bool) -> dict:
         raise _absent("lamp")
 
+    # ── Arm (cell6 / cell7 only) ────────────────────────────────────────
+    def prepare_arm(self) -> dict:
+        raise _absent("arm")
+
+    def jog_joint(
+        self, joint: int, delta_deg: float, *, speed_pct: float | None = None
+    ) -> dict:
+        raise _absent("arm")
+
+    def prefetch_episode(self, repo_id: str, episode: int) -> dict:
+        raise _absent("arm")
+
+    def start_replay(
+        self, repo_id: str, episode: int, fps: int | None = None
+    ) -> dict:
+        raise _absent("arm")
+
+    def await_replay(self) -> dict:
+        raise _absent("arm")
+
+    def start_program(self, name: str) -> dict:
+        raise _absent("arm")
+
+    def await_program(self) -> dict:
+        raise _absent("arm")
+
     # ── Safety / lifecycle ──────────────────────────────────────────────
     def stop(self) -> None:
         # Hard-stop the whole gantry group; halt the pump if it exposes one.
