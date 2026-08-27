@@ -2295,3 +2295,125 @@ episode 10 (200 episodes, 20 fps, ~723 frames ≈ 36 s).
       and refuses to serve unless all three motors answer an encoder read
       (LearnedPatterns #24). Folding the encoder check into
       `PumpGantryCell.open` would help every gantry cell, not just NUC2's.
+
+## 2026-08-27 — cell1 pump re-verified on the bench; gravimetric CV deferred
+
+- [x] **The pump is back on cell1 and works.** `1A86:7523` enumerated
+      (bus 003 dev 019), `server/nuc1/cell1.toml` still carries its
+      `[pump]` table, and cell1's server answers `pump_ok: true`.
+      `diagnose`: fw **8.33**, serial **32656**, supply **24.0 V**,
+      config `4 way|9600|100K|TSY|high|XLP|AUTO`. This is the first
+      bench use since the link was left flapping (see the 2026-07-29
+      entries); the MINAS amp was OFF for all of it, and no
+      `[pump-link] reopened` appeared in either run.
+- [x] `scenarios/test_pump_prime_1cycle.yaml` — new. `demo_pump_cycle`
+      with the batched `pump/cycle` step removed. That step's schema is
+      `cycles: ge=1`, so the demo's floor is two cycles (1 unrolled + 1
+      batched); this file exists for the single-shot case. Every other
+      step and assert is the demo's, unchanged.
+- [x] **Bench run, 1 cycle @ 125 uL** (`20260827T063233Z-test_pump_prime_1cycle`,
+      `--step-mode`): completed, 16/16. Measured per step —
+      `initialize` 6.17 s (returns `valve: "4"`), valve move 0.56 s,
+      `aspirate` 125 uL 3.27 s, `dispense` to 0 3.12 s. One cycle is
+      therefore **~7.5 s**, not the ~7.0 s at 100 uL recorded on
+      2026-07-29.
+- [x] **Bench run, 20 cycles @ 125 uL** (`20260827T064658Z-demo_pump_cycle`,
+      params `volume_uL: 125.0`, `remaining_cycles: 19`): completed,
+      19/19. Batched step **155.78 s** for 19 cycles = **8.20 s/cycle**,
+      `cycles_done: 19`, `final_valve: "2"`, syringe left empty.
+      Total transferred ~2.5 mL. The operator edited those two params
+      into `demo_pump_cycle.yaml` rather than passing `--param`.
+- [x] 125.0 uL is the **full stroke** of this syringe and the boundary
+      of the driver's accepted range (`[0, Config.syringe_uL]`, closed).
+      It is accepted and arrives; `init_force: 2` (one-third) is the
+      right homing code for the 125 uL barrel's top stop.
+- [ ] **Fix the stale comment.** Both scenarios say "A full-stroke
+      plunger home is ~24 s at the init speed" above `initialize`'s
+      `timeout_s: 60.0`. Measured twice today at **6.2-6.4 s** with
+      `init_force: 2`. The 60 s timeout is still right (the driver's own
+      settle budget is 30 s); only the prose is wrong. Check whether the
+      24 s figure came from a different force code before rewriting it.
+
+## 2026-08-27 — NEXT: gravimetric check that 100 uL really is 100 uL (CV)
+
+Deferred by the user. Everything below was established this session so a
+later run does not have to re-derive it.
+
+- [ ] **Goal.** Dispense 100 uL onto the cell4 balance N times and
+      compute the CV of the delivered mass. Needs three cells' devices
+      at once: cell1's pump AND gantry, cell4's rail AND balance.
+- [ ] **BLOCKER — cell4's rail is down.** Measured today:
+      `health` → `stage_ok: false`, `driver_versions.linear: null`;
+      `diagnose` → `stage: {model: null, version: null, ok: false}`,
+      `ok_to_initialize: false`; `status` → `stage_x_mm: null`. The
+      **balance is fine** (`G     -   0.0005 g`, SerNo 0047304196), as
+      is cell1's gantry (x=0, z=0, `error: null`). Nothing can be
+      weighed at a position until the MINAS amp is powered and
+      `stage.ok` reads true.
+- [ ] **The blocker's fix reintroduces the EMI storm.** Powering the
+      MINAS amp is what brings back the LP #20 conducted-noise coupling
+      that knocks the pump's CH340 off USB — i.e. enabling the balance
+      degrades the very link being measured. `PumpGantryCell` reconnects
+      and re-issues, so expect `[pump-link] reopened` lines mid-run and
+      do not read them as a failure. Rail workaround unchanged:
+      hand-park the carriage near home, split long moves into <=50 mm.
+- [ ] **No existing scenario weighs a dispense.** The motion skeleton is
+      already written in `scenarios/test_synthesis_seq_shinyeong.yaml`
+      (rail -> cell1 station -> gantry X -> descend -> `pump/cycle` ->
+      retract), but its only dispense assert is
+      `${disp.cycles_done} == 1` — a control-path check, not a mass one.
+      The balance calls to graft in are in
+      `scenarios/demo_weigh_at_position.yaml`: `balance/tare` (POST) and
+      `balance/weight` (GET -> `{weight_g, stable}`).
+- [ ] **Taught coordinates to reuse** (from the synthesis scenario,
+      measured 2026-08-13): `rail_cell1_mm: 470.772`, `c1_x_mm: 260.0`,
+      `c1_z_mm: 215.0`, `z_up_mm: 3.0`. **Z is 215, NOT the taught
+      223.654** — 223.654 drove the head into the vial: the descent
+      stalled at 222.27, the paired Z motors ended 1.40 mm apart, and
+      the balance read 29.2 g of head resting on it. A taught Z is only
+      valid for the pan loading it was taught with.
+- [ ] **Design constraint 1: the CV cannot be computed in the YAML.**
+      `_ALLOWED_ASSERT_NODES` (`orchestrator/scenario.py`) has no
+      `ast.Call`, so no `abs()`, no `sqrt()` — which is why every
+      "within +/- x" in the repo is written as two comparisons.
+      Arithmetic (`+ - * / %`) IS allowed, so a per-dispense difference
+      (`${w2.weight_g} - ${w1.weight_g}`) can be asserted; mean, SD and
+      CV must be computed outside, from `run.jsonl`. There is also no
+      loop, so N replicates get unrolled.
+- [ ] **Design constraint 2: tare and weigh must share one rail
+      position.** `demo_weigh_at_position.yaml` budgets
+      `max_drift_g: 0.05` for what carrying the balance does to a
+      reading — **50 mg, half of a 100 uL dispense**. So the rail moves
+      to the cell1 station ONCE and does not move again until the last
+      weight is read.
+- [ ] **Proposed shape.** Pre-flight both cells -> `linear/home` ->
+      `linear/move(470.772)` -> `gantry/home` -> `gantry/move(x=260)` ->
+      `gantry/move(z=215)` -> `balance/tare` -> confirm ~0 -> N x
+      [`pump/cycle(cycles=1, volume_uL=100)` + `balance/weight`
+      `save_as: w1..wN`] -> `gantry/move(z=3)`. Tare ONCE and read
+      cumulative mass; dispense i = `w_i - w_(i-1)`. Assert only a sane
+      per-dispense range in the YAML (e.g. 90-110 mg); do the statistics
+      afterwards.
+- [ ] **Measurement notes.** Balance readability 0.5 mg contributes a CV
+      floor of only ~0.14 % at 100 mg (d/sqrt(12)), so it is not the
+      limiting term. **Evaporation is** — 10-20 cycles is several
+      minutes with the vial open. Use a lid or an evaporation trap, or
+      accept a downward drift in the later replicates.
+- [ ] **Open decisions.** How many replicates (10 is the ISO 8655
+      count); whether the amp can be powered for this bench session.
+
+## 2026-08-27 — branch hygiene before the pump bench work
+
+- [x] The working tree carried **37 uncommitted files** on
+      `feat/arm-cell` (arm cell rename + Lua specs + shinyeong's
+      cell2/cell3 tests and synthesis scenarios). Created
+      `test/cell1-pump-bench` off it and committed them as `efba65f`,
+      a restore point — **local only, nothing pushed**; origin still has
+      only `main`, and `feat/arm-cell` still sits at `a6dc89f`.
+- [x] Checked that `efba65f` does not touch the pump path: its
+      `server/routes.py` and `server/schemas.py` hunks are arm-only (no
+      pump/aspirate/dispense/valve/cycle lines either side), and its
+      `cell/pump_gantry_cell.py` change is the gantry's
+      `motor_serial_z_a`/`_z_b` + `_open_gantry` work. So pump commits
+      made here can be cherry-picked onto a clean branch off
+      `origin/main` without conflict when it is time to push.
