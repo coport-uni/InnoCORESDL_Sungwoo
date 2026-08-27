@@ -2,15 +2,24 @@
 
 대상 저장소: `coport-uni/InnoCORESDL_Sungwoo`
 선행 문서: `docs/SPEC_ARM_REPLAY_CELL.md` (v1.0) — 본 문서는 그 확장이다
-문서 버전: v0.1 (설계안), 2026-08-11
+문서 버전: v1.0 (구현·검증 완료), 2026-08-11
 실행 주체: Claude Code
 
-> **검증 상태: 벤치 실측 없음.** 이 문서의 모든 기술적 주장은 Fairino
-> 공식 매뉴얼 또는 `external/FR5Controller/fairino/Robot.py`의 실제 코드를
-> 읽어서 나왔다. 컨트롤러에 붙여서 확인한 것은 아직 없다. §7 T0'(Phase-0
-> 정찰)이 그 확인 절차이며, 그 결과에 따라 §5와 §6이 바뀔 수 있다.
-> CLAUDE.md 폴더 규칙 4에 따라, 이 문서는 구현 승인 근거일 뿐 검증 증거가
-> 아니다.
+> **검증 상태 (2026-08-11): 두 팔 모두 모션 검증 완료.**
+>
+> - §7 T0' 정찰 7/7 — `claude_test/probe_arm_lua_fr5_a_20260811T042141Z.md`
+> - §7 T2 — `claude_test/bench_arm_program_20260811.md`. replay 경로를
+>   삭제하고 `cell/arm_cell.py`로 개명한 **뒤에** 두 서버를 재시작해 다시
+>   측정한 값이다 (모션 경로 리팩터는 살아남은 테스트로 검증되지 않는다):
+>   - cell6 `Test1.lua`: `elapsed_s 23.786`, `last_line 18`, 폴트 없음
+>   - cell7 `Cell7Test1.lua`: `elapsed_s 25.293`, `last_line 13`, 폴트 없음
+> - **아직 안 한 것**: `POST /v1/stop` 실측(§7 T2-2), 시나리오 step-mode
+>   완주(§7 T3). operator 게이트가 콘솔 입력을 요구하므로 시나리오는
+>   운영자가 직접 돌려야 한다.
+>
+> 이 문서의 초안은 코드와 매뉴얼만 읽고 쓴 것이었고, 벤치가 그중 **세 가지를
+> 뒤집었다** — §4.1(래퍼가 죽지 않는다), §4.6(수락-진입 간극),
+> §4.6(라인 리셋). 정정 내용은 각 절에 그대로 남겨 둔다.
 
 근거 문헌:
 
@@ -25,9 +34,9 @@
 
 ## 1. 목적
 
-현재 cell6/cell7의 유일한 모션 수단은 lerobot replay다
-(`SPEC_ARM_REPLAY_CELL.md` §1). 이 경로는 PC가 dataset episode를 열어
-20 Hz로 `ServoJ` 프레임을 컨트롤러에 계속 밀어넣는 구조이므로,
+이 문서를 쓰기 시작한 시점에 cell6/cell7의 유일한 모션 수단은 lerobot
+replay였다 (`SPEC_ARM_REPLAY_CELL.md` §1). 그 경로는 PC가 dataset episode를
+열어 20 Hz로 `ServoJ` 프레임을 컨트롤러에 계속 밀어넣는 구조여서,
 
 - **PC와 네트워크가 에피소드 전 구간 동안 실시간 루프에 묶인다.**
 - **녹화된 episode가 없는 동작은 표현할 수 없다.** 새 동작 하나를 추가하려면
@@ -39,8 +48,16 @@ Fairino 펌웨어는 이미 컨트롤러 자체 스크립트 실행기 겸 모�
 올라가 있는 Lua 프로그램을 L1 `/v1` API로 load / run / stop 하고 진행 상태를
 관측하는 경로**를 정의한다.
 
-replay를 대체하지 않는다. VLA 정책 롤아웃은 본질적으로 프레임 스트림이므로
-`ServoJ` 경로가 계속 필요하다. 두 경로는 한 cell 안에 공존한다.
+**최종 결과 (2026-08-11): 이 경로가 replay를 대체했다.** 초안은 두 경로의
+공존을 전제했고 실제로 그렇게 구현·검증했지만, 두 팔에서 동작을 확인한 뒤
+사용자 판단으로 replay를 리포에서 제거했다. 이유와 — 더 중요하게 —
+replay가 더 나았던 점은 `LearnedPatterns.md` #47에 있다. 요약하면 학습된
+정책 실행은 replay 계열만 할 수 있고(정책은 포즈를 연속 생성하므로 컨트롤러에
+미리 올릴 것이 없다) 종료 검증도 더 강하다. VLA 롤아웃이 다시 범위에 들어오면
+`docs/SPEC_ARM_REPLAY_CELL.md`와 git 히스토리에서 되살린다.
+
+아래 §1.1의 비교표와 §3의 L1/L4/L7/L8은 **두 경로가 공존하던 시점의
+기록**이다. 그 대비가 왜 이 경로를 택했는지를 설명하므로 남겨 둔다.
 
 ### 1.1 두 경로의 성질 비교
 
@@ -75,7 +92,8 @@ Lua 하나로 표현할 수 있고, 포인트 테이블(§3.8.3, SDK의
 
 포함:
 
-- `cell/arm_replay_cell.py`에 **program action set 추가** (§3 D1 참조)
+- `cell/arm_cell.py`의 program action set (초안 시점에는
+  `cell/arm_replay_cell.py`에 **추가**하는 형태였다 — §3 L1/L2)
 - `server/` 라우트·스키마·에러 매핑
 - `server/nuc2/cell6.toml.example`, `server/nuc1/cell7.toml.example`의
   `[arm]` 테이블 확장
@@ -101,19 +119,49 @@ Lua 하나로 표현할 수 있고, 포인트 테이블(§3.8.3, SDK의
 | ID | 결정 | 근거 |
 |---|---|---|
 | L1 | replay cell에 action set을 **추가**한다. 별도 `ArmLuaCell`을 만들지 않는다 | `_read_joints`, `prepare_arm`, `_require_ready`, `stop()`, 타 shape 409 스텁 22개가 전부 공유된다. 분리하면 통째로 복제된다. 한 서버가 두 경로를 모두 제공해야 시나리오에서 섞어 쓸 수 있다 |
-| L2 | 파일·클래스를 `cell/arm_cell.py` / `ArmCell`로 개명한다 | `ArmReplayCell`이 더 이상 사실이 아니게 된다. 해당 파일은 아직 untracked이므로 첫 커밋 전 개명이 가장 싸다. **미결정 — 사용자 확인 필요** |
+| L2 | 파일·클래스를 `cell/arm_cell.py` / `ArmCell`로 개명한다 | `ArmReplayCell`이 더 이상 사실이 아니다. **적용됨** — replay 제거와 함께 개명, 1940 → 1254줄 |
 | L3 | 모든 Lua API 호출은 **raw `rpc.robot.*`** 로 한다. SDK 래퍼를 쓰지 않는다 | §4에 근거. 셀이 이미 `GetActualJointPosDegree` / `MoveJ` / `StopMotion`에서 지키는 규칙과 동일 |
 | L4 | 실행은 `start_program` + `await_program` 2단계. 라우트는 `arm/replay`와 **동일한 비대칭 락 패턴** | 락 안에서 시작, 락 밖에서 대기 → 실행 중 `POST /v1/stop`이 모션 뒤에 줄 서지 않는다 (GAP-9 회피) |
 | L5 | 프로그램 이름은 요청 body의 변수. 단 `.lua` 확장자 + 경로 구분자 금지 + config 화이트리스트 검사 | `allowed_repo_prefixes`(D6)와 같은 취지. 경로 탈출(`../`) 차단 |
 | L6 | timeout은 config 상수 `max_program_s`. replay처럼 계산하지 않는다 | frames/fps에 해당하는 사전 정보가 없다. 프로그램 길이를 L1이 알 방법이 없다 |
-| L7 | 프로그램 실행 중에는 replay를 띄우지 않고, replay 중에는 프로그램을 실행하지 않는다. 둘 다 409 | 서보 세션과 잡 프로그램은 모션의 소유자가 서로 다르다 (§4.3) |
-| L8 | `stop()`은 3단계로 확장: subprocess → `ProgramStop()` → `StopMotion()`. 어느 단계도 예외를 밖으로 내지 않는다 | 기존 cell5/arm stop 패턴 유지. e-stop 성격의 호출은 절대 raise 하지 않는다 |
+| L7 | 프로그램 실행 중에는 replay를 띄우지 않고, replay 중에는 프로그램을 실행하지 않는다. 둘 다 409 | 서보 세션과 잡 프로그램은 모션의 소유자가 서로 다르다 (§4.3). replay 제거 후에는 "프로그램은 한 번에 하나"만 남았다 |
+| L8 | `stop()`은 subprocess → `ProgramStop()` → `StopMotion()` 순서. 어느 단계도 예외를 밖으로 내지 않는다 | e-stop 성격의 호출은 절대 raise 하지 않는다. replay 제거 후 subprocess 단계가 빠져 2단계다 |
 
 ## 4. 사전 확인된 SDK 함정 (코드 실사 결과)
 
 구현 전에 반드시 알고 있어야 하는 것들. 전부 `Robot.py`를 직접 읽어 확인했다.
 
-### 4.1 `GetProgramState()` 래퍼는 동작하지 않는 스텁이다
+### 4.0 Phase-0 정찰 실측값 (cell6, 2026-08-11)
+
+`claude_test/probe_arm_lua.py --ip 192.168.0.58 --robot-id fr5_a`, 7/7 응답:
+
+| 호출 | 반환 (raw) |
+|---|---|
+| `GetLuaList()` | `[0, 7, 'test.lua;example.lua;new_pr.lua;SimpleLoadIdentify.lua;Test0902.lua;Test1.lua;test2.lua;']` |
+| `GetLoadedProgram()` | `[0, '/fruser/test2.lua']` |
+| `GetProgramState()` (raw) | `[0, 1]` |
+| `GetProgramState()` (래퍼) | `(0, 1)` |
+| `GetCurrentLine()` | `[0, 0]` |
+| `GetRobotErrorCode()` | `[0, 0, 0]` |
+| `GetActualJointPosDegree(1)` | `[0, -137.755, -99.876, 95.266, -87.985, -89.388, 2.914]` |
+
+확정된 것:
+
+- `GetLuaList()`는 `(error, count, "a;b;c;")` 형태가 맞다 (Q2 해소). 끝에
+  빈 항목이 남는 후행 `;`가 있으므로 split 후 빈 문자열을 걸러야 한다.
+- raw `GetProgramState()`는 `(error, state)`가 맞다 (Q1 해소).
+- **프로그램 이름은 대소문자를 구분한다.** 커미셔닝 대상은
+  `Test1.lua`이며 소문자 `test1.lua`는 이 컨트롤러에 없다 (Q3 해소).
+
+### 4.1 `GetProgramState()` 래퍼는 프로그램 상태를 읽지 않는다
+
+> **정정 (2026-08-11).** 이 절의 초안은 "cell6에서 래퍼가
+> `TypeError: '_ctypes.CField' object is not subscriptable`로 죽는다"고
+>썼다. **틀렸다.** 실측에서 래퍼는 `(0, 1)`을 정상 반환했다 — 이 컨트롤러의
+> port-20004 스트림은 살아 있다. 아래 근거는 "죽는다"가 아니라 "다른 필드를
+> 읽는다"로 좁혀진다. 값이 우연히 raw와 같은 `1`이었다는 것은 두 값이 같은
+> 것을 뜻한다는 증거가 아니다.
+
 
 `Robot.py:4915-4925`:
 
@@ -128,14 +176,22 @@ def GetProgramState(self):
     return 0, self.robot_state_pkg.robot_state
 ```
 
-XMLRPC 본문이 통째로 주석 처리되어 있고, port-20004 실시간 상태 구조체를
-반환한다. cell6의 컨트롤러는 20004를 서비스하지 않으므로 이 구조체는
-ctypes 클래스인 채로 남아 `TypeError: '_ctypes.CField' object is not
-subscriptable`이 난다 — **LearnedPatterns #40과 동일한 근본 원인.**
-게다가 `return 0, ...`으로 성공을 하드코딩하므로 실패를 보고할 수도 없다.
+XMLRPC 본문이 통째로 주석 처리되어 있고, 대신 port-20004 실시간 상태
+구조체의 `robot_state` 필드를 반환한다. 문제는 세 가지다:
 
-→ 반드시 raw `rpc.robot.GetProgramState()`를 쓴다. 주석 처리된 원본 코드가
-`(error, state)` 형태임을 알려주지만, **이것은 확인 대상이다** (§7 T0').
+1. **읽는 대상이 다르다.** `robot_state`는 로봇의 운전 상태이지 잡 프로그램의
+   실행 상태가 아니다. 실측에서 둘 다 `1`이었지만, 프로그램이 정지해 있고
+   로봇도 정지해 있는 상태에서 두 값이 같았다는 것은 아무것도 증명하지
+   않는다. 폴링 루프가 판정에 쓸 값으로는 부적격이다.
+2. **실패를 보고할 수 없다.** `return 0, ...`으로 성공 코드를 하드코딩한다 —
+   LearnedPatterns #15가 모션 경로에서 걷어낸 "조작된 성공"과 같은 형태.
+3. **20004가 두절되면 죽는다.** 구조체가 ctypes 클래스인 채로 남아
+   `TypeError: '_ctypes.CField' object is not subscriptable`이 난다
+   (LearnedPatterns #40). cell6에서는 2026-08-11 현재 20004가 살아 있어
+   이 경로가 터지지 않았지만, 그것은 스트림 상태에 달린 우연이다.
+
+→ 반드시 raw `rpc.robot.GetProgramState()`를 쓴다. 실측으로 `[0, 1]` 형태가
+확인되었다 (§4.0).
 
 ### 4.2 Program 계열 래퍼에 무한 스핀이 있다
 
@@ -149,8 +205,10 @@ while self.reconnect_flag:
 ```
 
 `reconnect_flag`는 SDK 상태 스레드가 20004 스트림 두절 시 래치하는 **클래스**
-속성이다. 20004를 서비스하지 않는 컨트롤러에서는 영영 안 풀린다 —
-LearnedPatterns #41, `POST /v1/stop`이 끝나지 않던 그 버그와 같은 것.
+속성이고, 한 번 래치되면 풀리지 않는다 — LearnedPatterns #41,
+`POST /v1/stop`이 끝나지 않던 그 버그와 같은 것. 이 벤치에서 20004가 지금
+살아 있다는 것(§4.0)은 앞으로도 그렇다는 뜻이 아니고, e-stop 성격의 호출을
+스트림 상태에 의존하게 둘 이유가 없다.
 `ProgramRun`과 `ProgramResume`은 추가로 `GetSafetyCode()`를 부르는데, 그것도
 같은 죽은 구조체를 읽는다.
 
@@ -182,6 +240,39 @@ LearnedPatterns #41, `POST /v1/stop`이 끝나지 않던 그 버그와 같은 �
 프로토콜(업로드 20010 / 다운로드 20011, MD5 검증 `/f/b … /b/f` 프레이밍,
 `Robot.py:7115-7235`)이지만 — **본 사양의 비범위다** (§2).
 
+### 4.6 `ProgramRun`은 수락 시점에 답하고, `GetCurrentLine`은 끝에서 0으로 리셋된다
+
+이 두 가지가 첫 실기 실행에서 **실제 결함 2건**을 만들었다. 전말은
+LearnedPatterns #46, 측정 데이터는 아래.
+
+`/fruser/Test1.lua`, cell6, 2026-08-11:
+
+```
+run      -> 0
+  t+  0.001s  state=1  line=0     ← 수락. 아직 실행 아님
+  t+  0.160s  state=2  line=4     ← 여기서 비로소 실행 상태
+  t+  5.643s  state=2  line=9
+  t+ 11.064s  state=2  line=11
+  t+ 14.332s  state=2  line=14
+  t+ 17.388s  state=2  line=18
+  t+ 23.712s  state=2  line=0     ← 종료하면서 line이 0으로 리셋
+  t+ 23.764s  state=1  line=0
+```
+
+1. **160 ms의 수락-진입 간극.** 그 안에서 폴링하면 "정지"를 보고 "끝났다"고
+   판정한다. 첫 `POST /v1/arm/program`이 정확히 그랬다 — 2.8 ms 만에
+   `completed: true`를 반환했고, 그 뒤 팔이 joint 1을 91.27° 돌렸다. 이
+   파일이 MoveJ에 대해 이미 `JOG_SETTLE_S`로 흡수하고 있는 바로 그 간극이다.
+   → `_confirm_started()`: 50 ms 간격으로 상태가 1을 벗어날 때까지 폴링,
+   상한 `PROGRAM_START_GRACE_S = 5.0`(측정치의 ~30배), 끝내 안 벗어나면
+   `DeviceFaultError`.
+2. **`last_line`은 최대값이어야 한다.** 마지막 값은 항상 0이다. 게다가 이
+   프로그램은 시작 자세로 되돌아오므로(종료 자세가 초기 대비 0.004° 이내)
+   자세 변화로도 실행을 증명할 수 없다 — `last_line > 0`이 유일한 증거다.
+
+수정 후 재측정: `elapsed_s = 23.789 s`, `last_line = 18`, HTTP 벽시계
+23.803 s. 즉 응답이 프로그램 종료와 함께 도착한다.
+
 ## 5. Config 스키마 (증분)
 
 기존 `[arm]` 테이블에 4개 키를 추가한다. 나머지는
@@ -212,13 +303,16 @@ program_poll_s = 0.5           # GetProgramState 폴링 주기
 
 | Route | Method | Body | 성공 응답 (요지) |
 |---|---|---|---|
-| `arm/programs` | GET | — | `{programs: ["a.lua", "b.lua"]}` |
 | `arm/program` | POST | `{name: "x.lua"}` | `{completed: true, name, elapsed_s, last_line, joints_deg: [...]}` |
 
-`arm/programs`는 읽기 전용 조회다 (`GetLuaList()`). 사용자가 선택한
-"실행만" 범위에서 한 뼘 넓힌 부분이지만 쓰기가 없고, 이것이 없으면 프로그램
-이름을 사람이 외워서 넣어야 한다. 불필요하면 삭제 가능한 독립 라우트로
-둔다.
+`arm/programs`(GET, `GetLuaList()`) 는 **구현하지 않았다.** 사용자가 고른
+"실행만" 범위를 넘고, 이름 발견은 `claude_test/probe_arm_lua.py`가 셀 서버
+없이 해준다. 필요해지면 읽기 전용 라우트로 추가하면 된다 (Q7).
+
+`last_line`은 **관측된 최대 라인**이지 마지막 값이 아니다. 컨트롤러가 종료
+시 `GetCurrentLine`을 0으로 되돌리기 때문이다 (§4.6). 시나리오가
+"스크립트가 실제로 실행됐다"를 주장할 수 있는 유일한 근거이므로 이 값이
+0이면 실행되지 않은 것으로 읽어야 한다.
 
 ### 6.2 `arm/program` 실행 시퀀스 (순서 고정)
 
@@ -421,24 +515,26 @@ steps:
 
 ## 9. Definition of Done
 
-| # | 항목 |
-|---|---|
-| 1 | T0' 정찰 리포트 1개 이상 커밋. §4.1의 가정이 실측으로 확인 또는 반증됨 |
-| 2 | T0 전체 green, `ruff check` + `ruff format --check` 통과 |
-| 3 | T1 read-only 통과, `arm/programs`가 정찰 결과와 일치 |
-| 4 | T2: 팔 1대 이상에서 프로그램 완주 + stop 실측 수치가 `docs/L1_AUDIT.md`에 기록 |
-| 5 | T3: validate 0 issue, step-mode 완주, orchestrator diff 0줄 |
-| 6 | `LearnedPatterns.md`에 §4.1/§4.2 항목 기록 (Problem/Cause/Fix/Rule) |
-| 7 | `README.md` arm 절에 replay / Lua 두 경로의 차이와 선택 기준 |
-| 8 | PR 본문에 §6.4(검증이 replay보다 약함)를 명시. 낙관적 요약은 결함 |
+| # | 항목 | 상태 |
+|---|---|---|
+| 1 | T0' 정찰 리포트 커밋, §4.1 가정이 실측으로 확인 또는 반증됨 | **완료** — 반증됨, §4.1 정정 |
+| 2 | T0 전체 green, `ruff check` + `ruff format --check` 통과 | **완료** — 102 passed |
+| 3 | T1 read-only 통과 (`diagnose.program`, 400 게이트 4종) | **완료** |
+| 4 | T2: 팔 1대에서 프로그램 완주 | **완료** — cell6, 23.789 s / line 18 |
+| 5 | T2-2: `POST /v1/stop` 실측 수치가 `docs/L1_AUDIT.md`에 기록 | **미완** |
+| 6 | T3: validate 0 issue / step-mode 완주 / orchestrator diff 0줄 | validate·diff는 완료, step-mode **미완** (운영자 게이트) |
+| 7 | cell7(fr5_b)에서 T2 반복 | **완료** — `Cell7Test1.lua`, 25.298 s / line 13 |
+| 8 | `LearnedPatterns.md` 항목 (Problem/Cause/Fix/Rule) | **완료** — #46 |
+| 9 | `README.md` arm 절에 두 경로의 차이와 선택 기준 | **미완** |
+| 10 | PR 본문에 §6.4(검증이 replay보다 약함)를 명시. 낙관적 요약은 결함 | 머지 시 |
 
 ## 10. 구현 전 확인 사항
 
 | # | 질문 | 확인 방법 | 상태 |
 |---|---|---|---|
-| Q1 | raw `GetProgramState()`가 정말 `(error, state)`를 반환하는가 | T0' P3 | **미확인** |
-| Q2 | `GetLuaList()` raw 반환이 `(error, count, "a;b;c")` 형태가 맞는가 | T0' P1 | **미확인** |
-| Q3 | 컨트롤러에 실제로 있는 프로그램 이름 | T0' P1 | **미확인** |
+| Q1 | raw `GetProgramState()`가 정말 `(error, state)`를 반환하는가 | T0' P3 | **확인** — `[0, 1]` (§4.0) |
+| Q2 | `GetLuaList()` raw 반환이 `(error, count, "a;b;c")` 형태가 맞는가 | T0' P1 | **확인** — 후행 `;` 주의 (§4.0) |
+| Q3 | 컨트롤러에 실제로 있는 프로그램 이름 | T0' P1 | **확인** — 7개, 대상은 `Test1.lua` (§4.0) |
 | Q4 | 프로그램 실행 중 다른 XMLRPC getter(`GetActualJointPosDegree`)가 응답하는가 — `status()`가 실행 중 무엇을 반환할지가 여기 달렸다 | T2에서 실측. 불응하면 replay와 같이 캐시값을 서빙 | **미확인** |
 | Q5 | `ProgramStop()` 후 팔이 즉시 서는가, 아니면 현재 줄을 끝내는가 | T2 stop 실측 | **미확인** |
 | Q6 | L2 결정 — 파일/클래스를 `arm_cell.py` / `ArmCell`로 개명할 것인가 | 사용자 확인 필요 | **미결정** |

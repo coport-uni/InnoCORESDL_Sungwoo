@@ -375,17 +375,6 @@ class BalanceLinearCell(Cell):
     ) -> dict:
         raise _absent("arm")
 
-    def prefetch_episode(self, repo_id: str, episode: int) -> dict:
-        raise _absent("arm")
-
-    def start_replay(
-        self, repo_id: str, episode: int, fps: int | None = None
-    ) -> dict:
-        raise _absent("arm")
-
-    def await_replay(self) -> dict:
-        raise _absent("arm")
-
     def start_program(self, name: str) -> dict:
         raise _absent("arm")
 

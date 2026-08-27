@@ -1,0 +1,175 @@
+# T2 of docs/SPEC_ARM_LUA_PROGRAM.md: L2 runs a `.lua` job program that
+# already lives on cell6's FR5 controller, over HTTP /v1 only.
+#
+# The controller's own interpreter and planner execute the program; this
+# side only says "go" and watches. There used to be a second path here —
+# `lerobot-replay` streaming a recorded episode as ServoJ frames — which
+# was removed on 2026-08-11 (LearnedPatterns #47).
+#
+# Action path and body field were checked against the L1 code, not the
+# spec draft: server/routes.py exposes POST /v1/arm/program and the
+# request model is ArmProgramRequest {name}.
+#
+# SAFETY (spec section 8):
+#   1. READ THIS ONE FIRST. Running a job program is motion the L1 server
+#      cannot bound. The program's first PTP/MoveJ goes from WHEREVER THE
+#      ARM IS to a point taught inside a script nothing here reads, at
+#      whatever speed the script asks for. Clear the frame, know what the
+#      program does, keep the e-stop in hand.
+#      `arm/` is in the orchestrator's hazard_prefixes, so the run step
+#      waits for a console confirmation.
+#   2. The program must have been run from the teach pendant / WebApp on
+#      this arm before. This scenario is not the place to try an unproven
+#      program, and it is not the place to try a long one.
+#   3. ONE ARM. cell6 and cell7 must not appear in the same parallel
+#      block until their reach overlap has been measured (GAP-8).
+#   4. POST /v1/stop does stop this: the route holds no lock while the
+#      program runs, and the cell issues ProgramStop before StopMotion
+#      (spec section 6.3). Measure it — see the note at the end.
+#   5. What a pass here does NOT mean: the cell never reads the script,
+#      so it has no expected end pose. `completed: true` means the
+#      controller returned to state 1 with no latched fault and the
+#      encoder answered afterwards (spec section 6.4). If this program's
+#      end pose matters, assert on `prog.joints_deg` yourself.
+#
+# Run it as: dry run -> real step_mode -> real.
+#   python -m orchestrator validate scenarios/demo_arm_program.yaml
+#   python -m orchestrator run scenarios/demo_arm_program.yaml --step-mode
+#   python -m orchestrator run scenarios/demo_arm_program.yaml
+
+# ── Running this scenario ───────────────────────────────────────────────
+#
+# 1. Start cell6's server and leave it up. `--cell` is not needed: the
+#    shape is inferred from the config's [arm] table.
+#
+#      conda activate sdl
+#      cd ~/workspace/InnoCOREServer/InnoCORESDL_Sungwoo
+#      python -m server --config server/nuc2/cell6.toml
+#
+#    Port 17064. cell6 = FR5 arm, synthesis stage.
+#
+# 2. Confirm the program name before you run anything. The names live on
+#    the controller, not in this repo, so read them off it — stop the
+#    cell server first, since the session has one owner:
+#
+#      python claude_test/probe_arm_lua.py --ip 192.168.0.58 \
+#          --robot-id fr5_a
+#
+#    That script is read-only: getters only, no Mode(), no ProgramLoad,
+#    no ProgramRun, nothing moves. Put the name you find in
+#    `allowed_programs` in server/nuc2/cell6.toml as well — an empty
+#    allow-list permits any .lua on the controller.
+#
+# 3. Check the server sees the arm BEFORE any motion:
+#
+#      curl -s localhost:17064/v1/diagnose | python3 -m json.tool
+#
+#    `program.running` must be false and `arm.ready` must be true.
+#
+# 4. Register cell6 in orchestrator/config.toml (uncommented):
+#
+#      [cells.cell6]
+#      base_url = "http://127.0.0.1:17064"
+#
+# 5. Dry run, then the real run. A runlog lands in `runs/<UTC>-<name>/`.
+#
+# ──────────────────────────────────────────────────────────────────────────
+
+name: demo_arm_program
+description: >
+  L2 runs one Lua job program on cell6's FR5 controller. The orchestrator
+  checks the arm is reachable and unfaulted, energises it, hands the
+  program name to L1, and reads the arm back afterwards. The controller
+  does the motion planning; this side only starts it and watches.
+
+params:
+  # The program to run. Chosen by the operator, 2026-08-11: Test1.lua is
+  # the short program already taught on cell6 through the WebApp, and it
+  # is the acceptance test of docs/SPEC_ARM_LUA_PROGRAM.md.
+  #
+  # CAPITAL T. GetLuaList() on this controller the same day returned
+  # test.lua, example.lua, new_pr.lua, SimpleLoadIdentify.lua,
+  # Test0902.lua, Test1.lua, test2.lua — there is no lowercase
+  # test1.lua, and ProgramLoad takes the name literally.
+  #
+  # It is a bare file name on purpose. The cell resolves it under its
+  # configured program_dir (/fruser) and refuses anything containing a
+  # path separator, so a scenario cannot steer ProgramLoad elsewhere.
+  program: "Test1.lua"
+
+defaults:
+  on_fail: abort        # a motion step must never be retried blindly
+  timeout_s: 30.0
+
+steps:
+  - id: check_arm
+    cell: cell6
+    action: diagnose
+    method: GET
+    save_as: diag
+
+  # `ok` is "can we talk to it"; `ready` is "will it accept a move". The
+  # arm answered every read on 2026-08-11 while holding a latched fault
+  # and refusing MoveJ with SDK error 154, so both are checked. The
+  # program block also confirms nothing is already running — diagnose
+  # does not probe the controller while a program is in flight.
+  - id: assert_ready
+    assert: "${diag.arm.ok} == True and ${diag.program.running} == False"
+
+  - id: assert_unfaulted
+    assert: "${diag.arm.ready} == True"
+
+  # No motion, but holding torque comes on. Separate step because it is
+  # the one that DISCARDS the fault codes — the response carries what
+  # they were, and the runlog keeps them.
+  - id: enable
+    cell: cell6
+    action: arm/enable
+    save_as: en
+
+  - id: assert_enabled
+    assert: "${en.fault_cleared} == True"
+
+  # MOTION. First hazardous step, so the operator confirmation lands
+  # here. Mode(0) -> ProgramLoad(/fruser/Test1.lua) -> ProgramRun, then
+  # the cell polls GetProgramState until the controller reports stopped.
+  - id: run
+    cell: cell6
+    action: arm/program
+    body:
+      name: "${params.program}"
+    # Above the cell's own max_program_s (300 s) so the CELL's timeout is
+    # the one that fires: it issues ProgramStop, where an L2 timeout would
+    # only drop the connection and leave the controller executing.
+    timeout_s: 360.0
+    save_as: prog
+
+  # `completed` is the weaker claim described in the safety note above.
+  # `last_line` advancing is the evidence that the controller actually
+  # executed the script rather than accepting and idling — the same
+  # distinction LearnedPatterns #33 draws between commanded and measured.
+  - id: assert_done
+    assert: "${prog.completed} == True"
+
+  - id: assert_progressed
+    assert: "${prog.last_line} > 0"
+
+  # A 200 already means the encoder was re-read. This reads it again
+  # through a different route, so the verdict does not rest on one
+  # reading (LearnedPatterns #34).
+  - id: read_back
+    cell: cell6
+    action: status
+    method: GET
+    timeout_s: 15.0
+    save_as: post
+
+  - id: assert_idle_after
+    assert: "${post.busy} == False"
+
+# After a clean pass, measure the stop separately (spec T2 step 2): start
+# the program again with curl and POST /v1/stop while it runs. Expect a
+# response within 2 s, the arm stopped, `program: "stopped"` in the
+# detail, and status readable afterwards. Record the numbers in
+# docs/L1_AUDIT.md — this cell is meant to be the counter-example to
+# GAP-9, not another instance of it.

@@ -1,0 +1,173 @@
+# T2 of docs/SPEC_ARM_LUA_PROGRAM.md, against `Task1.lua` instead of the
+# acceptance program: L2 runs a `.lua` job program that already lives on
+# cell6's FR5 controller, over HTTP /v1 only.
+#
+# A copy of demo_arm_program.yaml with the program name changed. That
+# file stays as the record of the 2026-08-11 acceptance run against
+# `Test1.lua`; this one is the synthesis-stage program the bench actually
+# wants to run. Everything else — the step shape, the asserts, the safety
+# notes — is unchanged, because none of it depends on which program runs.
+#
+# The controller's own interpreter and planner execute the program; this
+# side only says "go" and watches.
+#
+# WHAT IS KNOWN ABOUT Task1.lua, and what is not:
+#   * It is on the controller. `GetLuaList()` on 2026-08-13 returned nine
+#     programs, `Task1.lua` among them, and `GetLoadedProgram()` already
+#     reported `/fruser/Task1.lua` — the operator exported this file FROM
+#     the controller, so the copy and the original are the same artifact.
+#   * The operator has run its motion from the WebApp. That is the
+#     precondition safety note 2 asks for.
+#   * It is 31 lines and loops **three times** (`while loop1 < 3`), moving
+#     at 100 % on every PTP but one. Test1.lua, for comparison, ran 23.8 s
+#     to `last_line` 18 in a single pass. Expect this one to take longer;
+#     if it exceeds the cell's `max_program_s` (300 s) the CELL stops it.
+#   * Its ten taught points (Home_Pos, check_point_1..5, Grasp_pose,
+#     final_point2, hold_out, return) all exist in cell6's point table,
+#     checked against the WebApp on 2026-08-13. They are NOT in the .lua
+#     file — the script names them and the controller resolves them, so a
+#     point renamed on the pendant silently changes where the arm goes.
+#   * `return` is a Lua reserved word, and this script uses it as a point
+#     name. Standard Lua would reject it; this controller does not, which
+#     is measured rather than assumed — the file was exported from the
+#     controller and its motion has run. Do not "fix" it.
+#   * Its reach spans roughly X -429..+82 and Y 146..763 mm, and rises to
+#     Z 405 mm. That is a wide sweep. Whether it overlaps a gantry cell's
+#     frame has NOT been measured — see safety note 3.
+#
+# SAFETY (spec section 8):
+#   1. READ THIS ONE FIRST. Running a job program is motion the L1 server
+#      cannot bound. The program's first PTP/MoveJ goes from WHEREVER THE
+#      ARM IS to a point taught inside a script nothing here reads, at
+#      whatever speed the script asks for. Clear the frame, know what the
+#      program does, keep the e-stop in hand.
+#      `arm/` is in the orchestrator's hazard_prefixes, so the run step
+#      waits for a console confirmation.
+#   2. The program must have been run from the teach pendant / WebApp on
+#      this arm before. This scenario is not the place to try an unproven
+#      program, and it is not the place to try a long one.
+#   3. ONE ARM, AND NO GANTRY EITHER. cell6 and cell7 must not appear in
+#      the same parallel block until their reach overlap has been
+#      measured (GAP-8). The same applies to this arm and cell1/2/3: the
+#      L2 lock is per cell and models no shared workspace, so putting a
+#      gantry in a parallel block with this program is exactly the
+#      collision GAP-8 describes. Sequential only, until measured.
+#   4. POST /v1/stop does stop this: the route holds no lock while the
+#      program runs, and the cell issues ProgramStop before StopMotion
+#      (spec section 6.3). On cell6 the SDK's own safety-stop check reads
+#      a stream this controller does not serve (LearnedPatterns #40), so
+#      the HARDWARE e-stop button remains the stop that counts.
+#   5. What a pass here does NOT mean: the cell never reads the script,
+#      so it has no expected end pose. `completed: true` means the
+#      controller returned to state 1 with no latched fault and the
+#      encoder answered afterwards (spec section 6.4). If this program's
+#      end pose matters, assert on `prog.joints_deg` yourself.
+#
+# BEFORE THE FIRST RUN: `allowed_programs` in server/nuc2/cell6.toml must
+# contain "Task1.lua", and cell6's server must have been restarted since
+# that edit — the allow-list is read at startup. Without it the run fails
+# with 400 before anything moves. `GET /v1/diagnose` reports the live
+# list as `program.allowed`; check it there rather than in the file.
+#
+# Run it as: dry run -> real step_mode -> real.
+#   python -m orchestrator validate scenarios/test_arm_program_cell6_task1_shinyeong.yaml
+#   python -m orchestrator run scenarios/test_arm_program_cell6_task1_shinyeong.yaml --step-mode
+#   python -m orchestrator run scenarios/test_arm_program_cell6_task1_shinyeong.yaml
+
+name: test_arm_program_cell6_task1_shinyeong
+description: >
+  L2 runs the Task1 Lua job program on cell6's FR5 controller. The
+  orchestrator checks the arm is reachable and unfaulted, energises it,
+  hands the program name to L1, and reads the arm back afterwards. The
+  controller does the motion planning; this side only starts it and
+  watches.
+
+params:
+  # Measured off the controller on 2026-08-13 with
+  # claude_test/probe_arm_lua.py (read-only, no motion):
+  #   test.lua, example.lua, new_pr.lua, SimpleLoadIdentify.lua,
+  #   Test0902.lua, Test1.lua, test2.lua, demo1.lua, Task1.lua
+  # Capital T, digit 1 — `ProgramLoad` takes the name literally, and
+  # there is no lowercase task1.lua on this arm.
+  #
+  # It is a bare file name on purpose. The cell resolves it under its
+  # configured program_dir (/fruser) and refuses anything containing a
+  # path separator, so a scenario cannot steer ProgramLoad elsewhere.
+  program: "Task1.lua"
+
+defaults:
+  on_fail: abort        # a motion step must never be retried blindly
+  timeout_s: 30.0
+
+steps:
+  - id: check_arm
+    cell: cell6
+    action: diagnose
+    method: GET
+    save_as: diag
+
+  # `ok` is "can we talk to it"; `ready` is "will it accept a move". The
+  # arm answered every read on 2026-08-11 while holding a latched fault
+  # and refusing MoveJ with SDK error 154, so both are checked. The
+  # program block also confirms nothing is already running — diagnose
+  # does not probe the controller while a program is in flight.
+  - id: assert_ready
+    assert: "${diag.arm.ok} == True and ${diag.program.running} == False"
+
+  - id: assert_unfaulted
+    assert: "${diag.arm.ready} == True"
+
+  # No motion, but holding torque comes on. Separate step because it is
+  # the one that DISCARDS the fault codes — the response carries what
+  # they were, and the runlog keeps them.
+  - id: enable
+    cell: cell6
+    action: arm/enable
+    save_as: en
+
+  - id: assert_enabled
+    assert: "${en.fault_cleared} == True"
+
+  # MOTION. First hazardous step, so the operator confirmation lands
+  # here. Mode(0) -> ProgramLoad(/fruser/Task1.lua) -> ProgramRun, then
+  # the cell polls GetProgramState until the controller reports stopped.
+  - id: run
+    cell: cell6
+    action: arm/program
+    body:
+      name: "${params.program}"
+    # Above the cell's own max_program_s (300 s) so the CELL's timeout is
+    # the one that fires: it issues ProgramStop, where an L2 timeout would
+    # only drop the connection and leave the controller executing.
+    timeout_s: 360.0
+    save_as: prog
+
+  # `completed` is the weaker claim described in the safety note above.
+  # `last_line` advancing is the evidence that the controller actually
+  # executed the script rather than accepting and idling — the same
+  # distinction LearnedPatterns #33 draws between commanded and measured.
+  - id: assert_done
+    assert: "${prog.completed} == True"
+
+  - id: assert_progressed
+    assert: "${prog.last_line} > 0"
+
+  # A 200 already means the encoder was re-read. This reads it again
+  # through a different route, so the verdict does not rest on one
+  # reading (LearnedPatterns #34).
+  - id: read_back
+    cell: cell6
+    action: status
+    method: GET
+    timeout_s: 15.0
+    save_as: post
+
+  - id: assert_idle_after
+    assert: "${post.busy} == False"
+
+# After a clean pass, measure the stop separately (spec T2 step 2): start
+# the program again with curl and POST /v1/stop while it runs. Expect a
+# response within 2 s, the arm stopped, `program: "stopped"` in the
+# detail, and status readable afterwards. Record the numbers in
+# docs/L1_AUDIT.md — this cell is meant to be the counter-example to
+# GAP-9, not another instance of it.

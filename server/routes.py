@@ -20,12 +20,8 @@ from server.schemas import (
     ArmJogRequest,
     ArmJogResponse,
     ArmPrepareResponse,
-    ArmPrefetchRequest,
-    ArmPrefetchResponse,
     ArmProgramRequest,
     ArmProgramResponse,
-    ArmReplayRequest,
-    ArmReplayResponse,
     CycleRequest,
     CycleResponse,
     DiagnoseResponse,
@@ -111,7 +107,7 @@ async def diagnose(request: Request) -> DiagnoseResponse:
         ok_to_initialize=report["ok_to_initialize"],
         # Arm cells only; absent everywhere else.
         arm=report.get("arm"),
-        replay=report.get("replay"),
+        program=report.get("program"),
     )
 
 
@@ -483,26 +479,9 @@ async def lamp_switch(request: Request, body: LampRequest) -> LampResponse:
 
 # ── Arm (FR5) — cell6 / cell7 ────────────────────────────────────────────────
 #
-# Two motion routes, two different executors: /arm/replay streams a
-# recorded episode from this machine, /arm/program hands a .lua job
-# program to the controller and lets its own planner run it.
-
-
-@router.post(
-    "/arm/prefetch",
-    response_model=ArmPrefetchResponse,
-    tags=["Arm"],
-    summary="Download + describe a dataset episode (no motion)",
-)
-async def arm_prefetch(
-    request: Request, body: ArmPrefetchRequest
-) -> ArmPrefetchResponse:
-    cell = _cell(request)
-    async with request.app.state.lock:
-        out = await run_in_threadpool(
-            lambda: cell.prefetch_episode(body.repo_id, body.episode)
-        )
-    return ArmPrefetchResponse(**out)
+# One motion route: /arm/program hands a .lua job program to the
+# controller and lets its own interpreter and planner run it. Plus two
+# commissioning routes, /arm/enable and /arm/jog_joint.
 
 
 @router.post(
@@ -550,37 +529,6 @@ async def arm_jog_joint(
 
 
 @router.post(
-    "/arm/replay",
-    response_model=ArmReplayResponse,
-    tags=["Arm"],
-    summary="Replay a recorded episode on the arm — MOTION",
-)
-async def arm_replay(
-    request: Request, body: ArmReplayRequest
-) -> ArmReplayResponse:
-    """Launch under the lock, then wait *without* it.
-
-    Every other route holds ``app.state.lock`` for its whole device
-    interaction, which is right when a command lasts a second or two. An
-    episode lasts minutes, and holding the lock across it would put
-    ``POST /v1/stop`` in a queue behind the motion it exists to abort —
-    GAP-9 (LearnedPatterns #9), which spec §6.1 forbids this cell to
-    reproduce. So the lock covers validation, the start-pose approach and
-    the subprocess launch; the episode itself plays out unlocked. A
-    second replay submitted meanwhile passes the lock and is refused by
-    the cell with a 409, which is the same answer the lock would have
-    produced.
-    """
-    cell = _cell(request)
-    async with request.app.state.lock:
-        await run_in_threadpool(
-            lambda: cell.start_replay(body.repo_id, body.episode, body.fps)
-        )
-    result = await run_in_threadpool(cell.await_replay)
-    return ArmReplayResponse(**result)
-
-
-@router.post(
     "/arm/program",
     response_model=ArmProgramResponse,
     tags=["Arm"],
@@ -598,9 +546,10 @@ async def arm_program(
     the frame and keep the e-stop in hand — the operator gate is the
     guard, not the code.
 
-    Same asymmetric locking as ``/arm/replay`` and for the same reason:
-    the lock covers validation, load and start, and the program runs
-    unlocked so ``POST /v1/stop`` is not queued behind it (GAP-9).
+    Asymmetric locking on purpose: the lock covers validation, load and
+    start, and the program then runs unlocked, so ``POST /v1/stop`` is
+    not queued behind the motion it exists to abort (GAP-9,
+    LearnedPatterns #9).
     """
     cell = _cell(request)
     async with request.app.state.lock:

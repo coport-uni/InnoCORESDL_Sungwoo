@@ -1,74 +1,60 @@
-"""Real cell6 / cell7: one FR5 robot arm, on two motion paths.
+"""Real cell6 / cell7: one FR5 robot arm, behind the ``Cell`` interface.
 
-Two identical cells, one shape, config apart (spec D1): cell6 is the
+Two identical cells, one shape, config apart: cell6 is the
 **synthesis-stage** arm at 192.168.0.58, cell7 the **analysis-stage** arm
 at 192.168.0.59. One arm per cell process, because the L2 lock is per
 cell and an arm is exactly the unit that must be locked.
 
 ============  =============================================================
-Motion (a)    ``lerobot-replay`` on a recorded HuggingFace dataset episode
-Motion (b)    a ``.lua`` job program already on the controller
+Motion        a ``.lua`` job program already on the controller
 Reads         the fairino XMLRPC SDK (``external/FR5Controller/fairino``)
 ============  =============================================================
 
-The two paths are mutually exclusive and differ in who is doing the work.
-A **replay** keeps this machine in the loop: lerobot streams the episode's
-frames as ``ServoJ`` at 20 Hz, so the PC and the network are load-bearing
-for the whole episode, and only motions someone recorded exist. A **job
-program** is executed by the controller's own interpreter and planner —
-``Mode(0)`` → ``ProgramLoad`` → ``ProgramRun`` and this process is done
-talking; the firmware does the interpolation and blending (see
-``docs/SPEC_ARM_LUA_PROGRAM.md``). The cost is feedback: a replay can be
-checked against the episode's last frame, while a job program is a script
-this cell never reads, so ``await_program`` can only report that it ended
-cleanly — not that it ended anywhere in particular.
-
 The arm action set is deliberately *not* a pose interface (ADDING_A_CELL.md
-"a robot arm is just another action family"): a request names a dataset
-repo and an episode number, or a program file name. Nothing streams a
-pose from L2.
+"a robot arm is just another action family"): a request names a program
+file the controller already holds, and the controller's own interpreter
+and planner execute it — ``Mode(0)`` → ``ProgramLoad`` → ``ProgramRun``,
+and this process is done talking. Nothing streams a pose from L2. Design:
+``docs/SPEC_ARM_LUA_PROGRAM.md``.
 
-Four properties of this cell that are not obvious from the interface:
+There was a second motion path here until 2026-08-11: ``lerobot-replay``
+streaming a recorded dataset episode as ``ServoJ`` frames at 20 Hz. It
+worked and was removed anyway — it kept this machine inside the arm's
+real-time loop and could only express motions somebody had recorded.
+``LearnedPatterns.md`` #47 has the full reasoning and, more usefully,
+what it was *better* at; ``docs/SPEC_ARM_REPLAY_CELL.md`` keeps the
+design. Both matter if VLA policy rollouts come back into scope, because
+a learned policy emits poses continuously and cannot be pre-loaded onto a
+controller.
 
-- **The replay runs in another conda env, as a subprocess** (spec D3).
-  lerobot drags in torch; the SDL venv must not. The subprocess is also
-  what makes ``stop()`` real — killing a process stops the ServoJ stream
-  in a way no in-process flag could.
-- **The SDK session is handed over, not shared** (spec Q1). The lerobot
-  follower's ``connect()`` runs ``RobotEnable(0) → ResetAllError →
-  RobotEnable(1) → Mode(0) → ServoMoveStart``, an exclusive control
-  session. So the cell drops its own RPC before spawning the subprocess
-  and rebuilds it afterwards, and ``status()`` answers from the last
-  reading — never the wire — while a replay is in flight.
-- **Replay is two calls, not one** (``start_replay`` + ``await_replay``).
-  The server holds one lock per command; a single blocking call would
-  hold it for the whole episode and ``POST /v1/stop`` would queue behind
-  the motion it is meant to abort. That is GAP-9 (LearnedPatterns #9),
-  and spec §6.1 says reproducing it here is a defect. The route takes the
-  lock only for the launch and waits outside it.
-- **A 200 means the encoder was read.** ``await_replay`` re-reads the
-  joints from the SDK after the subprocess exits and reports the error
-  against the episode's last recorded frame. LearnedPatterns #24: the
-  gantry once reported the position it was asked for, not the one it
-  reached.
+Three properties of this cell that are not obvious from the interface:
+
+- **A job program is two calls, not one** (``start_program`` +
+  ``await_program``). The server holds one lock per command; a single
+  blocking call would hold it for the whole program and ``POST /v1/stop``
+  would queue behind the motion it is meant to abort. That is GAP-9
+  (LearnedPatterns #9). The route takes the lock only for the launch and
+  waits outside it.
+- **Starting is not the same event as being started.** ``ProgramRun``
+  answers on acceptance; the controller enters the running state ~160 ms
+  later. Polling inside that window reads the pre-start idle as
+  "finished" — which it once did, answering a 200 in 2.8 ms for a motion
+  that then swung joint 1 through 91 degrees (LearnedPatterns #46).
+- **A 200 means the encoder was read**, and no more than that. The cell
+  never reads the script, so it has no expected end pose and does not
+  claim the arm arrived anywhere (spec §6.4).
 
 Hardware-verified at the bench, not in CI. The unit tests in
-``claude_test/test_arm_replay_cell.py`` drive fakes.
+``claude_test/test_arm_cell.py`` drive fakes.
 """
 
 from __future__ import annotations
 
-import json
-import os
-import shlex
-import signal
-import subprocess
 import sys
 import threading
 import time
 import xmlrpc.client
-from dataclasses import dataclass, field
-from pathlib import Path
+from dataclasses import dataclass
 
 from .cell_protocol import (
     Cell,
@@ -79,28 +65,9 @@ from .cell_protocol import (
     WrongStateError,
 )
 
-#: Joints on an FR5. The dataset's action vector may carry a gripper
-#: channel after these; only the revolute joints are compared.
+#: Revolute joints on an FR5. The gripper is a separate channel and is
+#: not one of these.
 JOINT_COUNT = 6
-
-#: How far past ``final_pose_tolerance_deg`` the post-replay pose may sit
-#: before the cell calls it a fault rather than a miss. The tolerance
-#: itself is a *scenario* judgement (spec §5) — the response carries the
-#: number and the scenario asserts on it. This is the separate, much
-#: looser "the arm is not where the episode ended at all" line.
-POSE_RUNAWAY_FACTOR = 10.0
-
-#: Grace period between SIGTERM and SIGKILL on the replay subprocess
-#: (spec §6.1). Long enough for lerobot's ``finally: robot.disconnect()``
-#: to run, short enough that ``POST /v1/stop`` answers inside its 2 s
-#: acceptance bound.
-TERMINATE_GRACE_S = 2.0
-
-#: Timeout for the dataset metadata probe. It may download, so this is
-#: generous; it is deliberately NOT part of the replay timeout (spec D7
-#: splits prefetch from motion so a slow network cannot look like a
-#: stalled arm).
-PROBE_TIMEOUT_S = 1800.0
 
 #: fairino SDK error code meaning "OK".
 _SDK_OK = 0
@@ -108,25 +75,10 @@ _SDK_OK = 0
 #: ``flag`` for the controller's joint read: 1 = non-blocking.
 _JOINT_READ_NONBLOCKING = 1
 
-#: How far the arm may be from an episode's first frame and still have
-#: the cell drive it there itself (spec §6.2 step 4). Beyond this the
-#: request is refused instead, because the "approach" would be a large
-#: simultaneous multi-joint swing that nobody asked for by name.
-#:
-#: Measured 2026-08-11, and this is why the cap exists: with the arm
-#: parked where the bench left it, the gap to episode 10 of
-#: FR5_task3_turn_the_sliver_air_valve… was **97.2 deg** — joint 6 at
-#: -98.1 against a first frame of -1.0. A `POST /v1/arm/replay` would
-#: have answered by rotating the wrist through a right angle and more
-#: before the episode began. Same lesson as LearnedPatterns #39 on the
-#: linear rail: bound the *commanded travel*, and make the operator
-#: place the mechanism near its start.
-MAX_START_APPROACH_DEG = 30.0
-
 #: Hard ceiling on one ``arm/jog_joint`` step, degrees. The spec's arm
-#: action set is replay-only (D8) and the +10 deg acceptance test was
-#: meant to stay a bench script; running it from a scenario instead
-#: needs a route, so this is the narrowest one that does the job — ONE
+#: action set is program-only and the +10 deg acceptance test was meant
+#: to stay a bench script; running it from a scenario instead needs a
+#: route, so this is the narrowest one that does the job — ONE
 #: joint, a RELATIVE step, and a cap no request can raise. It is not a
 #: pose interface and must not grow into one: a caller cannot express
 #: "go to this configuration", only "nudge this axis a little".
@@ -171,109 +123,66 @@ DEFAULT_PROGRAM_DIR = "/fruser"
 #: Extension a job program must have for ``arm/program`` to accept it.
 PROGRAM_SUFFIX = ".lua"
 
+#: How long ``start_program`` waits for the controller to actually enter
+#: the running state before calling the start a failure.
+#:
+#: ``ProgramRun()`` answers on acceptance, not on entry — the same
+#: distinction as MoveJ (``JOG_SETTLE_S``). Measured on cell6
+#: 2026-08-11 with ``/fruser/Test1.lua``: the call returned 0 at t+0.001 s
+#: with the state still 1, and the state flipped to 2 at **t+0.160 s**.
+#: Without this wait the first poll saw "stopped", concluded the program
+#: had finished, and answered 200 in 2.8 ms — while the arm then swung
+#: joint 1 through 91.3 degrees. That is LearnedPatterns #24 exactly: a
+#: success reported for something that had not happened yet. 5 s is ~30x
+#: the measured latency.
+PROGRAM_START_GRACE_S = 5.0
+
+#: Poll interval while waiting for the start, kept well under the
+#: measured 160 ms so the transition is not stepped over.
+PROGRAM_START_POLL_S = 0.05
+
 #: Seconds to let a jog settle before re-reading. MoveJ answers on
 #: acceptance, not on arrival, so a read taken immediately after it
 #: reports the pose the arm is leaving (LearnedPatterns #24's shape).
 JOG_SETTLE_S = 2.0
 
-#: Reads a lerobot dataset's metadata without importing lerobot into this
-#: process (spec D3). Runs under the lerobot conda env; prints one JSON
-#: object on stdout. argv: repo_id, episode, root ("" for the HF cache),
-#: offline ("1" forbids a download).
-META_PROBE_PY = r"""
-import json
-import sys
-from pathlib import Path
-
-repo_id, episode, root, offline = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
-
-from lerobot.utils.constants import HF_LEROBOT_HOME
-
-local = Path(root) if root else HF_LEROBOT_HOME / repo_id
-cached = (local / "meta").is_dir()
-if offline == "1" and not cached:
-    print(json.dumps({"cached": False}))
-    raise SystemExit(0)
-
-from lerobot.datasets.dataset_metadata import LeRobotDatasetMetadata
-from lerobot.datasets.lerobot_dataset import LeRobotDataset
-from lerobot.utils.constants import ACTION
-
-meta = LeRobotDatasetMetadata(repo_id, root=root or None)
-total = int(meta.total_episodes)
-if not 0 <= episode < total:
-    print(json.dumps({"cached": True, "total_episodes": total}))
-    raise SystemExit(0)
-
-ds = LeRobotDataset(repo_id, root=root or None, episodes=[episode])
-rows = ds.hf_dataset.filter(lambda x: x["episode_index"] == episode)
-names = ds.features[ACTION]["names"]
-keep = [i for i, n in enumerate(names) if n.lower().startswith("joint")]
-first = [float(rows[0][ACTION][i]) for i in keep]
-last = [float(rows[len(rows) - 1][ACTION][i]) for i in keep]
-print(json.dumps({
-    "cached": True,
-    "total_episodes": total,
-    "frames": int(len(rows)),
-    "fps": int(ds.fps),
-    "first_action_deg": first,
-    "last_action_deg": last,
-}))
-"""
-
 
 @dataclass(frozen=True, slots=True)
-class ArmReplayConfig:
+class ArmConfig:
     """Bench wiring for one arm (loaded from the cell6/cell7 TOML)."""
 
-    #: Identifier written into logs, runlogs and ``--robot.id``.
+    #: Identifier written into logs and runlogs.
     robot_id: str = "fr5_a"
     #: The controller's address. Fixed network asset, so no VID:PID rule.
-    #: cell6 and cell7 MUST differ (spec §8.3): teach-pendant work, not
-    #: something a second process can detect.
+    #: cell6 and cell7 MUST differ: teach-pendant work, not something a
+    #: second process can detect.
     ip_address: str = "192.168.0.58"
     gripper_enabled: bool = True
-    # ── the lerobot side (spec D3: its own env, never installed here) ──
-    conda_sh: str = "/home/inno-controller/anaconda3/etc/profile.d/conda.sh"
-    conda_env: str = "lerobot"
-    lerobot_root: str = "external/FR5ControllerVLA"
-    #: ``--dataset.root``. Empty means the HuggingFace cache, which is
-    #: what an orchestrated run should use; ``6__replay.sh`` pins a local
-    #: directory instead and this reproduces that when a bench needs it.
-    dataset_root: str = ""
-    # ── what a request is allowed to ask for ──────────────────────────
-    #: Spec D6. A dataset outside these prefixes is not replayed: an
-    #: arbitrary episode off the internet is physical motion here.
-    allowed_repo_prefixes: tuple[str, ...] = ("coport-uni/",)
-    #: ``HF_HOME`` for the subprocesses; empty leaves the default.
-    cache_dir: str = ""
-    #: Refuse to replay anything not already downloaded.
-    offline_only: bool = False
     # ── motion envelope ───────────────────────────────────────────────
-    max_replay_s: float = 300.0
-    replay_timeout_factor: float = 1.5
-    start_pose_tolerance_deg: float = 2.0
-    final_pose_tolerance_deg: float = 1.0
-    #: MoveJ velocity for the start-pose approach and for smoke_arm.py.
+    #: MoveJ velocity for a commissioning jog and for smoke_arm.py.
     jog_speed_pct: float = 10.0
-    # ── the Lua job-program side (the second motion path) ─────────────
+    # ── the Lua job-program path ──────────────────────────────────────
     #: Where the controller keeps its ``.lua`` job programs.
     program_dir: str = DEFAULT_PROGRAM_DIR
     #: Same gate as ``allowed_repo_prefixes``, for programs. Empty means
     #: any ``*.lua`` on the controller; naming them here narrows a
     #: motion-bearing request to a reviewed list.
     allowed_programs: tuple[str, ...] = ()
-    #: Timeout for one program run. Unlike a replay this cannot be
-    #: derived — the cell does not read the script, so it has no frames
-    #: and no fps to compute from.
+    #: Timeout for one program run. It cannot be derived — the cell
+    #: does not read the script, so there is nothing to compute from.
     max_program_s: float = 300.0
     #: How often ``await_program`` asks the controller whether it is
     #: still running.
     program_poll_s: float = 0.5
 
     @classmethod
-    def from_toml(cls, table: dict) -> ArmReplayConfig:
+    def from_toml(cls, table: dict) -> ArmConfig:
         """Build a config from the ``[arm]`` table of a cell TOML.
+
+        Unknown keys are ignored rather than rejected, which matters on a
+        bench mid-migration: a cell6.toml still carrying the removed
+        replay keys (``conda_env``, ``max_replay_s``, …) starts instead of
+        refusing to.
 
         Args:
             table: The parsed ``[arm]`` table.
@@ -281,32 +190,12 @@ class ArmReplayConfig:
         Returns:
             The config, with every field coerced to its declared type —
             TOML gives ``300`` for a float field as an int otherwise, and
-            T0-1 asserts on the types.
+            the config test asserts on the types.
         """
-        prefixes = table.get("allowed_repo_prefixes", ("coport-uni/",))
         return cls(
             robot_id=str(table.get("robot_id", "fr5_a")),
             ip_address=str(table.get("ip_address", "192.168.0.58")),
             gripper_enabled=bool(table.get("gripper_enabled", True)),
-            conda_sh=str(table.get("conda_sh", cls.conda_sh)),
-            conda_env=str(table.get("conda_env", "lerobot")),
-            lerobot_root=str(
-                table.get("lerobot_root", "external/FR5ControllerVLA")
-            ),
-            dataset_root=str(table.get("dataset_root", "")),
-            allowed_repo_prefixes=tuple(str(p) for p in prefixes),
-            cache_dir=str(table.get("cache_dir", "")),
-            offline_only=bool(table.get("offline_only", False)),
-            max_replay_s=float(table.get("max_replay_s", 300.0)),
-            replay_timeout_factor=float(
-                table.get("replay_timeout_factor", 1.5)
-            ),
-            start_pose_tolerance_deg=float(
-                table.get("start_pose_tolerance_deg", 2.0)
-            ),
-            final_pose_tolerance_deg=float(
-                table.get("final_pose_tolerance_deg", 1.0)
-            ),
             jog_speed_pct=float(table.get("jog_speed_pct", 10.0)),
             program_dir=str(
                 table.get("program_dir", DEFAULT_PROGRAM_DIR)
@@ -317,196 +206,6 @@ class ArmReplayConfig:
             max_program_s=float(table.get("max_program_s", 300.0)),
             program_poll_s=float(table.get("program_poll_s", 0.5)),
         )
-
-
-def replay_timeout_s(
-    frames: int, fps: int, *, factor: float, ceiling: float
-) -> float:
-    """Seconds to allow the replay subprocess (spec §6.2 step 3).
-
-    Args:
-        frames: Frames in the episode.
-        fps: Frames per second the episode was recorded at.
-        factor: Slack multiplier over the nominal duration.
-        ceiling: ``max_replay_s`` — the absolute upper bound.
-
-    Returns:
-        ``min(frames / fps * factor, ceiling)``.
-
-    Raises:
-        InvalidArgError: ``fps`` is not positive.
-    """
-    if fps <= 0:
-        raise InvalidArgError(f"fps must be positive, got {fps}", command="arm")
-    return min(frames / fps * factor, ceiling)
-
-
-def build_replay_argv(
-    config: ArmReplayConfig, *, repo_id: str, episode: int, fps: int
-) -> list[str]:
-    """Assemble the ``lerobot-replay`` argv (spec §6.2 step 5).
-
-    Same argument series as ``FR5ControllerVLA/6__replay.sh``, which is
-    the only invocation known to have replayed on this hardware.
-
-    Args:
-        config: This cell's arm config.
-        repo_id: HuggingFace dataset id.
-        episode: Episode index within the dataset.
-        fps: Replay rate; always the recorded rate (spec D5).
-
-    Returns:
-        The argv, ``lerobot-replay`` first.
-    """
-    argv = [
-        "lerobot-replay",
-        "--robot.type=fairino_follower",
-        f"--robot.ip_address={config.ip_address}",
-        # Lower-case: draccus parses the literal, and "False" is not it.
-        f"--robot.gripper_enabled={str(config.gripper_enabled).lower()}",
-        f"--robot.id={config.robot_id}",
-    ]
-    if config.dataset_root:
-        argv.append(f"--dataset.root={config.dataset_root}")
-    argv += [
-        f"--dataset.repo_id={repo_id}",
-        f"--dataset.episode={episode}",
-        f"--dataset.fps={fps}",
-    ]
-    return argv
-
-
-def build_conda_command(config: ArmReplayConfig, argv: list[str]) -> list[str]:
-    """Wrap ``argv`` in the lerobot conda env (spec D3).
-
-    ``exec`` matters: without it the process the cell holds is bash, and
-    a SIGTERM would kill the shell while the replay kept streaming.
-
-    Args:
-        config: This cell's arm config.
-        argv: The command to run inside the env.
-
-    Returns:
-        A ``bash -lc`` argv.
-    """
-    inner = " ".join(shlex.quote(a) for a in argv)
-    script = (
-        f"source {shlex.quote(config.conda_sh)} && "
-        f"conda activate {shlex.quote(config.conda_env)} && "
-        f"exec {inner}"
-    )
-    return ["bash", "-lc", script]
-
-
-class LerobotRunner:
-    """Runs lerobot in its own conda env, as a child process group.
-
-    Split out of the cell so the unit tests can replace it wholesale:
-    everything that needs conda, the network, or a real PID lives here.
-    """
-
-    def __init__(self, config: ArmReplayConfig) -> None:
-        self._cfg = config
-
-    def _env(self) -> dict[str, str]:
-        env = dict(os.environ)
-        if self._cfg.cache_dir:
-            env["HF_HOME"] = self._cfg.cache_dir
-        if self._cfg.offline_only:
-            env["HF_HUB_OFFLINE"] = "1"
-        return env
-
-    def probe(self, repo_id: str, episode: int) -> dict:
-        """Read the dataset's metadata, downloading it if allowed.
-
-        Args:
-            repo_id: HuggingFace dataset id.
-            episode: Episode index to describe.
-
-        Returns:
-            ``cached``, and — when the episode exists — ``total_episodes``,
-            ``frames``, ``fps``, ``first_action_deg``, ``last_action_deg``.
-
-        Raises:
-            TransportError: The probe failed (network, HF auth, a broken
-                lerobot env). Prefetch is the network step, so a failure
-                here is a 503, never a 500.
-            CellTimeoutError: The probe outlived ``PROBE_TIMEOUT_S``.
-        """
-        argv = [
-            "python",
-            "-c",
-            META_PROBE_PY,
-            repo_id,
-            str(episode),
-            self._cfg.dataset_root,
-            "1" if self._cfg.offline_only else "0",
-        ]
-        try:
-            done = subprocess.run(
-                build_conda_command(self._cfg, argv),
-                cwd=self._cfg.lerobot_root,
-                env=self._env(),
-                capture_output=True,
-                text=True,
-                timeout=PROBE_TIMEOUT_S,
-                check=False,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise CellTimeoutError(
-                f"dataset probe timed out after {PROBE_TIMEOUT_S:.0f} s",
-                command="arm/prefetch",
-            ) from exc
-        except OSError as exc:
-            raise TransportError(str(exc), command="arm/prefetch") from exc
-        if done.returncode != _SDK_OK:
-            raise TransportError(
-                f"dataset probe failed (exit {done.returncode}): "
-                f"{done.stderr.strip()[-400:]}",
-                command="arm/prefetch",
-            )
-        # lerobot logs to stdout as well; the probe's JSON is the last
-        # line it prints.
-        for line in reversed(done.stdout.strip().splitlines()):
-            try:
-                return json.loads(line)
-            except json.JSONDecodeError:
-                continue
-        raise TransportError(
-            f"dataset probe printed no JSON: {done.stdout.strip()[-400:]}",
-            command="arm/prefetch",
-        )
-
-    def spawn(self, argv: list[str]) -> subprocess.Popen:
-        """Start the replay in its own session so the group can be killed."""
-        return subprocess.Popen(  # noqa: S603 — argv built from config
-            build_conda_command(self._cfg, argv),
-            cwd=self._cfg.lerobot_root,
-            env=self._env(),
-            start_new_session=True,
-        )
-
-    def terminate(self, proc: subprocess.Popen) -> None:
-        self._signal(proc, signal.SIGTERM)
-
-    def kill(self, proc: subprocess.Popen) -> None:
-        self._signal(proc, signal.SIGKILL)
-
-    @staticmethod
-    def _signal(proc: subprocess.Popen, sig: int) -> None:
-        """Signal the whole process group, falling back to the child.
-
-        ``conda activate`` can leave helpers around the exec'd replay;
-        signalling only the child would orphan them and, worse, leave
-        something that can still write to the controller.
-        """
-        try:
-            os.killpg(os.getpgid(proc.pid), sig)
-        except (ProcessLookupError, PermissionError, OSError):
-            try:
-                proc.send_signal(sig)
-            except (ProcessLookupError, OSError):
-                pass
 
 
 def _no_pump() -> WrongStateError:
@@ -536,19 +235,6 @@ def _no_thermal() -> WrongStateError:
 
 
 @dataclass
-class _Pending:
-    """What a launched replay expects to have happened when it ends."""
-
-    repo_id: str
-    episode: int
-    frames: int
-    fps: int
-    timeout_s: float
-    last_action_deg: list[float] = field(default_factory=list)
-    started_at: float = 0.0
-
-
-@dataclass
 class _ProgramPending:
     """What a launched Lua job program is being waited on for.
 
@@ -560,49 +246,49 @@ class _ProgramPending:
     name: str
     timeout_s: float
     started_at: float = 0.0
+    #: The HIGHEST line seen, not the most recent one. The controller
+    #: resets GetCurrentLine to 0 as the program ends (measured on cell6
+    #: 2026-08-11: … 15, 18, then 0), so the last reading is always 0 and
+    #: reporting it would say "never executed a line" about a program
+    #: that ran for 23 s.
     last_line: int | None = None
 
 
-class ArmReplayCell(Cell):
-    """cell6 / cell7 = one FR5 arm replaying episodes, behind ``Cell``."""
+class ArmCell(Cell):
+    """cell6 / cell7 = one FR5 arm, behind the ``Cell`` interface."""
 
     def __init__(
         self,
         rpc,
-        config: ArmReplayConfig,
+        config: ArmConfig,
         *,
-        runner=None,
         reconnect=None,
     ) -> None:
         self._rpc = rpc
         self._cfg = config
-        self._runner = runner if runner is not None else LerobotRunner(config)
-        # How to rebuild the SDK session after the replay subprocess
-        # released it. Injectable because it is a real TCP connect: a
-        # test that fell through to it would dial the bench arm.
+        # How to rebuild the SDK session if it is ever dropped.
+        # Injectable because it is a real TCP connect: a test that fell
+        # through to it would dial the bench arm.
         self._reconnect = reconnect or (
             lambda: self._connect(self._cfg.ip_address)
         )
-        self._proc = None
-        self._pending: _Pending | None = None
-        self._last_replay: dict | None = None
         #: The Lua job program this cell launched and has not collected.
         self._program: _ProgramPending | None = None
         self._last_program: dict | None = None
         #: Guards the *launch*, not the run. ``stop()`` never takes it —
-        #: it reaches ``self._proc`` directly (spec §6.1).
-        self._replay_lock = threading.Lock()
-        #: Last joints read from the SDK. ``status()`` serves this while
-        #: the subprocess owns the controller (spec Q1).
+        #: it reaches ``self._program`` directly, so an e-stop is not
+        #: queued behind the motion it exists to abort (GAP-9).
+        self._launch_lock = threading.Lock()
+        #: Last joints read from the SDK.
         self._joints_deg: list[float] = [0.0] * JOINT_COUNT
 
     @property
-    def config(self) -> ArmReplayConfig:
+    def config(self) -> ArmConfig:
         return self._cfg
 
     @classmethod
-    def open(cls, config: ArmReplayConfig) -> ArmReplayCell:
-        """Connect to the controller and check the lerobot side exists.
+    def open(cls, config: ArmConfig) -> ArmCell:
+        """Connect to the controller and prove it answers.
 
         Args:
             config: This cell's arm config.
@@ -612,18 +298,9 @@ class ArmReplayCell(Cell):
 
         Raises:
             TransportError: The controller did not answer a joint read,
-                or the configured conda/lerobot paths do not exist. Any
-                of those means the cell cannot do its one job, so the
+                which means the cell cannot do its one job — so the
                 server must fail to start rather than 503 later.
         """
-        for label, path in (
-            ("conda_sh", Path(config.conda_sh)),
-            ("lerobot_root", Path(config.lerobot_root)),
-        ):
-            if not path.exists():
-                raise TransportError(
-                    f"[arm] {label} does not exist: {path}", command="arm"
-                )
         cell = cls(cls._connect(config.ip_address), config)
         # One real read, so a server that started is a server that can
         # see the arm — not one that will find out on the first request.
@@ -650,7 +327,7 @@ class ArmReplayCell(Cell):
         Best effort on purpose: the vendored ``CloseRPC()`` reads
         ``self.thread``, which its ``__init__`` never assigns, so it
         raises ``AttributeError`` every time. Letting that propagate
-        would turn every replay launch into a 500.
+        would turn every session rebuild into a 500.
         """
         rpc, self._rpc = self._rpc, None
         if rpc is None:
@@ -711,20 +388,12 @@ class ArmReplayCell(Cell):
         self._joints_deg = [float(v) for v in result[1 : JOINT_COUNT + 1]]
         return list(self._joints_deg)
 
-    def _replay_running(self) -> bool:
-        proc = self._proc
-        return proc is not None and proc.poll() is None
-
     # ── Discovery ───────────────────────────────────────────────────────
     def diagnose(self) -> dict:
         reachable = True
         detail: str | None = None
         fault: list[int] | None = None
-        if self._replay_running():
-            # Do not probe the controller while the subprocess owns the
-            # servo session; report what the last read said.
-            detail = "replay in flight; not probed"
-        elif self._program_running():
+        if self._program_running():
             detail = "job program in flight; not probed"
         else:
             try:
@@ -752,12 +421,6 @@ class ArmReplayCell(Cell):
                 "ready": reachable and fault == [0, 0],
                 "detail": detail,
             },
-            "replay": {
-                "running": self._replay_running(),
-                "last": self._last_replay,
-                "env": self._cfg.conda_env,
-                "allowed_repo_prefixes": list(self._cfg.allowed_repo_prefixes),
-            },
             "program": {
                 "running": self._program_running(),
                 "name": self._program.name if self._program else None,
@@ -775,70 +438,20 @@ class ArmReplayCell(Cell):
         }
 
     def status(self) -> dict:
-        replaying = self._replay_running()
-        # A Lua program runs *on the controller*, so unlike a replay it
-        # does not hold this process's SDK session — the encoder can be
-        # read right through it, and that is the more useful answer.
-        joints = list(self._joints_deg) if replaying else self._read_joints()
+        # A Lua job program runs *on the controller* and does not hold
+        # this process's SDK session, so the encoder can be read right
+        # through one — joints_deg here is always a live reading.
         return {
             "weight_g": 0.0,  # no balance on an arm cell
             "valve": "-",  # no pump
             "plunger_uL": 0.0,
             "stage_x_mm": None,  # no Cartesian stage; the arm is joints
             "stage_z_mm": None,
-            "busy": replaying or self._program_running(),
+            "busy": self._program_running(),
             "error": None,
-            "joints_deg": joints,
-            "last_replay": self._last_replay,
+            "joints_deg": self._read_joints(),
             "last_program": self._last_program,
         }
-
-    # ── Arm action set ──────────────────────────────────────────────────
-    def _check_repo(self, repo_id: str) -> None:
-        """Spec §6.2 step 1 / D6: the allow-list gate."""
-        if not repo_id.startswith(tuple(self._cfg.allowed_repo_prefixes)):
-            allowed = ", ".join(self._cfg.allowed_repo_prefixes)
-            raise InvalidArgError(
-                f"repo_id {repo_id!r} is outside the allowed prefixes "
-                f"({allowed})",
-                command="arm",
-            )
-
-    def _meta(self, repo_id: str, episode: int) -> dict:
-        """Validate the request against the dataset (spec §6.2 steps 1–2).
-
-        Args:
-            repo_id: HuggingFace dataset id.
-            episode: Episode index.
-
-        Returns:
-            The probe's metadata dict.
-
-        Raises:
-            InvalidArgError: Prefix not allowed, or episode out of range.
-            WrongStateError: ``offline_only`` and the dataset is not
-                cached — a 409, not a 400: the request is well-formed,
-                the bench is just not allowed to fetch it.
-        """
-        self._check_repo(repo_id)
-        meta = self._runner.probe(repo_id, episode)
-        if not meta.get("cached", False):
-            raise WrongStateError(
-                f"{repo_id} is not cached and offline_only is set",
-                command="arm",
-            )
-        total = int(meta.get("total_episodes", 0))
-        # Checked here as well as in the probe: the probe answers "no
-        # frames" for an episode it could not describe, but that is one
-        # bit of information for two different failures, and only the
-        # explicit range check can say which.
-        if not 0 <= episode < total or "frames" not in meta:
-            raise InvalidArgError(
-                f"episode {episode} is out of range; {repo_id} has "
-                f"{total} episode(s)",
-                command="arm",
-            )
-        return meta
 
     def _robot_error(self) -> tuple[int, int]:
         """The controller's latched fault, as ``(main_code, sub_code)``.
@@ -921,8 +534,10 @@ class ArmReplayCell(Cell):
                 survived the reset.
             TransportError: The controller could not be reached.
         """
-        if self._replay_running():
-            raise WrongStateError("a replay owns the controller", command="arm")
+        if self._program_running():
+            raise WrongStateError(
+                "a job program owns the controller", command="arm"
+            )
         before = self._robot_error()
         rpc = self._ensure_rpc()
         # Raw XMLRPC throughout: every one of these wrappers opens with
@@ -1006,7 +621,7 @@ class ArmReplayCell(Cell):
         Raises:
             InvalidArgError: Joint out of range, or the step exceeds the
                 cap.
-            WrongStateError: A replay owns the controller.
+            WrongStateError: A job program owns the controller.
             DeviceFaultError: The controller rejected the motion.
             TransportError: The encoder could not be read before or after.
         """
@@ -1020,9 +635,9 @@ class ArmReplayCell(Cell):
                 f"cap of {MAX_JOG_DEG:.1f} deg",
                 command="arm",
             )
-        if self._replay_running():
+        if self._program_running():
             raise WrongStateError(
-                "a replay owns the controller; POST /v1/stop first",
+                "a job program owns the controller; POST /v1/stop first",
                 command="arm",
             )
         speed = min(
@@ -1051,143 +666,6 @@ class ArmReplayCell(Cell):
             "max_other_axis_delta_deg": max(others) if others else 0.0,
             "joints_deg": after,
         }
-
-    def prefetch_episode(self, repo_id: str, episode: int) -> dict:
-        """Download + describe an episode without moving anything (D7).
-
-        Args:
-            repo_id: HuggingFace dataset id.
-            episode: Episode index.
-
-        Returns:
-            ``cached``, ``frames``, ``fps``, ``duration_s``.
-        """
-        meta = self._meta(repo_id, episode)
-        frames, fps = int(meta["frames"]), int(meta["fps"])
-        return {
-            "cached": True,
-            "frames": frames,
-            "fps": fps,
-            "duration_s": frames / fps if fps else 0.0,
-        }
-
-    def start_replay(
-        self, repo_id: str, episode: int, fps: int | None = None
-    ) -> dict:
-        """Validate, approach the first frame, and launch the replay.
-
-        Returns quickly — the episode plays out under ``await_replay``,
-        which the server calls *without* the command lock so a concurrent
-        ``POST /v1/stop`` is not queued behind the motion (spec §6.1).
-
-        Args:
-            repo_id: HuggingFace dataset id.
-            episode: Episode index.
-            fps: Replay rate. ``None`` adopts the recorded rate; any
-                other value must equal it (spec D5).
-
-        Returns:
-            ``frames``, ``fps``, ``timeout_s``.
-
-        Raises:
-            InvalidArgError: Bad prefix, episode, or fps.
-            WrongStateError: A replay is already running.
-            DeviceFaultError: The start-pose approach was rejected.
-        """
-        if not self._replay_lock.acquire(blocking=False):
-            raise WrongStateError("a replay is already starting", command="arm")
-        try:
-            if self._replay_running():
-                raise WrongStateError(
-                    "a replay is already running; POST /v1/stop first",
-                    command="arm",
-                )
-            if self._program is not None:
-                # A servo session and a job program are two different
-                # owners of the same axes; never both at once.
-                raise WrongStateError(
-                    f"job program {self._program.name} is running; "
-                    "POST /v1/stop first",
-                    command="arm",
-                )
-            meta = self._meta(repo_id, episode)
-            frames, recorded_fps = int(meta["frames"]), int(meta["fps"])
-            if fps is not None and int(fps) != recorded_fps:
-                raise InvalidArgError(
-                    f"fps {fps} does not match the recorded "
-                    f"{recorded_fps}; re-timed replay compresses the "
-                    "ServoJ interval and is refused",
-                    command="arm",
-                )
-            timeout_s = replay_timeout_s(
-                frames,
-                recorded_fps,
-                factor=self._cfg.replay_timeout_factor,
-                ceiling=self._cfg.max_replay_s,
-            )
-            self._approach_start(meta.get("first_action_deg") or [])
-            # The follower's connect() takes an exclusive servo session,
-            # so this process must be off the controller first (Q1).
-            self._release_rpc()
-            argv = build_replay_argv(
-                self._cfg,
-                repo_id=repo_id,
-                episode=episode,
-                fps=recorded_fps,
-            )
-            self._proc = self._runner.spawn(argv)
-            self._pending = _Pending(
-                repo_id=repo_id,
-                episode=episode,
-                frames=frames,
-                fps=recorded_fps,
-                timeout_s=timeout_s,
-                last_action_deg=[
-                    float(v) for v in (meta.get("last_action_deg") or [])
-                ],
-                started_at=time.monotonic(),
-            )
-        finally:
-            self._replay_lock.release()
-        return {"frames": frames, "fps": recorded_fps, "timeout_s": timeout_s}
-
-    def _approach_start(self, first_frame: list[float]) -> None:
-        """MoveJ to the episode's first pose when we are far from it.
-
-        Spec §6.2 step 4. The fork's follower ramps toward each ServoJ
-        target at ``max_servo_speed`` (90 deg/s) rather than refusing a
-        jump, so a replay started from the wrong pose does not fail — it
-        lunges. Hence the tolerance check here.
-
-        Args:
-            first_frame: The episode's first recorded joint vector.
-        """
-        if len(first_frame) < JOINT_COUNT:
-            return
-        target = [float(v) for v in first_frame[:JOINT_COUNT]]
-        self._require_ready()
-        here = self._read_joints()
-        drift = max(abs(a - b) for a, b in zip(here, target))
-        if drift <= self._cfg.start_pose_tolerance_deg:
-            return
-        if drift > MAX_START_APPROACH_DEG:
-            # Refuse rather than swing there. See MAX_START_APPROACH_DEG:
-            # the alternative is a replay request answering with a large
-            # unnamed multi-joint move.
-            worst = max(
-                range(JOINT_COUNT), key=lambda i: abs(here[i] - target[i])
-            )
-            raise WrongStateError(
-                f"the arm is {drift:.1f} deg from this episode's first "
-                f"frame (worst: joint {worst + 1}, {here[worst]:+.1f} vs "
-                f"{target[worst]:+.1f}), over the "
-                f"{MAX_START_APPROACH_DEG:.0f} deg approach limit. Jog it "
-                f"near {[round(v, 1) for v in target]} first — a replay "
-                "must not begin with a large unrequested move.",
-                command="arm",
-            )
-        self._move_j(target)
-        self._joints_deg = list(target)
 
     def _move_j(
         self, target: list[float], *, speed_pct: float | None = None
@@ -1265,127 +743,6 @@ class ArmReplayCell(Cell):
             raise DeviceFaultError(
                 f"MoveJ rejected with SDK error {error}", command="arm"
             )
-
-    def await_replay(self) -> dict:
-        """Wait out the launched replay and verify it on the encoder.
-
-        Args:
-            None.
-
-        Returns:
-            ``completed``, ``frames``, ``elapsed_s``,
-            ``final_joint_error_deg``, ``joints_deg``.
-
-        Raises:
-            WrongStateError: Nothing was launched.
-            CellTimeoutError: The subprocess outlived its timeout; it is
-                killed before this is raised.
-            DeviceFaultError: Non-zero exit, or the arm ended nowhere
-                near the episode's last frame.
-            TransportError: The encoder could not be re-read afterwards —
-                which means the run is unverified, so it is not a 200.
-        """
-        proc, pending = self._proc, self._pending
-        if proc is None or pending is None:
-            raise WrongStateError("no replay in flight", command="arm")
-        try:
-            code = proc.wait(timeout=pending.timeout_s)
-        except subprocess.TimeoutExpired as exc:
-            self._halt_process(proc)
-            self._finish(pending, "timeout")
-            raise CellTimeoutError(
-                f"replay of {pending.repo_id} episode {pending.episode} "
-                f"exceeded {pending.timeout_s:.1f} s",
-                command="arm",
-            ) from exc
-        elapsed = time.monotonic() - pending.started_at
-        self._proc = None
-        if code != _SDK_OK:
-            self._finish(pending, f"exit {code}")
-            raise DeviceFaultError(
-                f"lerobot-replay exited with code {code}", command="arm"
-            )
-        # Spec §6.2 step 7 / LearnedPatterns #24: a 200 has to mean the
-        # encoder was read, not that the command was accepted.
-        joints = self._read_joints()
-        error_deg = self._pose_error(joints, pending.last_action_deg)
-        runaway = POSE_RUNAWAY_FACTOR * self._cfg.final_pose_tolerance_deg
-        if error_deg is not None and error_deg > runaway:
-            self._finish(pending, f"pose error {error_deg:.2f} deg")
-            raise DeviceFaultError(
-                f"replay ended {error_deg:.2f} deg from the episode's last "
-                f"frame (runaway limit {runaway:.2f} deg)",
-                command="arm",
-            )
-        result = {
-            "completed": True,
-            "frames": pending.frames,
-            "fps": pending.fps,
-            "elapsed_s": elapsed,
-            "final_joint_error_deg": error_deg,
-            "joints_deg": joints,
-        }
-        self._finish(pending, "completed", elapsed=elapsed)
-        return result
-
-    @staticmethod
-    def _pose_error(
-        joints: list[float], last_frame: list[float]
-    ) -> float | None:
-        """Largest per-axis gap to the episode's last recorded frame.
-
-        Args:
-            joints: Encoder reading, degrees.
-            last_frame: The episode's last recorded joint vector.
-
-        Returns:
-            The max absolute difference, or None when the dataset did not
-            expose a last frame — reporting 0.0 there would be a
-            fabricated pass.
-        """
-        if len(last_frame) < JOINT_COUNT or len(joints) < JOINT_COUNT:
-            return None
-        return max(
-            abs(a - b)
-            for a, b in zip(joints[:JOINT_COUNT], last_frame[:JOINT_COUNT])
-        )
-
-    def _finish(
-        self, pending: _Pending, outcome: str, *, elapsed: float | None = None
-    ) -> None:
-        self._proc = None
-        self._pending = None
-        self._last_replay = {
-            "repo_id": pending.repo_id,
-            "episode": pending.episode,
-            "frames": pending.frames,
-            "fps": pending.fps,
-            "outcome": outcome,
-            "elapsed_s": elapsed,
-        }
-
-    def _halt_process(self, proc) -> str:
-        """SIGTERM, then SIGKILL after the grace period (spec §6.1).
-
-        Args:
-            proc: The replay subprocess.
-
-        Returns:
-            ``"terminated"``, ``"killed"``, or ``"idle"``.
-        """
-        if proc is None or proc.poll() is not None:
-            return "idle"
-        self._runner.terminate(proc)
-        try:
-            proc.wait(timeout=TERMINATE_GRACE_S)
-            return "terminated"
-        except subprocess.TimeoutExpired:
-            self._runner.kill(proc)
-            try:
-                proc.wait(timeout=TERMINATE_GRACE_S)
-            except subprocess.TimeoutExpired:
-                pass
-            return "killed"
 
     # ── Lua job programs: the controller-side motion path ───────────────
     #
@@ -1492,17 +849,18 @@ class ArmReplayCell(Cell):
     def start_program(self, name: str) -> dict:
         """Load a Lua job program on the controller and start it.
 
-        The counterpart of ``start_replay`` for the *other* motion path:
-        here the controller plans and executes, and this process only
-        says "go". Returns as soon as the program is running; collect it
-        with ``await_program``.
+        The controller plans and executes; this process only says "go".
+        Returns once the controller has actually entered the running
+        state — not when it accepted the command, which is a different
+        moment and the source of a real bug (see ``_confirm_started``).
+        Collect it with ``await_program``.
 
-        **This moves the arm, and the cell cannot bound where.** A replay
-        is checked against its first recorded frame
-        (``MAX_START_APPROACH_DEG``); a Lua program's first ``PTP``/
-        ``MoveJ`` goes from wherever the arm is to a taught point this
-        process never reads, at whatever speed the script asks for. The
-        operator gate and a clear frame are the guard, not this code.
+        **This moves the arm, and the cell cannot bound where.** The
+        program's first ``PTP``/``MoveJ`` goes from wherever the arm is
+        to a taught point this process never reads, at whatever speed the
+        script asks for. Nothing here can check that path, because
+        nothing here parses the script. The operator gate and a clear
+        frame are the guard, not this code.
 
         Args:
             name: Bare program file name on the controller, e.g.
@@ -1513,21 +871,17 @@ class ArmReplayCell(Cell):
 
         Raises:
             InvalidArgError: The name failed ``_check_program``.
-            WrongStateError: A replay or a program is already running, or
-                the controller has a latched fault.
+            WrongStateError: A program is already running, or the
+                controller has a latched fault.
             DeviceFaultError: The controller refused the load or the run,
                 or loaded something other than what was asked for.
             TransportError: The controller could not be reached.
         """
-        if not self._replay_lock.acquire(blocking=False):
+        if not self._launch_lock.acquire(blocking=False):
             raise WrongStateError(
                 "a motion command is already starting", command="arm"
             )
         try:
-            if self._replay_running():
-                raise WrongStateError(
-                    "a replay is running; POST /v1/stop first", command="arm"
-                )
             if self._program is not None:
                 raise WrongStateError(
                     f"program {self._program.name} is already running; "
@@ -1549,18 +903,55 @@ class ArmReplayCell(Cell):
             self._run_sdk(rpc.robot.ProgramLoad, path, what="ProgramLoad")
             self._require_loaded(name, path)
             self._run_sdk(rpc.robot.ProgramRun, what="ProgramRun")
+            started_at = time.monotonic()
+            self._confirm_started(name)
             self._program = _ProgramPending(
                 name=name,
                 timeout_s=float(self._cfg.max_program_s),
-                started_at=time.monotonic(),
+                started_at=started_at,
             )
         finally:
-            self._replay_lock.release()
+            self._launch_lock.release()
         return {
             "name": name,
             "path": path,
             "timeout_s": self._cfg.max_program_s,
         }
+
+    def _confirm_started(self, name: str) -> None:
+        """Block until the controller reports the program running.
+
+        ``ProgramRun()`` returns 0 on acceptance, and the state stays at
+        ``PROGRAM_STOPPED`` for a beat afterwards — 160 ms on cell6,
+        measured. Returning before that beat is what let ``arm/program``
+        answer ``completed: true`` in 2.8 ms and then move the arm 91
+        degrees (see ``PROGRAM_START_GRACE_S``).
+
+        A program shorter than this wait cannot be told apart from one
+        that never started: the controller resets both the state and the
+        line when it finishes, leaving no trace to read afterwards. The
+        cell errs toward reporting a fault rather than a success it
+        cannot evidence (LearnedPatterns #15).
+
+        Args:
+            name: The program, for the error message.
+
+        Raises:
+            DeviceFaultError: The controller accepted ``ProgramRun`` but
+                never left the stopped state.
+            TransportError: The state could not be read.
+        """
+        deadline = time.monotonic() + PROGRAM_START_GRACE_S
+        while time.monotonic() < deadline:
+            if self._program_state() != PROGRAM_STOPPED:
+                return
+            time.sleep(PROGRAM_START_POLL_S)
+        raise DeviceFaultError(
+            f"the controller accepted ProgramRun for {name} but was still "
+            f"stopped {PROGRAM_START_GRACE_S:.1f} s later; it did not run "
+            "(or it finished faster than this cell can observe)",
+            command="arm",
+        )
 
     @staticmethod
     def _run_sdk(call, *args, what: str) -> None:
@@ -1629,7 +1020,7 @@ class ArmReplayCell(Cell):
         """Wait out the running job program and read the arm afterwards.
 
         What a 200 from here does and does not mean is worth stating,
-        because it is weaker than ``await_replay``'s. It means: the
+        because it is weaker than it looks. It means: the
         controller went back to state 1, no fault was latched when it
         did, and the encoder answered afterwards. It does **not** mean
         the arm reached an intended pose — the cell never read the
@@ -1659,7 +1050,11 @@ class ArmReplayCell(Cell):
             raise WrongStateError("no program in flight", command="arm")
         while True:
             state = self._program_state()
-            pending.last_line = self._current_line()
+            line = self._current_line()
+            if line is not None:
+                # Keep the high-water mark, not the reading — see
+                # _ProgramPending.last_line.
+                pending.last_line = max(pending.last_line or 0, line)
             if state == PROGRAM_STOPPED:
                 break
             if time.monotonic() - pending.started_at > pending.timeout_s:
@@ -1805,35 +1200,25 @@ class ArmReplayCell(Cell):
 
     # ── Safety / lifecycle ──────────────────────────────────────────────
     def stop(self) -> dict:
-        """Kill both motion paths, then tell the controller to stop.
+        """Terminate the job program, then tell the controller to stop.
 
-        Reaches ``self._proc`` directly and takes no lock, so it works
-        while a replay is in flight — this cell is meant to be the
+        Reaches ``self._program`` directly and takes no lock, so it works
+        while a program is in flight — this cell is meant to be the
         counter-example to GAP-9, not another instance of it.
 
-        Every step is attempted whatever the others do, and none raises:
-        a partial stop is reported, because the caller of an e-stop needs
-        the answer more than it needs an exception.
+        Both steps are attempted whatever the other does, and neither
+        raises: a partial stop is reported, because the caller of an
+        e-stop needs the answer more than it needs an exception.
 
         Args:
             None.
 
         Returns:
-            ``{"subprocess": ..., "program": ..., "sdk": ...}``, each a
-            short outcome string.
+            ``{"program": ..., "sdk": ...}``, each a short outcome string.
         """
         result: dict[str, str] = {}
-        proc = self._proc
-        try:
-            result["subprocess"] = self._halt_process(proc)
-        except Exception as exc:  # noqa: BLE001 — an e-stop never raises
-            result["subprocess"] = f"failed: {exc}"
-        if self._pending is not None:
-            self._finish(self._pending, "stopped")
-        self._proc = None
-        # Order matters, and for the same reason in both halves: whatever
-        # is issuing motion has to be dead before StopMotion, or the next
-        # ServoJ frame — or the next Lua line — restarts it.
+        # Order matters: whatever is issuing motion has to be dead before
+        # StopMotion, or the next Lua line restarts what it just stopped.
         program = self._program
         result["program"] = (
             self._halt_program() if program is not None else "idle"
@@ -1855,13 +1240,6 @@ class ArmReplayCell(Cell):
         return result
 
     def close(self) -> None:
-        proc = self._proc
-        if proc is not None and proc.poll() is None:
-            try:
-                self._halt_process(proc)
-            except Exception:  # noqa: BLE001 — best-effort shutdown
-                print("warning: replay subprocess kill failed", file=sys.stderr)
-        self._proc = None
         if self._program is not None:
             # A job program outlives this process otherwise: it runs on
             # the controller, so shutting the server down does not end it.

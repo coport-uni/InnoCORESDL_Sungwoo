@@ -34,8 +34,8 @@ DEFAULT_HAZARD_PREFIXES = (
     "pump/",
     "hotplate/",
     "lamp/",
-    # cell6 / cell7. `arm/replay` streams a recorded episode to a 6-axis
-    # arm; `arm/prefetch` only downloads, but it is a POST under this
+    # cell6 / cell7. `arm/program` runs a job program on a 6-axis arm;
+    # `arm/enable` energises it. Both are POSTs under this
     # prefix, so it gates too. Erring toward one extra confirmation on a
     # download beats missing the one before an arm moves. Deliberately in
     # the DEFAULT list and not only in config.toml: a bench that has not

@@ -1617,3 +1617,102 @@ format below. Newest entries at the bottom.
   workaround written for one unit, read `GetSoftwareVersion` off both —
   same model, same room, two different machines (see #43).
 
+
+## 46. `ProgramRun` answers in 1 ms, the program starts in 160 — so the cell reported a 23-second motion as finished before it began
+
+- **Problem**: The first real `POST /v1/arm/program` on cell6 returned
+  **HTTP 200** with `{"completed": true, "elapsed_s": 0.0028,
+  "last_line": 0}` and a `joints_deg` identical to the pre-run pose. It
+  looked like a clean no-op: program accepted, nothing happened. It was
+  not. The operator watched the arm move immediately afterwards, and a
+  pose read taken later showed **joint 1 had swung 91.27°**
+  (`-137.755` → `-46.485`). The 200 had been sent 2.8 ms into a motion
+  that ran for 23.6 s.
+- **Cause**: Two independent defects, both in reading the controller's
+  own progress signals literally.
+  1. **`ProgramRun()` returns on acceptance, not on entry.** Measured
+     with `scratchpad/measure_start.py` against `/fruser/Test1.lua`:
+     the call returned `0` at `t+0.001 s` with `GetProgramState()` still
+     answering `1` (stopped), and the state only flipped to `2`
+     (running) at **`t+0.160 s`**. `await_program` polled inside that
+     window, saw "stopped", and concluded the program had finished. It
+     is the same acceptance-vs-arrival gap that `JOG_SETTLE_S` already
+     absorbs for MoveJ in this very file — applied to motion, missed for
+     programs.
+  2. **`GetCurrentLine()` resets to 0 at the end.** The same run
+     produced lines `4, 9, 11, 12, 14, 15, 18`, then **`0`**, then state
+     `1`. Reporting the *last* reading therefore always yields
+     `last_line: 0` — "never executed a line" said about a program that
+     executed eighteen. And `last_line > 0` is the only evidence a
+     scenario has that the script really ran, because this program
+     returns to its start pose (final joints within 0.004° of initial),
+     so a pose delta proves nothing either.
+- **Fix**: `start_program` no longer returns when `ProgramRun` is
+  accepted; `_confirm_started()` polls `GetProgramState()` every 50 ms
+  until it leaves `PROGRAM_STOPPED`, up to `PROGRAM_START_GRACE_S = 5.0`
+  (~30× the measured latency), and raises `DeviceFaultError` if the
+  controller never enters the running state. `_ProgramPending.last_line`
+  became a **high-water mark** (`max(seen, line)`) rather than the latest
+  reading. Both are pinned by regression tests whose fake reproduces the
+  lag and the reset, because a fake that flipped state instantly is what
+  let this reach the bench in the first place.
+- **Rule**: When a device exposes a start command and a state getter,
+  they answer different questions and the gap between them is where
+  fabricated success lives — poll until the state *confirms* the start
+  before you are entitled to interpret "idle" as "finished". A monotone
+  counter that a device resets on completion is not a progress readout
+  unless you keep the maximum yourself. And a 200 that arrives faster
+  than the mechanism can physically respond is a bug report, not a fast
+  path: 2.8 ms for a 23-second program should have been read as "this
+  cannot have happened" (see #24, #15).
+
+## 47. Replaying a recorded episode worked, and was still the wrong shape for an SDL cell — what we tried and why it is gone
+
+- **Problem**: The FR5 arms were brought into L1 as *replay* cells: a
+  request named a HuggingFace dataset and an episode, and the cell shelled
+  out to `lerobot-replay` in a separate conda env, which streamed each
+  recorded frame to the controller as `ServoJ` at 20 Hz. It worked — the
+  path was built, tested, and exercised on the bench. It was removed
+  anyway. Recording the reasons here because "we tried that" is cheap to
+  say and expensive to re-derive.
+- **Cause**: Three properties, none of them bugs, all of them wrong for
+  this job.
+  1. **The PC never leaves the loop.** For the whole episode the arm's
+     motion is a stream from this machine through a conda env through a
+     subprocess. Any hiccup on that chain is a hiccup in the mechanism.
+     An SDL step should survive the orchestrator being busy.
+  2. **Only recorded motions exist.** Adding one new movement meant a
+     teleop session, a dataset, and an upload — for what a teach pendant
+     expresses in a minute. The unit of work was a *dataset*, and the
+     unit of work an SDL protocol needs is a *step*.
+  3. **The operational surface was large for what it bought**: a second
+     conda env, a torch dependency kept out of the SDL venv only by
+     process isolation, `HF_HOME`/offline caching, prefetch as its own
+     route so a slow download could not be mistaken for a stalled arm,
+     and a start-pose approach guard because the follower ramps toward a
+     far `ServoJ` target instead of refusing it (see #39's shape).
+     Every one of those was a real answer to a real hazard; together they
+     were a lot of machinery for "move the arm".
+- **Fix**: Replaced by the Lua job-program path (#46,
+  `docs/SPEC_ARM_LUA_PROGRAM.md`): the program lives on the controller,
+  `ProgramRun` starts it, and the firmware plans and interpolates. One
+  command, no dataset, no second env, and a PC dropout no longer stalls
+  the arm. The replay code is deleted from `cell/`, `server/`,
+  `scenarios/` and its tests; `docs/SPEC_ARM_REPLAY_CELL.md` is kept as
+  the historical design with a superseded banner, and the
+  `external/FR5ControllerVLA` submodule pin stays so VLA policy work can
+  continue in its own repo.
+- **What replay was actually better at**, so this is not read as "the
+  approach was bad": it is the only one of the two that can execute a
+  *learned policy*, because a policy emits poses continuously and there
+  is nothing to pre-load onto a controller. If VLA rollouts come back
+  into scope, this path comes back with them — from git history and that
+  spec, not from scratch. It also gave stronger completion evidence: a
+  replay can be checked against the episode's last recorded frame, while
+  a job program has no expected end pose the cell can know.
+- **Rule**: "It works on the bench" is not the same question as "it is
+  the right shape for the layer". Ask what the unit of work is: if the
+  cheapest way to add one motion is to record a dataset, the abstraction
+  is fighting the task. And when a working path is removed, write down
+  what it was better at — otherwise the next person rediscovers the
+  reason by rebuilding it.

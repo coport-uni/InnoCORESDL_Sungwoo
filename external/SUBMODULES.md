@@ -50,9 +50,15 @@ Two exceptions to the usual submodule rules apply here, both from
 
 - **D4 — pinned but not editable-installed.** There is no
   `-e ./external/FR5ControllerVLA` line in `requirements.txt` and there
-  must not be. The submodule exists to *pin the version* of the replay
-  code; it is not imported by anything in `cell/` or `server/`.
-- **D3 — it runs in its own conda env.** `ArmReplayCell` shells out to
+  must not be. It is not imported by anything in `cell/` or `server/`.
+- **The replay path this submodule served was removed from L1 on
+  2026-08-11** (`LearnedPatterns.md` #47). The pin stays anyway: a
+  learned VLA policy emits poses continuously and cannot be pre-loaded
+  onto a controller, so if policy rollouts come back they come back
+  through this fork, and the pinned version is what the design in
+  `docs/SPEC_ARM_REPLAY_CELL.md` was written against. Nothing in this
+  repo imports it today; do not delete the pin to "clean up".
+- **D3 — it ran in its own conda env.** `ArmReplayCell` shelled out to
   `lerobot-replay` under the `[arm] conda_env` named in the cell's TOML
   (default `lerobot`). lerobot pulls in torch; the SDL venv must not.
   The subprocess boundary is also what makes the cell's `stop()` real —
@@ -63,7 +69,7 @@ The arm's *read* path is separate and does not involve this repo: the
 cell talks to the controller through `FR5Controller/fairino`, over
 XMLRPC on port 20003. Note that the vendored SDK's convenience wrappers
 are unusable on this firmware — see `LearnedPatterns.md` #40 and #41 —
-so `cell/arm_replay_cell.py` calls the XMLRPC methods directly.
+so `cell/arm_cell.py` calls the XMLRPC methods directly.
 
 ## Updating a driver
 

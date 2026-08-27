@@ -1,4 +1,4 @@
-# cell6 — FR5 robot arm, SYNTHESIS stage (docs/SPEC_ARM_REPLAY_CELL.md).
+# cell6 — FR5 robot arm, SYNTHESIS stage (docs/SPEC_ARM_LUA_PROGRAM.md).
 #
 # Copy to server/nuc2/cell6.toml and edit. The real .toml is gitignored.
 # Shape is auto-detected from the [arm] table, so `--config` alone is
@@ -6,9 +6,10 @@
 #
 #     python -m server --config server/nuc2/cell6.toml
 #
-# SAFETY (spec §8): every replay is motion. Operator at the bench,
-# e-stop in hand, arm's reach clear. cell6 and cell7 must never share an
-# ip_address — that is teach-pendant work no second process can detect.
+# SAFETY: running a job program is motion, and L1 cannot bound where it
+# goes — the program's first move starts from wherever the arm is. Operator
+# at the bench, e-stop in hand, arm's reach clear. cell6 and cell7 must
+# never share an ip_address — teach-pendant work no process can detect.
 
 [server]
 port = 17064
@@ -23,42 +24,11 @@ robot_id = "fr5_a"
 ip_address = "192.168.0.58"
 gripper_enabled = true
 
-# --- lerobot side (spec D3: its own conda env, never installed in the
-# SDL venv — torch stays out of the cell server's process). -------------
-conda_sh = "/home/inno-controller/anaconda3/etc/profile.d/conda.sh"
-conda_env = "lerobot"
-# cwd for the subprocess, and the pinned fork (submodule, not installed
-# here — see external/SUBMODULES.md).
-lerobot_root = "external/FR5ControllerVLA"
-# --dataset.root. Empty = the HuggingFace cache, which is what an
-# orchestrated run should use. 6__replay.sh pins a local directory
-# instead; set this only if this bench needs that.
-dataset_root = ""
-
-# --- what a request may ask for ----------------------------------------
-# D6: an arbitrary dataset off the internet is physical motion here.
-allowed_repo_prefixes = ["coport-uni/"]
-# HF_HOME for the subprocesses; empty leaves the default cache.
-cache_dir = ""
-# true refuses to replay anything not already downloaded (409).
-offline_only = false
-
 # --- motion envelope ----------------------------------------------------
-# timeout = min(frames / fps * replay_timeout_factor, max_replay_s)
-max_replay_s = 300.0
-replay_timeout_factor = 1.5
-# Above this gap to the episode's first frame, the cell MoveJ's there
-# first at jog_speed_pct. The fork's follower ramps toward a far ServoJ
-# target instead of refusing it, so without this a replay started from
-# the wrong pose lunges rather than failing.
-start_pose_tolerance_deg = 2.0
-# Reported in the replay response as final_joint_error_deg; the pass/fail
-# call belongs to the scenario, not the cell (spec §5).
-final_pose_tolerance_deg = 1.0
-# MoveJ velocity % for the start-pose approach and claude_test/smoke_arm.py.
+# MoveJ velocity % for arm/jog_joint and claude_test/smoke_arm.py.
 jog_speed_pct = 10.0
 
-# --- Lua job programs (the second motion path) --------------------------
+# --- Lua job programs (the motion path) ---------------------------------
 # docs/SPEC_ARM_LUA_PROGRAM.md. Programs are authored on the teach
 # pendant / WebApp and live on the controller; L1 only load-run-stops
 # them. Nothing here uploads or deletes a program.
@@ -70,8 +40,11 @@ program_dir = "/fruser"
 # motion-bearing request to a reviewed list, the way
 # allowed_repo_prefixes does for datasets. Discover names with
 # `python claude_test/probe_arm_lua.py --ip 192.168.0.58 --robot-id fr5_a`
-# (read-only, no motion).
-allowed_programs = ["test1.lua"]
+# (read-only, no motion). Measured on this arm 2026-08-11: test.lua,
+# example.lua, new_pr.lua, SimpleLoadIdentify.lua, Test0902.lua,
+# Test1.lua, test2.lua. Names are case-sensitive — there is no lowercase
+# test1.lua here, only Test1.lua.
+allowed_programs = ["Test1.lua"]
 # A program's length cannot be derived — the cell does not read the
 # script, so there is no frames/fps to compute a timeout from.
 max_program_s = 300.0

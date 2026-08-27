@@ -25,7 +25,7 @@ is wherever the motor happened to power up.
 Commands at the prompt::
 
     x 50          move X to 50 mm
-    z 20          move Z to 20 mm (both Z motors)
+    z 20          move Z to 20 mm (both Z motors; floor is --z-min)
     xz 50 20      move to X 50, Z 20 (retracts Z first, then X, then Z)
     pos           read all three encoders, move nothing
     home          re-home the gantry
@@ -73,6 +73,11 @@ Z_DESYNC_LIMIT_MM = 0.5
 #: a typo being able to command a 400 mm traverse.
 DEFAULT_MAX_MM = 100.0
 MIN_MM = 0.0
+
+#: Floor for Z. Zero is inside the home switch's trigger region on this
+#: cell and the pair splits there — see ``_z_ok``. The scenarios use the
+#: same 3 mm as their retracted position.
+DEFAULT_Z_MIN_MM = 3.0
 
 #: Conservative until the bench is characterised.
 DEFAULT_SPEED_PCT = 10
@@ -221,8 +226,44 @@ def _in_range(value: float, max_mm: float) -> bool:
     return False
 
 
+def _z_ok(target: float, z_min: float) -> bool:
+    """True if a Z target clears the switch region at the origin.
+
+    Measured on cell3, 2026-08-14. Commanding Z to 0 puts the pair into
+    the home switch's trigger region, and the two motors then end the
+    move differently — the log shows one ``Complete`` and one ``Stopped
+    by Limit``, and Z_B cannot reach 0 at all, resting at 0.078 mm. The
+    result is a pair that is a few tenths apart, and on some attempts one
+    motor did not move at all.
+
+    Three millimetres clear of it, the same pair is repeatable to a
+    thousandth: three consecutive 20 mm -> 3 mm cycles read Z_A 3.019 /
+    3.020 / 3.019 against Z_B 2.999 every time. So the fault is not the
+    motors, the coupling or the code — it is this one coordinate.
+
+    The scenarios already retract to 3 mm (`z_up_mm`); this keeps the
+    interactive tool honest to the same rule rather than leaving 0 as a
+    target an operator can still type.
+    """
+    if target >= z_min:
+        return True
+    print(
+        f"  refused: Z below {z_min:g} mm is the home switch's trigger "
+        f"region — one motor stops on the switch while the other keeps "
+        f"going, and the pair ends up split. Measured 2026-08-14; use "
+        f"{z_min:g} mm as the retracted position. Override with --z-min "
+        f"only to investigate that region deliberately."
+    )
+    return False
+
+
 def _handle(
-    motors: Motors, parts: list[str], speed: int, accel: int, max_mm: float
+    motors: Motors,
+    parts: list[str],
+    speed: int,
+    accel: int,
+    max_mm: float,
+    z_min: float,
 ) -> int:
     """Run one typed command. Returns the (possibly updated) speed."""
     verb = parts[0]
@@ -240,16 +281,25 @@ def _handle(
             print(f"  speed {speed} -> {new} %")
             return new
         print(f"  refused: speed must be {MIN_SPEED_PCT}..{MAX_SPEED_PCT}")
-    elif verb in ("x", "z") and len(parts) == 2:
+    elif verb == "x" and len(parts) == 2:
         target = float(parts[1])
         if _in_range(target, max_mm):
             _move_axis(motors, verb, target, speed, accel)
+    elif verb == "z" and len(parts) == 2:
+        target = float(parts[1])
+        if _in_range(target, max_mm) and _z_ok(target, z_min):
+            _move_axis(motors, verb, target, speed, accel)
     elif verb == "xz" and len(parts) == 3:
         x_target, z_target = float(parts[1]), float(parts[2])
-        if _in_range(x_target, max_mm) and _in_range(z_target, max_mm):
+        if (
+            _in_range(x_target, max_mm)
+            and _in_range(z_target, max_mm)
+            and _z_ok(z_target, z_min)
+        ):
             # Retract Z, traverse X, then lower Z — never diagonal.
-            # Same ordering PumpGantryCell.move_gantry uses.
-            _move_axis(motors, "z", 0.0, speed, accel)
+            # Same ordering PumpGantryCell.move_gantry uses. The retract
+            # goes to z_min, not 0, for the reason in _z_ok.
+            _move_axis(motors, "z", z_min, speed, accel)
             _move_axis(motors, "x", x_target, speed, accel)
             _move_axis(motors, "z", z_target, speed, accel)
     else:
@@ -270,6 +320,14 @@ def main(argv: list[str] | None = None) -> int:
         type=float,
         default=DEFAULT_MAX_MM,
         help=f"soft travel ceiling per axis (default {DEFAULT_MAX_MM:g})",
+    )
+    parser.add_argument(
+        "--z-min",
+        type=float,
+        default=DEFAULT_Z_MIN_MM,
+        help=f"lowest Z this tool will command "
+        f"(default {DEFAULT_Z_MIN_MM:g}; below it the home switch splits "
+        f"the pair)",
     )
     parser.add_argument(
         "--speed-pct",
@@ -314,7 +372,12 @@ def main(argv: list[str] | None = None) -> int:
                 break
             try:
                 speed = _handle(
-                    motors, line.split(), speed, args.accel_pct, args.max_mm
+                    motors,
+                    line.split(),
+                    speed,
+                    args.accel_pct,
+                    args.max_mm,
+                    args.z_min,
                 )
             except ValueError:
                 print("  refused: could not read that as a number")

@@ -69,8 +69,8 @@ only by config.
 | **cell3** (Cell C) | NUC2 · 17058 | pump + gantry (`PumpGantryCell`) | identical clone of Cell A | built, no bench run |
 | **cell4** | NUC1 · 17060 | balance + linear (`BalanceLinearCell`) | MINAS A6 linear rail (`LinearMotorController`, RS-485) · the Phase's **single** Entris-II balance (`entris_ii`, Sartorius CDC) that shuttles under cell1–3 to weigh each dispense | ✅ **bench-verified** |
 | **cell5** (Cell 5) | NUC2 · 17062 | pump + Z + thermal (`PumpZThermalCell`) | syringe pump (*not fitted yet* — optional `[pump]` table) · **one** MKS SERVO57D as a standalone Z axis (`mks_motor`, FTDI `NTB3EP5R`) · IKA RCT digital hotplate (`HotplateController`, STM32 VCP, direct USB port) · IR lamp on a Tapo P110M plug (`SmartPlugController`, LAN `192.168.0.237`) | ⚠ **Z + hotplate + lamp bench-verified; cell incomplete — no pump** |
-| **cell6** | 17064 | arm replay (`ArmReplayCell`) | Fairino FR5 6-axis arm, **synthesis stage**, controller at `192.168.0.58` (XMLRPC :20003). Motion is `lerobot-replay` on a recorded dataset episode, run as a subprocess in the `lerobot` conda env; reads go straight to the controller | ⚠ **read-only path bench-verified (health/diagnose/status/409s/stop); no motion run yet, and no `lerobot` env on this NUC** |
-| **cell7** | 17066 | arm replay (`ArmReplayCell`) | identical clone of cell6, **analysis stage**, controller at `192.168.0.59` | ⚠ **controller reachable; server not yet brought up** |
+| **cell6** | 17064 | arm (`ArmCell`) | Fairino FR5 6-axis arm, **synthesis stage**, controller at `192.168.0.58` (XMLRPC :20003). Motion is a `.lua` **job program the controller already holds**: `Mode(0)` → `ProgramLoad` → `ProgramRun`, and the firmware plans and interpolates | ✅ **bench-verified** — `Test1.lua`, 23.786 s, `last_line` 18 |
+| **cell7** | 17066 | arm (`ArmCell`) | identical clone of cell6, **analysis stage**, controller at `192.168.0.59` | ✅ **bench-verified** — `Cell7Test1.lua`, 25.293 s, `last_line` 13 |
 
 Special properties per cell worth remembering:
 
@@ -79,15 +79,31 @@ Special properties per cell worth remembering:
 - **cell4**: holds the *only* balance in the Phase, and its `stop()` is
   currently a no-op (GAP-1).
 - **cell6/cell7**: the only cells with **no serial device** — the arm is
-  reached over the LAN. Their action set is replay-only by design (a
-  request names a dataset episode, never a pose), and `/v1/arm/replay`
-  is the one route the server does **not** hold its command lock across,
-  so `/v1/stop` still answers while an episode plays. The **hardware
-  e-stop button is the stop that counts**: on cell6 the SDK's own
-  safety-stop check reads a state stream that controller does not serve,
-  so it can never see one (LearnedPatterns #40). Do not put cell6 and
-  cell7 in the same scenario `parallel` block until their reach overlap
-  has been measured (GAP-8).
+  reached over the LAN. Their action set is not a pose interface: a
+  request names a `.lua` job program the controller already holds, and
+  the *controller* executes it. `/v1/arm/program` is the one route the
+  server does **not** hold its command lock across, so `/v1/stop` still
+  answers while a program runs.
+
+  Two things this path cannot do, and both matter more than they sound.
+  It **cannot bound where the arm goes** — the program's first move
+  starts from wherever the arm is toward a point taught inside a script
+  L1 never reads. And a `200` **does not mean the arm arrived
+  anywhere**: with no expected end pose to compare against, it means the
+  controller returned to idle unfaulted and the encoder answered. Judge
+  `joints_deg` yourself if the end pose matters.
+
+  The **hardware e-stop button is the stop that counts**: on cell6 the
+  SDK's own safety-stop check reads a state stream that controller does
+  not serve, so it can never see one (LearnedPatterns #40). Do not put
+  cell6 and cell7 in the same scenario `parallel` block until their
+  reach overlap has been measured (GAP-8).
+
+  A `lerobot-replay` path lived here until 2026-08-11 and was removed —
+  it worked, but it kept this machine inside the arm's real-time loop
+  and could only express recorded motions. `LearnedPatterns.md` #47 has
+  the reasoning and what it was better at; `docs/SPEC_ARM_REPLAY_CELL.md`
+  keeps the design for whoever needs VLA policy rollouts back.
 - **cell5**: the only cell that **heats** — uniquely, its `stop()` also
   kills the heater, the stirrer, and the lamp, not just motion.
 

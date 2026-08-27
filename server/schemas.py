@@ -34,9 +34,9 @@ class DiagnoseResponse(BaseModel):
         default=None,
         description="Arm identity + reachability (robot_id, ip, gripper).",
     )
-    replay: dict | None = Field(
+    program: dict | None = Field(
         default=None,
-        description="Replay subprocess state and the last episode's summary.",
+        description="Lua job-program state and the last program's summary.",
     )
 
 
@@ -60,11 +60,11 @@ class StatusResponse(BaseModel):
     stirring: bool | None = None
     lamp_on: bool | None = None
     # cell6 / cell7 (arm) only; None on cells without an arm. Degrees,
-    # joint 1 first, read from the encoder — except while a replay owns
-    # the controller, when it is the last reading taken before the
-    # hand-over (the servo session has one owner; see ArmReplayCell).
+    # joint 1 first, read from the encoder. A Lua job program runs ON the
+    # controller and does not hold this process's SDK session, so this
+    # stays a live reading even while one is in flight.
     joints_deg: list[float] | None = None
-    last_replay: dict | None = None
+    last_program: dict | None = None
 
 
 class ErrorResponse(BaseModel):
@@ -261,21 +261,6 @@ class LampResponse(BaseModel):
 # cannot look like a stalled arm (spec D7).
 
 
-class ArmPrefetchRequest(BaseModel):
-    repo_id: str = Field(
-        description="HuggingFace dataset id; must match the cell's "
-        "allowed_repo_prefixes."
-    )
-    episode: int = Field(ge=0, description="Episode index in the dataset.")
-
-
-class ArmPrefetchResponse(BaseModel):
-    cached: bool
-    frames: int
-    fps: int
-    duration_s: float
-
-
 class ArmPrepareResponse(BaseModel):
     """Result of clearing faults + energising the arm.
 
@@ -330,27 +315,6 @@ class ArmJogResponse(BaseModel):
     joints_deg: list[float]
 
 
-class ArmReplayRequest(BaseModel):
-    repo_id: str
-    episode: int = Field(ge=0)
-    # Null adopts the recorded rate. Any other value must equal it: a
-    # re-timed replay compresses the ServoJ interval (spec D5).
-    fps: int | None = Field(default=None, ge=1)
-
-
-class ArmReplayResponse(BaseModel):
-    completed: bool
-    frames: int
-    fps: int
-    elapsed_s: float
-    # Null when the dataset exposed no last frame to compare against —
-    # reporting 0.0 there would be a fabricated pass.
-    final_joint_error_deg: float | None
-    joints_deg: list[float] = Field(
-        description="Encoder reading taken after the replay, degrees."
-    )
-
-
 class ArmProgramRequest(BaseModel):
     """Run a ``.lua`` job program the controller already holds.
 
@@ -378,9 +342,12 @@ class ArmProgramResponse(BaseModel):
     completed: bool
     name: str
     elapsed_s: float
-    # Last line the controller reported executing. Null when the
-    # controller would not answer GetCurrentLine — progress is
-    # informational, so an unreadable line does not fail the run.
+    # HIGHEST line the controller reported executing, not the last one:
+    # it resets GetCurrentLine to 0 as the program ends, so the final
+    # reading is always 0. Null when the controller would not answer at
+    # all — progress is informational, so an unreadable line does not
+    # fail the run. A non-zero value is the evidence that the script was
+    # actually executed rather than merely accepted.
     last_line: int | None
     joints_deg: list[float] = Field(
         description="Encoder reading taken after the program, degrees."
@@ -393,6 +360,6 @@ class ArmProgramResponse(BaseModel):
 class StopResponse(BaseModel):
     stopped: bool
     # Per-stage outcome from the cells whose stop has independent stages
-    # (cell6 / cell7: kill the replay, stop the job program, then stop the
+    # (cell6 / cell7: terminate the job program, then stop the
     # controller). None on the cells whose stop() is all-or-nothing.
     detail: dict | None = None

@@ -2153,3 +2153,145 @@ episode 10 (200 episodes, 20 fps, ~723 frames ≈ 36 s).
       submission order. This also exercises the raised 30° cap on real
       hardware. It still does NOT measure reach overlap, so GAP-8 stands.
 
+- [x] **Second arm motion path: run a `.lua` job program on the
+      controller** (`POST /v1/arm/program`). replay is untouched and both
+      paths coexist; they refuse each other with a 409, because a servo
+      session and a job program are two owners of the same axes. The
+      controller does the planning here, so the PC leaves the real-time
+      loop — and the trade is that the cell never reads the script, so it
+      has no expected end pose and cannot claim the arm arrived anywhere.
+      `docs/SPEC_ARM_LUA_PROGRAM.md` §6.4 says so and the response schema
+      repeats it. Scope is deliberately **execute-only**: `LuaUpload` /
+      `LuaDelete` / `LoadDefaultProgConfig` are all out, so nothing here
+      writes to the controller's filesystem or arms a boot-time motion.
+      Guarded by a bare-name check (no `/`, `\`, `..`) plus a config
+      allow-list, the same shape as `allowed_repo_prefixes`.
+- [x] **Phase-0 probe VERIFIED on cell6**
+      (`claude_test/probe_arm_lua_fr5_a_20260811T042141Z.md`, 7/7
+      read-only, no motion). Settled three things that had been assumed:
+      raw `GetProgramState()` really is `(error, state)`; `GetLuaList()`
+      really is `(error, count, "a;b;c;")` with a trailing `;`; and the
+      program is **`Test1.lua` with a capital T** — there is no lowercase
+      `test1.lua` on that arm, and `ProgramLoad` takes the name literally.
+      It also **disproved** a claim the spec draft had made from reading
+      the SDK alone: the `GetProgramState()` wrapper does not raise on
+      this controller, because its port-20004 stream is alive. The
+      wrapper is still unusable (it reads `robot_state`, a different
+      field, and hard-codes success), but for the reason measured, not
+      the one guessed. Spec §4.1 carries the correction.
+- [x] **`Test1.lua` RUN on cell6 hardware — and it found two real bugs.**
+      The first `POST /v1/arm/program` answered `200 completed:true` in
+      **2.8 ms** for a program that then ran **23.6 s** and swung joint 1
+      through **91.27°**. `ProgramRun` returns on acceptance and the
+      state does not reach "running" for 160 ms, so the first poll read
+      the pre-start idle as "finished"; separately `GetCurrentLine`
+      resets to 0 at the end, so `last_line` was always 0. Fixed with
+      `_confirm_started()` (poll until the controller leaves the stopped
+      state, 5 s grace vs 160 ms measured, `DeviceFaultError` if it never
+      does) and a high-water mark for `last_line`. Both pinned by
+      regression tests whose fake now reproduces the lag and the reset.
+      Written up as LearnedPatterns #46.
+- [x] **`arm/program` VERIFIED on both arms** after the fix
+      (`claude_test/bench_arm_program_20260811.md`). cell6 `Test1.lua`
+      23.789 s / `last_line` 18; cell7 `Cell7Test1.lua` 25.298 s /
+      `last_line` 13; no fault on either, `busy` false afterwards, and
+      the HTTP response now arrives when the program ends rather than
+      2.8 ms in. Both programs return to their own start pose (within
+      0.002–0.004°), which is worth remembering: **`last_line` is the
+      only evidence the script ran** — a pose check would pass on an arm
+      that never moved. Still open: `POST /v1/stop` has not been timed
+      against a running program, so GAP-9 is not disproved for this
+      path, and `scenarios/demo_arm_program.yaml` validates (0 issue)
+      but has not been run end to end — the operator gate wants a
+      console confirmation and auto-answering it would defeat the gate.
+- [ ] **`allowed_programs` is read once, at server start.** Adding a
+      program to the allow-list needs a restart; leaving the list empty
+      permits any `*.lua` the controller holds and needs neither a
+      restart nor a config change. That trade — a person in the loop vs.
+      scenario-only iteration — is currently resolved toward the person
+      on both cells. Revisit if the bench starts iterating on programs
+      often enough that the restart is what gets skipped.
+- [x] **lerobot replay path REMOVED from L1** (user request), with the
+      record written *before* the deletion so the reasoning survives it:
+      **LearnedPatterns #47** covers why it went — the PC never left the
+      arm's real-time loop, only recorded motions could be expressed, and
+      a second conda env plus torch isolation plus HF caching plus a
+      prefetch route plus a start-pose guard was a lot of machinery for
+      "move the arm" — and, deliberately, **what it was better at**:
+      executing a *learned policy* (nothing to pre-load onto a
+      controller) and stronger completion evidence (an episode has a last
+      recorded frame to check against; a job program has no end pose the
+      cell can know). `docs/SPEC_ARM_REPLAY_CELL.md` keeps the design
+      under a superseded banner and `external/FR5ControllerVLA` stays
+      pinned, so VLA rollouts come back from git rather than from
+      scratch.
+      Removed: `cell/arm_replay_cell.py` → **`cell/arm_cell.py` /
+      `ArmCell`** (1940 → 1254 lines), `LerobotRunner`, `start_replay` /
+      `await_replay` / `prefetch_episode` / `_approach_start`,
+      `POST /v1/arm/prefetch` and `/v1/arm/replay` with their schemas,
+      `demo_arm_replay*.yaml`, `episode_joint_range.py`, the 11 replay
+      config keys, and the replay stubs on the other three cells.
+      `--cell arm_replay` → `--cell arm`. `from_toml` now ignores unknown
+      keys so a bench TOML still carrying the old ones starts instead of
+      refusing to.
+      `ruff` clean, `pytest claude_test/test_arm_cell.py` 68 passed.
+- [x] **Re-verified on both arms AFTER the rename** — a refactor of a
+      motion path is not verified by the tests that survived it
+      (CLAUDE.md rule 4). Both servers restarted on `cell/arm_cell.py`;
+      `arm/prefetch` and `arm/replay` are gone from the OpenAPI and
+      `diagnose` no longer carries a `replay` block. cell6 `Test1.lua`
+      **23.786 s / line 18**, cell7 `Cell7Test1.lua` **25.293 s / line
+      13** — both within ~10 ms of the pre-refactor numbers, so the
+      removal changed the surface and not the behaviour. Rejection gates
+      re-checked with no motion (case / traversal / extension → 400) and
+      `orchestrator validate` ok, 10 steps.
+
+## 2026-08-27 — cell2/cell3 from a TOML config, not a claude_test launcher (issue #32)
+
+- [x] **Why it could not be done before.** `PumpGantryCell.open` opened
+      the gantry through `MKSMotor.open_xz(serial_x)`, which names X and
+      takes **whichever two FTDI adapters remain** for the Z pair. That
+      is right on a bus carrying one cell (cell1) and wrong on NUC2,
+      which carries seven adapters across three cells: cell2 started
+      that way grabs cell3's or cell5's Z motors, and starting both
+      gantries at once is impossible because the second takes motors the
+      first already drives. `claude_test/test_gantry_server_shinyeong.py`
+      worked around it by naming all three adapters and handing the
+      opened cell to `server.app.create_app`.
+- [x] `cell/pump_gantry_cell.py`: `Config.motor_serial_z_a` /
+      `motor_serial_z_b` (default `None`) + `_open_gantry`. Both set →
+      three explicit `MKSMotor.open` calls; either unset → `open_xz`,
+      unchanged. Deliberately all-or-nothing: naming one Z and letting
+      the other be auto-assigned is the same shared-bus mistake wearing
+      a configured look. A named adapter that will not open raises
+      `TransportError` naming the serial — pyftdi says only "no device",
+      and on a shared bus the likely cause is another cell's server
+      holding it, not an unplugged cable — and closes the adapters
+      already opened instead of leaking them.
+- [x] `server/__main__.py`: `_load` reads `stage.serial_z_a` /
+      `stage.serial_z_b`.
+- [x] `server/nuc2/cell2.toml.example` / `cell3.toml.example`: the real
+      serials from the 2026-07-29 bus census, replacing the
+      `TBD-CELL2-X` placeholders. **`[pump]` removed from both** — no
+      syringe pump is on either bench, and the synthesis scenario
+      asserts `d2.pump.present == False` / `d3.pump.present == False`,
+      which a present-but-unopenable pump would break.
+- [x] `ruff check` + `ruff format --check` clean; `pytest claude_test`
+      **162 passed**. `_load` on both examples yields the three serials,
+      `pump_port=None`, ports 17056/17058; `server/nuc1/cell1.toml`
+      still parses to `Z_A=None Z_B=None`, so cell1's path is untouched.
+      `_open_gantry` dispatch exercised against a mocked `MKSMotor` in
+      all four shapes (named / unset / half-named / missing adapter).
+- [ ] **NOT VERIFIED ON THE BENCH — CLAUDE.md rule 4.** The gantries are
+      on NUC2 and this session runs on NUC1, so nothing here has opened
+      a real adapter. Stays in the working tree, uncommitted, until
+      cell2 and cell3 have been served from their TOML files on NUC2 and
+      moved. What to watch there is exactly what the launcher checks and
+      `python -m server` does not: that each server opens its own three
+      adapters and leaves the other cell's alone.
+- [ ] Decide what happens to `claude_test/test_gantry_server_shinyeong.py`
+      once the TOML path is verified. It still does two things the server
+      does not — prints the whole bus with each adapter labelled by owner,
+      and refuses to serve unless all three motors answer an encoder read
+      (LearnedPatterns #24). Folding the encoder check into
+      `PumpGantryCell.open` would help every gantry cell, not just NUC2's.

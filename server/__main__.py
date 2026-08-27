@@ -29,7 +29,7 @@ import uvicorn
 from server.app import create_app
 
 if TYPE_CHECKING:  # annotations only — never imported at run time
-    from cell.arm_replay_cell import ArmReplayConfig
+    from cell.arm_cell import ArmConfig
     from cell.balance_linear_cell import BalanceLinearConfig
     from cell.pump_gantry_cell import Config
     from cell.pump_z_thermal_cell import PumpZThermalConfig
@@ -60,6 +60,12 @@ def _load(path: Path) -> tuple[Config, ServerConfig]:
         syringe_uL=int(pump.get("syringe_uL", 125)),
         pump_init_force=int(pump.get("init_force", 2)),
         motor_serial_x=stage.get("serial_x", "NTAMU6TO"),
+        # Both required to take effect: naming one Z adapter and letting
+        # the other be auto-assigned would be the same shared-bus mistake
+        # in a form that looks configured (cell/pump_gantry_cell.py
+        # `_open_gantry`). Omit both on a single-cell bus.
+        motor_serial_z_a=stage.get("serial_z_a"),
+        motor_serial_z_b=stage.get("serial_z_b"),
         z_coord_invert=bool(stage.get("z_coord_invert", True)),
         x_coord_invert=bool(stage.get("x_coord_invert", True)),
         home_dir_z=int(stage.get("home_dir_z", 0)),
@@ -134,8 +140,8 @@ def _load_pump_z_thermal(
     return cell_cfg, server_cfg
 
 
-def _load_arm_replay(path: Path) -> tuple[ArmReplayConfig, ServerConfig]:
-    """Parse a cell6 / cell7 config: one FR5 arm, replay-only.
+def _load_arm(path: Path) -> tuple[ArmConfig, ServerConfig]:
+    """Parse a cell6 / cell7 config: one FR5 arm.
 
     Args:
         path: The TOML config path.
@@ -145,11 +151,11 @@ def _load_arm_replay(path: Path) -> tuple[ArmReplayConfig, ServerConfig]:
         the cell module itself so the unit tests can load the example
         TOMLs without importing FastAPI or a driver.
     """
-    from cell.arm_replay_cell import ArmReplayConfig
+    from cell.arm_cell import ArmConfig
 
     raw = tomllib.loads(path.read_text(encoding="utf-8"))
     server = raw.get("server", {})
-    cell_cfg = ArmReplayConfig.from_toml(raw.get("arm", {}))
+    cell_cfg = ArmConfig.from_toml(raw.get("arm", {}))
     server_cfg = ServerConfig(
         host=server.get("host", "0.0.0.0"),
         port=int(server.get("port", 17064)),  # cell6 default
@@ -160,7 +166,7 @@ def _load_arm_replay(path: Path) -> tuple[ArmReplayConfig, ServerConfig]:
 
 def _infer_cell(path: Path) -> str:
     """Pick the cell shape from the config's tables so `--config` alone selects
-    it. An ``[arm]`` table → ``arm_replay`` (cell6, cell7 — the only cell with
+    it. An ``[arm]`` table → ``arm`` (cell6, cell7 — the only cell with
     no serial device at all); a ``[zstage]`` / ``[hotplate]`` / ``[lamp]``
     table → ``pump_z_thermal`` (cell5, Cell 5 — checked before cell1–3 because
     it also has a ``[pump]`` table); a ``[linear]`` (or ``[balance]``) table →
@@ -168,7 +174,7 @@ def _infer_cell(path: Path) -> str:
     ``--cell`` overrides this."""
     raw = tomllib.loads(path.read_text(encoding="utf-8"))
     if "arm" in raw:
-        return "arm_replay"
+        return "arm"
     if any(table in raw for table in ("zstage", "hotplate", "lamp")):
         return "pump_z_thermal"
     has_bl = "linear" in raw or "balance" in raw
@@ -192,12 +198,12 @@ def main(argv: list[str] | None = None) -> int:
             "pump_gantry",
             "balance_linear",
             "pump_z_thermal",
-            "arm_replay",
+            "arm",
         ),
         default=None,
         help=(
             "Cell shape to serve. Omit to auto-detect from the config: an "
-            "[arm] table → 'arm_replay' (cell6, cell7), a "
+            "[arm] table → 'arm' (cell6, cell7), a "
             "[zstage]/[hotplate]/[lamp] table → 'pump_z_thermal' (cell5), a "
             "[linear] table → 'balance_linear' (cell4), otherwise "
             "'pump_gantry' (cell1–3). Pass explicitly only to override the "
@@ -224,11 +230,11 @@ def main(argv: list[str] | None = None) -> int:
 
         bl_cfg, server_cfg = _load_balance_linear(cfg_path)
         factory = lambda: BalanceLinearCell.open(bl_cfg)  # noqa: E731
-    elif cell_kind == "arm_replay":
-        from cell.arm_replay_cell import ArmReplayCell
+    elif cell_kind == "arm":
+        from cell.arm_cell import ArmCell
 
-        arm_cfg, server_cfg = _load_arm_replay(cfg_path)
-        factory = lambda: ArmReplayCell.open(arm_cfg)  # noqa: E731
+        arm_cfg, server_cfg = _load_arm(cfg_path)
+        factory = lambda: ArmCell.open(arm_cfg)  # noqa: E731
     elif cell_kind == "pump_z_thermal":
         from cell.pump_z_thermal_cell import PumpZThermalCell
 

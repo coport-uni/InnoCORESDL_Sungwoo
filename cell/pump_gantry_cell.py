@@ -57,11 +57,21 @@ class Config:
     pump_baud: int = 9600
     syringe_uL: int = 125
     pump_init_force: int = 2
-    # XZ gantry: FTDI serial of the X adapter; the other two adapters are the
-    # paired Z (order doesn't matter — they always move together). The default
-    # is this bench's X adapter, the same serial bridge.py and CVMeasure.py
-    # name; run CAN2USBAdapterDeviceRecognition.py to read it off a new one.
+    # XZ gantry: FTDI serial of the X adapter. The default is this bench's X
+    # adapter, the same serial bridge.py and CVMeasure.py name; run
+    # CAN2USBAdapterDeviceRecognition.py to read it off a new one.
     motor_serial_x: str = "NTAMU6TO"
+    # The paired Z adapters, by serial (order doesn't matter — they always
+    # move together). Leave both unset on a bus that carries ONE cell: the
+    # gantry then opens through `open_xz`, which names X and takes whichever
+    # two adapters remain. That auto-assignment is wrong on a shared bus —
+    # NUC2 carries seven adapters across three cells, so it picks up another
+    # cell's Z motors, and serving two gantry cells at once is impossible
+    # because whichever starts second takes motors the first already drives.
+    # Naming all three opens exactly this cell's adapters and leaves the
+    # rest alone.
+    motor_serial_z_a: str | None = None
+    motor_serial_z_b: str | None = None
     # Both axes home at the 0x00 end and move +mm into the working travel via
     # coord_invert (their encoder-positive points into the home limit). This
     # is the uniform convention; the legacy CVMeasure.py instead homed X the
@@ -239,6 +249,53 @@ class PumpGantryCell(Cell):
             command=command,
         )
 
+    @staticmethod
+    def _open_gantry(
+        config: Config,
+    ) -> tuple[MKSMotor, MKSMotor, MKSMotor]:
+        """Open the three USB2CAN adapters, as ``(z_a, z_b, x)``.
+
+        Both Z serials set → every adapter is named, which is what a bus
+        shared by several cells needs (see ``Config.motor_serial_z_a``).
+        Either unset → ``open_xz``, X by serial and the two remaining
+        adapters auto-assigned, unchanged from before those fields existed.
+
+        Args:
+            config: Bench wiring for this cell.
+
+        Returns:
+            Tuple ``(z_a, z_b, x)``, matching ``__init__``'s order.
+
+        Raises:
+            TransportError: If a named adapter is not on the bus. pyftdi
+                reports only "no device", so the serial is named here —
+                on a shared bus the likely cause is that the adapter is
+                held by another cell's server, not that it is unplugged.
+        """
+        if not (config.motor_serial_z_a and config.motor_serial_z_b):
+            return MKSMotor.open_xz(
+                config.motor_serial_x, z_coord_invert=config.z_coord_invert
+            )
+        opened = []
+        for serial, invert in (
+            (config.motor_serial_z_a, config.z_coord_invert),
+            (config.motor_serial_z_b, config.z_coord_invert),
+            (config.motor_serial_x, False),
+        ):
+            try:
+                opened.append(MKSMotor.open(serial=serial, coord_invert=invert))
+            except Exception as exc:
+                for motor in opened:
+                    motor.close()
+                raise TransportError(
+                    f"USB2CAN adapter {serial!r} could not be opened "
+                    f"({exc}); check that it is on the bus and that no "
+                    f"other cell server holds it",
+                    command="open",
+                ) from exc
+        za, zb, x = opened
+        return za, zb, x
+
     @classmethod
     def open(cls, config: Config) -> PumpGantryCell:
         pump = None
@@ -250,12 +307,10 @@ class PumpGantryCell(Cell):
         # Both are no-ops on non-Linux and touch only FTDI adapters — no motion.
         prepare_usb_nodes()
         release_ftdi_sio()
-        # Opens all three USB2CAN adapters by serial (X explicit, two Z auto).
-        za, zb, x = MKSMotor.open_xz(
-            config.motor_serial_x, z_coord_invert=config.z_coord_invert
-        )
-        # open_xz inverts only the Z pair; X uses the same convention as Z
-        # (+mm away from the 0x00-home end), so set its invert here too.
+        za, zb, x = cls._open_gantry(config)
+        # Only the Z pair is inverted while opening; X uses the same
+        # convention as Z (+mm away from the 0x00-home end), so set its
+        # invert here too.
         x.coord_invert = config.x_coord_invert
         # Put every motor into SR_vFOC + active-response before any motion
         # (mirrors bridge.py). open_xz only opens the adapters; without this
@@ -740,17 +795,6 @@ class PumpGantryCell(Cell):
     def jog_joint(
         self, joint: int, delta_deg: float, *, speed_pct: float | None = None
     ) -> dict:
-        raise _absent("arm")
-
-    def prefetch_episode(self, repo_id: str, episode: int) -> dict:
-        raise _absent("arm")
-
-    def start_replay(
-        self, repo_id: str, episode: int, fps: int | None = None
-    ) -> dict:
-        raise _absent("arm")
-
-    def await_replay(self) -> dict:
         raise _absent("arm")
 
     def start_program(self, name: str) -> dict:
