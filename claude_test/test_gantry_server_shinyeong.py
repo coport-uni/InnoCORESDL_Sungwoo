@@ -138,12 +138,11 @@ WIRING = {
         pump_port=(
             "/dev/serial/by-path/pci-0000:00:14.0-usb-0:2.1.1:1.0-port0"
         ),
-        # TODO fill in. Observed 50487 on this socket 2026-08-27, read
-        # from the live cell2 diagnose() while another operator's server
-        # held it — recorded here as a note, not asserted, because the
-        # operator is confirming both pumps in a controlled setting.
-        # (NUC1's cell1 pump is 32656, so it is not that one.)
-        pump_serial=None,
+        # Read from this socket's diagnose() 2026-08-27, in the same
+        # sitting as cell3's, which is the comparison that makes either
+        # value trustworthy: 50487 != 30308, so the two by-paths lead to
+        # two different pumps. (NUC1's cell1 pump is a third, 32656.)
+        pump_serial="50487",
     ),
     "cell3": CellWiring(
         serial_x="NTB3FXCE",
@@ -155,11 +154,8 @@ WIRING = {
         pump_port=(
             "/dev/serial/by-path/pci-0000:00:14.0-usb-0:7.3.1:1.0-port0"
         ),
-        # TODO fill in. Never read: cell3's diagnose was 500ing while
-        # cell2's was taken. Whatever it is, it must DIFFER from cell2's
-        # — the same number on both would mean both by-paths lead to one
-        # pump, which is the exact swap this field exists to catch.
-        pump_serial=None,
+        # Read alongside cell2's, 2026-08-27 — see the note there.
+        pump_serial="30308",
     ),
 }
 
