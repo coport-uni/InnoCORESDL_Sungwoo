@@ -2460,7 +2460,10 @@ later run does not have to re-derive it.
       servers are stopped: three pins (CommonClaude, LinearMotorController,
       PrecisionScaleController) differ from the checked-out drivers.
 - [ ] Both NUC2 checkouts are still behind `origin/main` (86425c8).
-- [x] README: added "Repository state (2026-09-17)" (what landed since
+- [x] README: added "Repository state (2026-09-17)" and, per the operator's
+      note, an HTTP section ordered as: start the cell servers a YAML
+      names (ssh + systemctl, the non-HTTP step) -> read each server's
+      state -> run the YAML remotely -> read the run's state. Also (what landed since
       2026-07, with evidence pointers and the NOT-verified items called
       out) and "Controlling the system over HTTP" (curl for health /
       validate / run / confirm-by-resume / pause / abort, direct cell
