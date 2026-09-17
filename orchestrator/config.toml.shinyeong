@@ -1,0 +1,56 @@
+# L2 orchestrator config -- live bench (gitignored). Generated 2026-07-28.
+#   .venv/bin/python -m orchestrator --config orchestrator/config.toml serve
+#
+# This file is the ONLY address book (spec section 2). This NUC is nuc1,
+# hostname innocorecontroller-NUC14MNK-B2, LAN address 192.168.0.126 --
+# note the bench is on 192.168.0.0/24, NOT the 192.168.1.0/24 the
+# config.toml.example placeholders assumed.
+
+[orchestrator]
+host = "0.0.0.0"
+port = 17100
+log_dir = "runs"
+status_poll_s = 1.0
+step_timeout_s = 30.0
+connect_timeout_s = 5.0
+retry_delay_s = 1.0
+
+# Ask the operator before the run's first hardware-acting step. The linear
+# rail has no software stop (docs/L1_AUDIT.md GAP-1/GAP-9), so this stays
+# on for every bench run.
+confirm_first_motion = true
+
+stop_on_failure = true
+
+hazard_prefixes = [
+    "gantry/", "linear/", "zstage/", "stage/",
+    "pump/", "hotplate/", "lamp/",
+]
+
+# --- Cells ----------------------------------------------------------------
+# cell1 and cell4 are both served by this same NUC, so they are addressed
+# over loopback; the LAN address 192.168.0.126 works too. The other three
+# cells are not wired up on this bench yet -- their addresses are still
+# placeholders and any scenario naming them will fail to connect.
+
+[cells.cell4]                # balance + MINAS A6 linear rail (NUC1) -- LIVE
+base_url = "http://127.0.0.1:17060"
+nuc = "nuc1"
+
+[cells.cell1]                # Cell A -- X1/Z2 gantry (NUC1) -- LIVE
+# Running WITHOUT its syringe pump (server/nuc1/cell1.toml has no [pump]
+# table), so /v1/pump/* answers 409 here. The gantry action set is live.
+base_url = "http://127.0.0.1:17054"
+nuc = "nuc1"
+
+[cells.cell2]                # Cell B -- clone of Cell A (NUC2) -- PLACEHOLDER
+base_url = "http://192.168.0.20:17056"
+nuc = "nuc2"
+
+[cells.cell3]                # Cell C -- clone of Cell A (NUC2) -- PLACEHOLDER
+base_url = "http://192.168.0.20:17058"
+nuc = "nuc2"
+
+[cells.cell5]                # Cell D -- pump + Z + hotplate + lamp (NUC2)
+base_url = "http://192.168.0.20:17062"   # PLACEHOLDER
+nuc = "nuc2"

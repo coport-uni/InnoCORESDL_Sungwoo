@@ -1,0 +1,3222 @@
+INFO:     Started server process [20556]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:17056 (Press CTRL+C to quit)
+cell2 L1 server — NUC2, adapters named explicitly.
+Starting the server commands no motion. The physical e-stop remains the only stop once a scenario runs: POST /v1/stop queues behind the move it means to interrupt (docs/L1_AUDIT.md GAP-9).
+
+FTDI adapters on this bus (6):
+  NT9ZVXLU  <- another cell — NOT touched
+  NTA0X8KN  <- cell2 Z — this server drives it
+  NTA4FH8Q  <- another cell — NOT touched
+  NTAFT1KQ  <- cell2 Z — this server drives it
+  NTB19XKA  <- cell2 X — this server drives it
+  NTB3FXCE  <- another cell — NOT touched
+All three cell2 adapters present.
+
+Opening X   NTB19XKA
+Opening Z_A NTAFT1KQ
+Opening Z_B NTA0X8KN
+[SETUP] OK
+[SETUP] OK
+[SETUP] OK
+Live encoder read: X 0.001 mm  Z_A -0.000 mm  Z_B -0.000 mm
+cell2 is reachable on all three axes.
+
+Opening pump /dev/serial/by-path/pci-0000:00:14.0-usb-0:2.1.1:1.0-port0
+Pump answers: fw 8.33  serial 50487  24.0 V  address 1
+cell2's pump is reachable.
+
+serving cell2 on http://0.0.0.0:17056
+
+INFO:     127.0.0.1:55554 - "GET /v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39948 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:45134 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:42498 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:42498 - "GET /v1/diagnose HTTP/1.1" 200 OK
+Homing Z motors...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[TX] 0x90 000000B40000
+[RX] Success
+[RX] Success
+[TX] 0x91 (no data)
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+[RX] Success
+Limit switches enabled.
+Z homing complete.
+Homing X motor...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[RX] Success
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+X homing complete.
+INFO:     192.168.0.126:48102 - "POST /v1/gantry/home HTTP/1.1" 200 OK
+INFO:     192.168.0.126:45250 - "POST /v1/pump/initialize HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 260.0mm (speed=300RPM, accel=0, coord=0x-68000)
+[TX] 0xF5 012C00F98000
+[RX] Running
+[RX] Complete
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:45250 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+  Moving to 215.0mm (speed=300RPM, accel=0, coord=0x-56000)
+  Moving to 215.0mm (speed=300RPM, accel=0, coord=0x-56000)
+[TX] 0xF5 012C00FAA000
+[TX] 0xF5 012C00FAA000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:45250 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:45250 - "POST /v1/pump/cycle HTTP/1.1" 200 OK
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:45250 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:45250 - "GET /v1/status HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+[RX] Running
+[RX] Complete
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:53606 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:35452 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:35466 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59334 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35066 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:55272 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:55286 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:55300 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60946 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+[RX] Running
+[RX] Complete
+  Moving to 248.0mm (speed=300RPM, accel=0, coord=0x-63333)
+[TX] 0xF5 012C00F9CCCD
+[RX] Running
+[RX] Complete
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+INFO:     127.0.0.1:44060 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+  Moving to 200.0mm (speed=300RPM, accel=0, coord=0x-50000)
+  Moving to 200.0mm (speed=300RPM, accel=0, coord=0x-50000)
+[TX] 0xF5 012C00FB0000
+[TX] 0xF5 012C00FB0000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:43254 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:37792 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 204.9993896484375mm (speed=300RPM, accel=0, coord=0x-51FFF)
+  Moving to 204.9993896484375mm (speed=300RPM, accel=0, coord=0x-51FFF)
+[TX] 0xF5 012C00FAE001
+[TX] 0xF5 012C00FAE001
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:37800 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:37814 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 209.9993896484375mm (speed=300RPM, accel=0, coord=0x-53FFF)
+  Moving to 209.9993896484375mm (speed=300RPM, accel=0, coord=0x-53FFF)
+[TX] 0xF5 012C00FAC001
+[TX] 0xF5 012C00FAC001
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:37824 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:37840 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 214.9993896484375mm (speed=300RPM, accel=0, coord=0x-55FFF)
+  Moving to 214.9993896484375mm (speed=300RPM, accel=0, coord=0x-55FFF)
+[TX] 0xF5 012C00FAA001
+[TX] 0xF5 012C00FAA001
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:37842 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:37858 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 215.0mm (speed=300RPM, accel=0, coord=0x-56000)
+  Moving to 215.0mm (speed=300RPM, accel=0, coord=0x-56000)
+[TX] 0xF5 012C00FAA000
+[TX] 0xF5 012C00FAA000
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:37862 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:37878 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 217.0mm (speed=300RPM, accel=0, coord=0x-56CCC)
+  Moving to 217.0mm (speed=300RPM, accel=0, coord=0x-56CCC)
+[TX] 0xF5 012C00FA9334
+[TX] 0xF5 012C00FA9334
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:37886 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:39146 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 219.0mm (speed=300RPM, accel=0, coord=0x-57999)
+  Moving to 219.0mm (speed=300RPM, accel=0, coord=0x-57999)
+[TX] 0xF5 012C00FA8667
+[TX] 0xF5 012C00FA8667
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:39158 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:39170 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 221.0mm (speed=300RPM, accel=0, coord=0x-58666)
+  Moving to 221.0mm (speed=300RPM, accel=0, coord=0x-58666)
+[TX] 0xF5 012C00FA799A
+[TX] 0xF5 012C00FA799A
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:39176 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:39190 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 223.0mm (speed=300RPM, accel=0, coord=0x-59333)
+  Moving to 223.0mm (speed=300RPM, accel=0, coord=0x-59333)
+[TX] 0xF5 012C00FA6CCD
+[TX] 0xF5 012C00FA6CCD
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:39200 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:39204 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+[TX] 0xF5 012C00FA6000
+[TX] 0xF5 012C00FA6000
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:39216 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:39232 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:39234 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:41110 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:41126 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:49638 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 200.0mm (speed=300RPM, accel=0, coord=0x-50000)
+  Moving to 200.0mm (speed=300RPM, accel=0, coord=0x-50000)
+[TX] 0xF5 012C00FB0000
+[TX] 0xF5 012C00FB0000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:49162 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:49168 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 204.9981689453125mm (speed=300RPM, accel=0, coord=0x-51FFD)
+  Moving to 204.9981689453125mm (speed=300RPM, accel=0, coord=0x-51FFD)
+[TX] 0xF5 012C00FAE003
+[TX] 0xF5 012C00FAE003
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:49182 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:49198 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 209.9981689453125mm (speed=300RPM, accel=0, coord=0x-53FFD)
+  Moving to 209.9981689453125mm (speed=300RPM, accel=0, coord=0x-53FFD)
+[TX] 0xF5 012C00FAC003
+[TX] 0xF5 012C00FAC003
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:49210 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:49224 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 214.9981689453125mm (speed=300RPM, accel=0, coord=0x-55FFD)
+  Moving to 214.9981689453125mm (speed=300RPM, accel=0, coord=0x-55FFD)
+[TX] 0xF5 012C00FAA003
+[TX] 0xF5 012C00FAA003
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:37728 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:37732 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 215.0mm (speed=300RPM, accel=0, coord=0x-56000)
+  Moving to 215.0mm (speed=300RPM, accel=0, coord=0x-56000)
+[TX] 0xF5 012C00FAA000
+[TX] 0xF5 012C00FAA000
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:37740 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:37750 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 217.0mm (speed=300RPM, accel=0, coord=0x-56CCC)
+  Moving to 217.0mm (speed=300RPM, accel=0, coord=0x-56CCC)
+[TX] 0xF5 012C00FA9334
+[TX] 0xF5 012C00FA9334
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:37764 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:37768 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 219.0mm (speed=300RPM, accel=0, coord=0x-57999)
+  Moving to 219.0mm (speed=300RPM, accel=0, coord=0x-57999)
+[TX] 0xF5 012C00FA8667
+[TX] 0xF5 012C00FA8667
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:37778 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:37790 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 221.0mm (speed=300RPM, accel=0, coord=0x-58666)
+  Moving to 221.0mm (speed=300RPM, accel=0, coord=0x-58666)
+[TX] 0xF5 012C00FA799A
+[TX] 0xF5 012C00FA799A
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:37796 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:37806 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 223.0mm (speed=300RPM, accel=0, coord=0x-59333)
+  Moving to 223.0mm (speed=300RPM, accel=0, coord=0x-59333)
+[TX] 0xF5 012C00FA6CCD
+[TX] 0xF5 012C00FA6CCD
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:37818 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:41416 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+[TX] 0xF5 012C00FA6000
+[TX] 0xF5 012C00FA6000
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:41428 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:41436 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:46968 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:50478 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 200.0mm (speed=300RPM, accel=0, coord=0x-50000)
+  Moving to 200.0mm (speed=300RPM, accel=0, coord=0x-50000)
+[TX] 0xF5 012C00FB0000
+[TX] 0xF5 012C00FB0000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:50486 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:50496 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 204.998779296875mm (speed=300RPM, accel=0, coord=0x-51FFE)
+  Moving to 204.998779296875mm (speed=300RPM, accel=0, coord=0x-51FFE)
+[TX] 0xF5 012C00FAE002
+[TX] 0xF5 012C00FAE002
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:48374 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:48382 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 209.998779296875mm (speed=300RPM, accel=0, coord=0x-53FFE)
+  Moving to 209.998779296875mm (speed=300RPM, accel=0, coord=0x-53FFE)
+[TX] 0xF5 012C00FAC002
+[TX] 0xF5 012C00FAC002
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:48388 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:48396 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 214.998779296875mm (speed=300RPM, accel=0, coord=0x-55FFE)
+  Moving to 214.998779296875mm (speed=300RPM, accel=0, coord=0x-55FFE)
+[TX] 0xF5 012C00FAA002
+[TX] 0xF5 012C00FAA002
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:48402 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:48418 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 215.0mm (speed=300RPM, accel=0, coord=0x-56000)
+  Moving to 215.0mm (speed=300RPM, accel=0, coord=0x-56000)
+[TX] 0xF5 012C00FAA000
+[TX] 0xF5 012C00FAA000
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:48430 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:48444 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 217.0mm (speed=300RPM, accel=0, coord=0x-56CCC)
+  Moving to 217.0mm (speed=300RPM, accel=0, coord=0x-56CCC)
+[TX] 0xF5 012C00FA9334
+[TX] 0xF5 012C00FA9334
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:48456 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:48460 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 219.0mm (speed=300RPM, accel=0, coord=0x-57999)
+  Moving to 219.0mm (speed=300RPM, accel=0, coord=0x-57999)
+[TX] 0xF5 012C00FA8667
+[TX] 0xF5 012C00FA8667
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:34514 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:34522 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 221.0mm (speed=300RPM, accel=0, coord=0x-58666)
+  Moving to 221.0mm (speed=300RPM, accel=0, coord=0x-58666)
+[TX] 0xF5 012C00FA799A
+[TX] 0xF5 012C00FA799A
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:34524 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:34538 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 223.0mm (speed=300RPM, accel=0, coord=0x-59333)
+  Moving to 223.0mm (speed=300RPM, accel=0, coord=0x-59333)
+[TX] 0xF5 012C00FA6CCD
+[TX] 0xF5 012C00FA6CCD
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:34546 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:34556 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+[TX] 0xF5 012C00FA6000
+[TX] 0xF5 012C00FA6000
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:34568 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:34570 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:49842 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:49854 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:34402 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:48210 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:48226 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:48232 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:35322 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:35324 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:35328 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:41292 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:41292 - "POST /v1/stop HTTP/1.1" 200 OK
+INFO:     192.168.0.126:34380 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:60734 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:60734 - "GET /v1/diagnose HTTP/1.1" 200 OK
+Homing Z motors...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[TX] 0x90 000000B40000
+[RX] Success
+[RX] Success
+[TX] 0x91 (no data)
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+[RX] Success
+Limit switches enabled.
+Z homing complete.
+Homing X motor...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[RX] Success
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+X homing complete.
+INFO:     192.168.0.126:43848 - "POST /v1/gantry/home HTTP/1.1" 200 OK
+INFO:     192.168.0.126:48768 - "POST /v1/stop HTTP/1.1" 200 OK
+INFO:     192.168.0.126:37700 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:37714 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:58530 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:36036 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:36036 - "GET /v1/diagnose HTTP/1.1" 200 OK
+Homing Z motors...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[TX] 0x90 000000B40000
+[RX] Success
+[RX] Success
+[TX] 0x91 (no data)
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+[RX] Success
+Limit switches enabled.
+Z homing complete.
+Homing X motor...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[RX] Success
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+X homing complete.
+INFO:     192.168.0.126:53946 - "POST /v1/gantry/home HTTP/1.1" 200 OK
+INFO:     192.168.0.126:40376 - "POST /v1/pump/initialize HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 248.004mm (speed=300RPM, accel=0, coord=0x-63339)
+[TX] 0xF5 012C00F9CCC7
+[RX] Running
+[RX] Complete
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:40376 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+[TX] 0xF5 012C00FA6000
+[TX] 0xF5 012C00FA6000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:40376 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:40376 - "POST /v1/pump/cycle HTTP/1.1" 200 OK
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:40376 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:40376 - "GET /v1/status HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:54684 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:33788 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:33788 - "GET /v1/diagnose HTTP/1.1" 200 OK
+Homing Z motors...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[TX] 0x90 000000B40000
+[RX] Success
+[RX] Success
+[TX] 0x91 (no data)
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+[RX] Success
+Limit switches enabled.
+Z homing complete.
+Homing X motor...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[RX] Success
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+X homing complete.
+INFO:     192.168.0.126:35876 - "POST /v1/gantry/home HTTP/1.1" 200 OK
+INFO:     192.168.0.126:37938 - "POST /v1/pump/initialize HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 248.004mm (speed=300RPM, accel=0, coord=0x-63339)
+[TX] 0xF5 012C00F9CCC7
+[RX] Running
+[RX] Complete
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:37938 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+[TX] 0xF5 012C00FA6000
+[TX] 0xF5 012C00FA6000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:37938 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:37938 - "POST /v1/pump/cycle HTTP/1.1" 200 OK
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:37938 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:37938 - "GET /v1/status HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+[RX] Running
+[RX] Complete
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:48478 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:49372 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:49372 - "GET /v1/diagnose HTTP/1.1" 200 OK
+Homing Z motors...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[TX] 0x90 000000B40000
+[RX] Success
+[RX] Success
+[TX] 0x91 (no data)
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+[RX] Success
+Limit switches enabled.
+Z homing complete.
+Homing X motor...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[RX] Success
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+X homing complete.
+INFO:     192.168.0.126:49322 - "POST /v1/gantry/home HTTP/1.1" 200 OK
+INFO:     192.168.0.126:42494 - "POST /v1/pump/initialize HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 248.004mm (speed=300RPM, accel=0, coord=0x-63339)
+[TX] 0xF5 012C00F9CCC7
+[RX] Running
+[RX] Complete
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:42494 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+[TX] 0xF5 012C00FA6000
+[TX] 0xF5 012C00FA6000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:42494 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:42494 - "POST /v1/pump/cycle HTTP/1.1" 200 OK
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:42494 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:42494 - "GET /v1/status HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+[RX] Running
+[RX] Complete
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:33536 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:48206 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:48206 - "POST /v1/stop HTTP/1.1" 200 OK
+INFO:     192.168.0.126:57190 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:57190 - "GET /v1/diagnose HTTP/1.1" 200 OK
+Homing Z motors...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[TX] 0x90 000000B40000
+[RX] Success
+[RX] Success
+[TX] 0x91 (no data)
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+[RX] Success
+Limit switches enabled.
+Z homing complete.
+Homing X motor...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[RX] Success
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+X homing complete.
+INFO:     192.168.0.126:54602 - "POST /v1/gantry/home HTTP/1.1" 200 OK
+INFO:     192.168.0.126:45508 - "POST /v1/pump/initialize HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 248.004mm (speed=300RPM, accel=0, coord=0x-63339)
+[TX] 0xF5 012C00F9CCC7
+[RX] Running
+[RX] Complete
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:45508 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+[TX] 0xF5 012C00FA6000
+[TX] 0xF5 012C00FA6000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:45508 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:45508 - "POST /v1/pump/cycle HTTP/1.1" 200 OK
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:45508 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:45508 - "GET /v1/status HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+[RX] Running
+[RX] Complete
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:33756 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:44716 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:44716 - "GET /v1/diagnose HTTP/1.1" 200 OK
+Homing Z motors...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[TX] 0x90 000000B40000
+[RX] Success
+[RX] Success
+[TX] 0x91 (no data)
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+[RX] Success
+Limit switches enabled.
+Z homing complete.
+Homing X motor...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[RX] Success
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+X homing complete.
+INFO:     192.168.0.126:44722 - "POST /v1/gantry/home HTTP/1.1" 200 OK
+INFO:     192.168.0.126:60880 - "POST /v1/pump/initialize HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 248.004mm (speed=300RPM, accel=0, coord=0x-63339)
+[TX] 0xF5 012C00F9CCC7
+[RX] Running
+[RX] Complete
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:60880 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+[TX] 0xF5 012C00FA6000
+[TX] 0xF5 012C00FA6000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:60880 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:60880 - "POST /v1/pump/cycle HTTP/1.1" 200 OK
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:60880 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:60880 - "GET /v1/status HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+[RX] Running
+[RX] Complete
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:35828 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:54536 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:54536 - "GET /v1/diagnose HTTP/1.1" 200 OK
+Homing Z motors...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[TX] 0x90 000000B40000
+[RX] Success
+[RX] Success
+[TX] 0x91 (no data)
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+[RX] Success
+Limit switches enabled.
+Z homing complete.
+Homing X motor...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[RX] Success
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+X homing complete.
+INFO:     192.168.0.126:39384 - "POST /v1/gantry/home HTTP/1.1" 200 OK
+INFO:     192.168.0.126:58990 - "POST /v1/pump/initialize HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 248.004mm (speed=300RPM, accel=0, coord=0x-63339)
+[TX] 0xF5 012C00F9CCC7
+[RX] Running
+[RX] Complete
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:58990 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+[TX] 0xF5 012C00FA6000
+[TX] 0xF5 012C00FA6000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:58990 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:58990 - "POST /v1/pump/cycle HTTP/1.1" 200 OK
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:58990 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:58990 - "GET /v1/status HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:44242 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:46782 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:34402 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:53338 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:53520 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:46054 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:59096 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:59104 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:59120 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:52190 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:45162 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:32994 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:32994 - "GET /v1/diagnose HTTP/1.1" 200 OK
+Homing Z motors...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[TX] 0x90 000000B40000
+[RX] Success
+[RX] Success
+[TX] 0x91 (no data)
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Complete
+Homing complete. Zero point set.
+[RX] Success
+Limit switches enabled.
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+Z homing complete.
+Homing X motor...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[RX] Success
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+X homing complete.
+INFO:     192.168.0.126:51122 - "POST /v1/gantry/home HTTP/1.1" 200 OK
+INFO:     192.168.0.126:56948 - "POST /v1/pump/initialize HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 248.004mm (speed=300RPM, accel=0, coord=0x-63339)
+[TX] 0xF5 012C00F9CCC7
+[RX] Running
+[RX] Complete
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:56948 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+[TX] 0xF5 012C00FA6000
+[TX] 0xF5 012C00FA6000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:56948 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:56948 - "POST /v1/pump/cycle HTTP/1.1" 200 OK
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:56948 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:56948 - "GET /v1/status HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:59620 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:35164 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:35346 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:35682 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+[RX] Running
+[RX] Complete
+  Moving to 248.004mm (speed=300RPM, accel=0, coord=0x-63339)
+[TX] 0xF5 012C00F9CCC7
+[RX] Running
+[RX] Complete
+  Moving to 150.0mm (speed=300RPM, accel=0, coord=0x-3C000)
+  Moving to 150.0mm (speed=300RPM, accel=0, coord=0x-3C000)
+[TX] 0xF5 012C00FC4000
+[RX] Running
+[TX] 0xF5 012C00FC4000
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:47524 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:52750 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:52758 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 155.0mm (speed=300RPM, accel=0, coord=0x-3E000)
+  Moving to 155.0mm (speed=300RPM, accel=0, coord=0x-3E000)
+[TX] 0xF5 012C00FC2000
+[TX] 0xF5 012C00FC2000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:52760 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:52770 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 160.0mm (speed=300RPM, accel=0, coord=0x-40000)
+  Moving to 160.0mm (speed=300RPM, accel=0, coord=0x-40000)
+[TX] 0xF5 012C00FC0000
+[TX] 0xF5 012C00FC0000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:52776 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:48936 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 165.0mm (speed=300RPM, accel=0, coord=0x-42000)
+  Moving to 165.0mm (speed=300RPM, accel=0, coord=0x-42000)
+[TX] 0xF5 012C00FBE000
+[TX] 0xF5 012C00FBE000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:48952 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:48960 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 170.0mm (speed=300RPM, accel=0, coord=0x-44000)
+  Moving to 170.0mm (speed=300RPM, accel=0, coord=0x-44000)
+[TX] 0xF5 012C00FBC000
+[TX] 0xF5 012C00FBC000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:48976 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:48978 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 175.0mm (speed=300RPM, accel=0, coord=0x-46000)
+  Moving to 175.0mm (speed=300RPM, accel=0, coord=0x-46000)
+[TX] 0xF5 012C00FBA000
+[TX] 0xF5 012C00FBA000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:48992 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:49006 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 180.0mm (speed=300RPM, accel=0, coord=0x-48000)
+  Moving to 180.0mm (speed=300RPM, accel=0, coord=0x-48000)
+[TX] 0xF5 012C00FB8000
+[TX] 0xF5 012C00FB8000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:49022 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:49032 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 185.0mm (speed=300RPM, accel=0, coord=0x-4A000)
+  Moving to 185.0mm (speed=300RPM, accel=0, coord=0x-4A000)
+[TX] 0xF5 012C00FB6000
+[TX] 0xF5 012C00FB6000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:49034 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:59490 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 190.0mm (speed=300RPM, accel=0, coord=0x-4C000)
+  Moving to 190.0mm (speed=300RPM, accel=0, coord=0x-4C000)
+[TX] 0xF5 012C00FB4000
+[TX] 0xF5 012C00FB4000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:59498 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:59506 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 195.0mm (speed=300RPM, accel=0, coord=0x-4E000)
+  Moving to 195.0mm (speed=300RPM, accel=0, coord=0x-4E000)
+[TX] 0xF5 012C00FB2000
+[TX] 0xF5 012C00FB2000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:59512 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:59516 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 200.0mm (speed=300RPM, accel=0, coord=0x-50000)
+  Moving to 200.0mm (speed=300RPM, accel=0, coord=0x-50000)
+[TX] 0xF5 012C00FB0000
+[TX] 0xF5 012C00FB0000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:59520 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:59530 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 205.0mm (speed=300RPM, accel=0, coord=0x-52000)
+  Moving to 205.0mm (speed=300RPM, accel=0, coord=0x-52000)
+[TX] 0xF5 012C00FAE000
+[TX] 0xF5 012C00FAE000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:59542 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:59552 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 210.0mm (speed=300RPM, accel=0, coord=0x-54000)
+  Moving to 210.0mm (speed=300RPM, accel=0, coord=0x-54000)
+[TX] 0xF5 012C00FAC000
+[TX] 0xF5 012C00FAC000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:59562 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:34800 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 215.0mm (speed=300RPM, accel=0, coord=0x-56000)
+  Moving to 215.0mm (speed=300RPM, accel=0, coord=0x-56000)
+[TX] 0xF5 012C00FAA000
+[TX] 0xF5 012C00FAA000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:34804 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:34812 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 217.0mm (speed=300RPM, accel=0, coord=0x-56CCC)
+  Moving to 217.0mm (speed=300RPM, accel=0, coord=0x-56CCC)
+[TX] 0xF5 012C00FA9334
+[TX] 0xF5 012C00FA9334
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:34814 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:34820 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 219.0mm (speed=300RPM, accel=0, coord=0x-57999)
+  Moving to 219.0mm (speed=300RPM, accel=0, coord=0x-57999)
+[TX] 0xF5 012C00FA8667
+[TX] 0xF5 012C00FA8667
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:34830 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:34836 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 221.0mm (speed=300RPM, accel=0, coord=0x-58666)
+  Moving to 221.0mm (speed=300RPM, accel=0, coord=0x-58666)
+[TX] 0xF5 012C00FA799A
+[TX] 0xF5 012C00FA799A
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:34850 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:34856 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 223.0mm (speed=300RPM, accel=0, coord=0x-59333)
+  Moving to 223.0mm (speed=300RPM, accel=0, coord=0x-59333)
+[TX] 0xF5 012C00FA6CCD
+[TX] 0xF5 012C00FA6CCD
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:34862 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:53264 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+[TX] 0xF5 012C00FA6000
+[TX] 0xF5 012C00FA6000
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:53268 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:53276 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:53278 - "GET /v1/diagnose HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:33598 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:50462 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:56536 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:45952 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:45952 - "GET /v1/diagnose HTTP/1.1" 200 OK
+Homing Z motors...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[TX] 0x90 000000B40000
+[RX] Success
+[RX] Success
+[TX] 0x91 (no data)
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+[RX] Success
+Limit switches enabled.
+Z homing complete.
+Homing X motor...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[RX] Success
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+X homing complete.
+INFO:     192.168.0.126:34670 - "POST /v1/gantry/home HTTP/1.1" 200 OK
+INFO:     192.168.0.126:48806 - "POST /v1/pump/initialize HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 248.004mm (speed=300RPM, accel=0, coord=0x-63339)
+[TX] 0xF5 012C00F9CCC7
+[RX] Running
+[RX] Complete
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:48806 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+[TX] 0xF5 012C00FA6000
+[TX] 0xF5 012C00FA6000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:48806 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:48806 - "POST /v1/pump/cycle HTTP/1.1" 200 OK
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:48806 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:48806 - "GET /v1/status HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+[RX] Running
+[RX] Complete
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:60250 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:40532 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:40536 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:46738 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:46738 - "GET /v1/diagnose HTTP/1.1" 200 OK
+Homing Z motors...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[TX] 0x90 000000B40000
+[RX] Success
+[RX] Success
+[TX] 0x91 (no data)
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+Z homing complete.
+Homing X motor...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[RX] Success
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+X homing complete.
+INFO:     192.168.0.126:57440 - "POST /v1/gantry/home HTTP/1.1" 200 OK
+INFO:     192.168.0.126:59316 - "POST /v1/pump/initialize HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 248.004mm (speed=300RPM, accel=0, coord=0x-63339)
+[TX] 0xF5 012C00F9CCC7
+[RX] Running
+[RX] Complete
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:59316 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+[TX] 0xF5 012C00FA6000
+[TX] 0xF5 012C00FA6000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:59316 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:59316 - "POST /v1/pump/cycle HTTP/1.1" 200 OK
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:59316 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:59316 - "GET /v1/status HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+[RX] Running
+[RX] Complete
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:55646 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:41074 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:41090 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:41094 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:43826 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:33378 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:33382 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:33382 - "GET /v1/diagnose HTTP/1.1" 200 OK
+Homing Z motors...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[TX] 0x90 000000B40000
+[RX] Success
+[RX] Success
+[TX] 0x91 (no data)
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+[RX] Success
+Limit switches enabled.
+Z homing complete.
+Homing X motor...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[RX] Success
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+X homing complete.
+INFO:     192.168.0.126:45298 - "POST /v1/gantry/home HTTP/1.1" 200 OK
+INFO:     192.168.0.126:54566 - "POST /v1/pump/initialize HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 248.004mm (speed=300RPM, accel=0, coord=0x-63339)
+[TX] 0xF5 012C00F9CCC7
+[RX] Running
+[RX] Complete
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:54566 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+[TX] 0xF5 012C00FA6000
+[TX] 0xF5 012C00FA6000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:54566 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:54566 - "POST /v1/pump/cycle HTTP/1.1" 200 OK
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:54566 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:54566 - "GET /v1/status HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:59242 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:53420 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:53430 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:55554 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:52384 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:51470 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:51470 - "GET /v1/diagnose HTTP/1.1" 200 OK
+Homing Z motors...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[TX] 0x90 000000B40000
+[RX] Success
+[RX] Success
+[TX] 0x91 (no data)
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+[RX] Success
+Limit switches enabled.
+Z homing complete.
+Homing X motor...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[RX] Success
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+X homing complete.
+INFO:     192.168.0.126:40378 - "POST /v1/gantry/home HTTP/1.1" 200 OK
+INFO:     192.168.0.126:60180 - "POST /v1/pump/initialize HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 248.004mm (speed=300RPM, accel=0, coord=0x-63339)
+[TX] 0xF5 012C00F9CCC7
+[RX] Running
+[RX] Complete
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:60180 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+[TX] 0xF5 012C00FA6000
+[TX] 0xF5 012C00FA6000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:60180 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:60180 - "POST /v1/pump/cycle HTTP/1.1" 200 OK
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:60180 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:60180 - "GET /v1/status HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:59774 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:35532 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:34358 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:34368 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:34370 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:34372 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56266 - "GET /v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56278 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:50564 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:50572 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:56190 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:52434 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:45856 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:45858 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:45858 - "GET /v1/diagnose HTTP/1.1" 200 OK
+Homing Z motors...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[TX] 0x90 000000B40000
+[RX] Success
+[RX] Success
+[TX] 0x91 (no data)
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+[RX] Success
+Limit switches enabled.
+Z homing complete.
+Homing X motor...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[RX] Success
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+X homing complete.
+INFO:     192.168.0.126:46434 - "POST /v1/gantry/home HTTP/1.1" 200 OK
+INFO:     192.168.0.126:39558 - "POST /v1/stop HTTP/1.1" 200 OK
+INFO:     192.168.0.126:52936 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:45640 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:41444 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:41444 - "GET /v1/diagnose HTTP/1.1" 200 OK
+Homing Z motors...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[TX] 0x90 000000B40000
+[RX] Success
+[RX] Success
+[TX] 0x91 (no data)
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+[RX] Success
+Limit switches enabled.
+Z homing complete.
+Homing X motor...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[RX] Success
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+X homing complete.
+INFO:     192.168.0.126:53288 - "POST /v1/gantry/home HTTP/1.1" 200 OK
+INFO:     192.168.0.126:43410 - "POST /v1/pump/initialize HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 248.004mm (speed=300RPM, accel=0, coord=0x-63339)
+[TX] 0xF5 012C00F9CCC7
+[RX] Running
+[RX] Complete
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:43410 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+[TX] 0xF5 012C00FA6000
+[TX] 0xF5 012C00FA6000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:43410 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:43410 - "POST /v1/pump/cycle HTTP/1.1" 200 OK
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:43410 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:43410 - "GET /v1/status HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+[RX] Running
+[RX] Complete
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:36052 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:42436 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:42438 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:42442 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:42454 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:38500 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:57920 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:57928 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:57928 - "GET /v1/diagnose HTTP/1.1" 200 OK
+Homing Z motors...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[TX] 0x90 000000B40000
+[RX] Success
+[RX] Success
+[TX] 0x91 (no data)
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+[RX] Success
+Limit switches enabled.
+Z homing complete.
+Homing X motor...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[RX] Success
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+X homing complete.
+INFO:     192.168.0.126:38484 - "POST /v1/gantry/home HTTP/1.1" 200 OK
+INFO:     192.168.0.126:54492 - "POST /v1/pump/initialize HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 248.004mm (speed=300RPM, accel=0, coord=0x-63339)
+[TX] 0xF5 012C00F9CCC7
+[RX] Running
+[RX] Complete
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:54492 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+[TX] 0xF5 012C00FA6000
+[TX] 0xF5 012C00FA6000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:54492 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:54492 - "POST /v1/pump/cycle HTTP/1.1" 200 OK
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:54492 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:54492 - "GET /v1/status HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+[RX] Running
+[RX] Complete
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:55558 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:42108 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:60236 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:38820 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:53570 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:53574 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:53574 - "GET /v1/diagnose HTTP/1.1" 200 OK
+Homing Z motors...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[TX] 0x90 000000B40000
+[RX] Success
+[RX] Success
+[TX] 0x91 (no data)
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+[RX] Success
+Limit switches enabled.
+Z homing complete.
+Homing X motor...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[RX] Success
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+X homing complete.
+INFO:     192.168.0.126:44634 - "POST /v1/gantry/home HTTP/1.1" 200 OK
+INFO:     192.168.0.126:53200 - "POST /v1/pump/initialize HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 248.004mm (speed=300RPM, accel=0, coord=0x-63339)
+[TX] 0xF5 012C00F9CCC7
+[RX] Running
+[RX] Complete
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:53200 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+[TX] 0xF5 012C00FA6000
+[TX] 0xF5 012C00FA6000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:53200 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:53200 - "POST /v1/pump/cycle HTTP/1.1" 200 OK
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:53200 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:53200 - "GET /v1/status HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+[RX] Running
+[RX] Complete
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:50690 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:40542 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:37426 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:54416 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:54428 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:54428 - "GET /v1/diagnose HTTP/1.1" 200 OK
+Homing Z motors...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[TX] 0x90 000000B40000
+[RX] Success
+[RX] Success
+[TX] 0x91 (no data)
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+[RX] Success
+Limit switches enabled.
+Z homing complete.
+Homing X motor...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[RX] Success
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+X homing complete.
+INFO:     192.168.0.126:51106 - "POST /v1/gantry/home HTTP/1.1" 200 OK
+INFO:     192.168.0.126:41606 - "POST /v1/pump/initialize HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 249.004mm (speed=300RPM, accel=0, coord=0x-639A0)
+[TX] 0xF5 012C00F9C660
+[RX] Running
+[RX] Complete
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:41606 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+[TX] 0xF5 012C00FA6000
+[TX] 0xF5 012C00FA6000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:41606 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:41606 - "POST /v1/pump/cycle HTTP/1.1" 200 OK
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:41606 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:41606 - "GET /v1/status HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:60426 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:52326 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:53382 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:60900 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:55284 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:55286 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:55286 - "GET /v1/diagnose HTTP/1.1" 200 OK
+Homing Z motors...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[TX] 0x90 000000B40000
+[RX] Success
+[RX] Success
+[TX] 0x91 (no data)
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Complete
+Homing complete. Zero point set.
+[RX] Success
+Limit switches enabled.
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+Z homing complete.
+Homing X motor...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[RX] Success
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+X homing complete.
+INFO:     192.168.0.126:33086 - "POST /v1/gantry/home HTTP/1.1" 200 OK
+INFO:     192.168.0.126:56974 - "POST /v1/pump/initialize HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 250.004mm (speed=300RPM, accel=0, coord=0x-64006)
+[TX] 0xF5 012C00F9BFFA
+[RX] Running
+[RX] Complete
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:56974 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+[TX] 0xF5 012C00FA6000
+[TX] 0xF5 012C00FA6000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:56974 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:56974 - "POST /v1/pump/cycle HTTP/1.1" 200 OK
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:56974 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:56974 - "GET /v1/status HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:39836 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+Homing Z motors...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[TX] 0x90 000000B40000
+[RX] Success
+[RX] Success
+[TX] 0x91 (no data)
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+[RX] Success
+Limit switches enabled.
+Z homing complete.
+Homing X motor...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[RX] Success
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+X homing complete.
+INFO:     192.168.0.126:37036 - "POST /v1/gantry/home HTTP/1.1" 200 OK
+INFO:     192.168.0.126:49762 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:60196 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:60198 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:60210 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:60210 - "GET /v1/diagnose HTTP/1.1" 200 OK
+Homing Z motors...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[TX] 0x90 000000B40000
+[RX] Success
+[RX] Success
+[TX] 0x91 (no data)
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+[RX] Success
+Limit switches enabled.
+Z homing complete.
+Homing X motor...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[RX] Success
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+X homing complete.
+INFO:     192.168.0.126:50032 - "POST /v1/gantry/home HTTP/1.1" 200 OK
+INFO:     192.168.0.126:34622 - "POST /v1/pump/initialize HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 250.004mm (speed=300RPM, accel=0, coord=0x-64006)
+[TX] 0xF5 012C00F9BFFA
+[RX] Running
+[RX] Complete
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:34622 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+[TX] 0xF5 012C00FA6000
+[TX] 0xF5 012C00FA6000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:34622 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:34622 - "POST /v1/pump/cycle HTTP/1.1" 200 OK
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:34622 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:34622 - "GET /v1/status HTTP/1.1" 200 OK
+Homing Z motors...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[TX] 0x90 000000B40000
+[RX] Success
+[RX] Success
+[TX] 0x91 (no data)
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+[RX] Success
+Limit switches enabled.
+Z homing complete.
+Homing X motor...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[RX] Success
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+X homing complete.
+INFO:     192.168.0.126:33058 - "POST /v1/gantry/home HTTP/1.1" 200 OK
+INFO:     192.168.0.126:42808 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:54188 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:54194 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:54202 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:54202 - "GET /v1/diagnose HTTP/1.1" 200 OK
+Homing Z motors...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[TX] 0x90 000000B40000
+[RX] Success
+[RX] Success
+[TX] 0x91 (no data)
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+[RX] Success
+Limit switches enabled.
+Z homing complete.
+Homing X motor...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[RX] Success
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+X homing complete.
+INFO:     192.168.0.126:49320 - "POST /v1/gantry/home HTTP/1.1" 200 OK
+INFO:     192.168.0.126:45778 - "POST /v1/pump/initialize HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 250.004mm (speed=300RPM, accel=0, coord=0x-64006)
+[TX] 0xF5 012C00F9BFFA
+[RX] Running
+[RX] Complete
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:45778 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+[TX] 0xF5 012C00FA6000
+[TX] 0xF5 012C00FA6000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:45778 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:45778 - "POST /v1/pump/cycle HTTP/1.1" 200 OK
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:45778 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:45778 - "GET /v1/status HTTP/1.1" 200 OK
+INFO:     192.168.0.126:38356 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:51320 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:58410 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:34060 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:46048 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:33434 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:39210 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:39212 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:39212 - "GET /v1/diagnose HTTP/1.1" 200 OK
+Homing Z motors...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[TX] 0x90 000000B40000
+[RX] Success
+[RX] Success
+[TX] 0x91 (no data)
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+[RX] Success
+Limit switches enabled.
+Z homing complete.
+Homing X motor...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[RX] Success
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+X homing complete.
+INFO:     192.168.0.126:51976 - "POST /v1/gantry/home HTTP/1.1" 200 OK
+INFO:     192.168.0.126:60418 - "POST /v1/pump/initialize HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 250.004mm (speed=300RPM, accel=0, coord=0x-64006)
+[TX] 0xF5 012C00F9BFFA
+[RX] Running
+[RX] Complete
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:60418 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+[TX] 0xF5 012C00FA6000
+[TX] 0xF5 012C00FA6000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:60418 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:60418 - "POST /v1/pump/cycle HTTP/1.1" 200 OK
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:60418 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:60418 - "GET /v1/status HTTP/1.1" 200 OK
+INFO:     192.168.0.126:47258 - "POST /v1/stop HTTP/1.1" 200 OK
+INFO:     192.168.0.126:48256 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:37358 - "GET /v1/diagnose HTTP/1.1" 200 OK
+Homing Z motors...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[TX] 0x90 000000B40000
+[RX] Success
+[RX] Success
+[TX] 0x91 (no data)
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+[RX] Success
+Limit switches enabled.
+Z homing complete.
+Homing X motor...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[RX] Success
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+X homing complete.
+INFO:     192.168.0.126:33226 - "POST /v1/gantry/home HTTP/1.1" 200 OK
+INFO:     192.168.0.126:55408 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:55416 - "GET /v1/diagnose HTTP/1.1" 200 OK
+INFO:     192.168.0.126:55420 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     192.168.0.126:55420 - "GET /v1/diagnose HTTP/1.1" 200 OK
+Homing Z motors...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[TX] 0x90 000000B40000
+[RX] Success
+[RX] Success
+[TX] 0x91 (no data)
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+[RX] Success
+Limit switches enabled.
+Z homing complete.
+Homing X motor...
+========================================
+HOMING (speed=180 RPM, dir=0x00)
+========================================
+[TX] 0x90 000000B40000
+[RX] Success
+[TX] 0x91 (no data)
+[RX] Running
+Moving toward origin switch...
+[RX] Complete
+Homing complete. Zero point set.
+[TX] 0x90 000000B40100
+[RX] Success
+Limit switches enabled.
+X homing complete.
+INFO:     192.168.0.126:45628 - "POST /v1/gantry/home HTTP/1.1" 200 OK
+INFO:     192.168.0.126:44142 - "POST /v1/pump/initialize HTTP/1.1" 200 OK
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+  Moving to 0.0mm (speed=300RPM, accel=0, coord=0x000000)
+[TX] 0xF5 012C00000000
+[TX] 0xF5 012C00000000
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+[RX] Running
+[RX] Stopped by Limit
+[LIMIT] Motor stopped by limit switch
+  Moving to 250.004mm (speed=300RPM, accel=0, coord=0x-64006)
+[TX] 0xF5 012C00F9BFFA
+[RX] Running
+[RX] Complete
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Complete
+[RX] Running
+[RX] Complete
+INFO:     192.168.0.126:44142 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+  Moving to 225.0mm (speed=300RPM, accel=0, coord=0x-5A000)
+[TX] 0xF5 012C00FA6000
+[TX] 0xF5 012C00FA6000
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:44142 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:44142 - "POST /v1/pump/cycle HTTP/1.1" 200 OK
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+  Moving to 3.0mm (speed=300RPM, accel=0, coord=0x-01333)
+[TX] 0xF5 012C00FFECCD
+[TX] 0xF5 012C00FFECCD
+[RX] Running
+[RX] Running
+[RX] Complete
+[RX] Complete
+INFO:     192.168.0.126:44142 - "POST /v1/gantry/move HTTP/1.1" 200 OK
+INFO:     192.168.0.126:44142 - "GET /v1/status HTTP/1.1" 200 OK
+INFO:     192.168.0.126:40532 - "POST /v1/stop HTTP/1.1" 200 OK
+INFO:     192.168.0.126:37892 - "GET /v1/diagnose HTTP/1.1" 200 OK
