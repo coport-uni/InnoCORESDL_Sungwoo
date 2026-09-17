@@ -131,6 +131,11 @@ def _no_linear() -> WrongStateError:
     return WrongStateError("Cell 5 has no linear rail", command="linear")
 
 
+def _no_arm() -> WrongStateError:
+    # Defensive stub: the robot arms are cell6 / cell7.
+    return WrongStateError("Cell 5 has no robot arm", command="arm")
+
+
 def _no_lamp() -> WrongStateError:
     # Not "absent hardware" but "unconfigured": the plug needs
     # credentials in the driver's secure.env, written by the operator.
@@ -577,6 +582,21 @@ class PumpZThermalCell(Cell):
             "target": self._cfg.lamp_target,
             "devices": [r.entry.name for r in results],
         }
+
+    # ── Arm (cell6 / cell7 only) ────────────────────────────────────────
+    def prepare_arm(self) -> dict:
+        raise _no_arm()
+
+    def jog_joint(
+        self, joint: int, delta_deg: float, *, speed_pct: float | None = None
+    ) -> dict:
+        raise _no_arm()
+
+    def start_program(self, name: str) -> dict:
+        raise _no_arm()
+
+    def await_program(self) -> dict:
+        raise _no_arm()
 
     # ── Safety / lifecycle ──────────────────────────────────────────────
     def stop(self) -> None:

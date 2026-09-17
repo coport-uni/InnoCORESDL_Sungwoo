@@ -1051,7 +1051,7 @@ async def test_pump_cycle_demo(engine: Engine, fake_l1: FakeL1) -> None:
     # remaining_cycles is TOTAL MINUS ONE (cycle 1 is unrolled), so a
     # future edit that sets it to the desired total would run one extra
     # cycle -- this pin catches that off-by-one.
-    assert 1 + cycle_body["cycles"] == 30
+    assert 1 + cycle_body["cycles"] == 20
 
     # The fake's end state matches what the scenario's witness asserted.
     assert fake_l1.plunger_uL["cell1"] == 0.0

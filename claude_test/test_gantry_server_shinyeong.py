@@ -90,6 +90,34 @@ class CellWiring:
     #: `ttyUSB*` renumbering and the EMI re-enumerations, because neither
     #: changes where the plug is.
     pump_port: str | None
+    #: What this cell's pump answers to `?202` — the pump's OWN serial
+    #: number, not a USB one (CH340s have no USB serial, which is why
+    #: `pump_port` is a by-path in the first place). Checked at open and
+    #: refused on mismatch.
+    #:
+    #: This is the half `pump_port` cannot supply. by-path names a
+    #: SOCKET, so it stays valid while pointing at the wrong pump the
+    #: moment two cables are swapped — and a swap is silent: both pumps
+    #: open, both answer, both dispense, into the wrong vessels. The
+    #: socket cannot say which pump is on its far end; only the pump can.
+    #:
+    #: None = not known yet. The launcher then prints the serial and
+    #: serves, which is how you LEARN it on a first bring-up. Fill it in
+    #: here afterwards. Replacing a pump means editing this line — that
+    #: is the point, not an inconvenience.
+    #:
+    #: Two ways to read one, with the servers DOWN for the second:
+    #:
+    #:     curl -s <nuc2>:17056/v1/diagnose | grep serial_number
+    #:
+    #:     .venv/bin/python -c "from sy01b import SyringePumpController \
+    #:       as S; c=S.Config(port='<by-path>', address=1, syringe_uL=125)
+    #:       ; p=S.open(c); print(p.query_serial_number()); p.close()"
+    #:
+    #: Do BOTH pumps in one sitting and compare: two cells reporting the
+    #: same number means the by-paths are wrong, and neither value is
+    #: safe to record.
+    pump_serial: str | None = None
 
 
 #: Read off NUC2's live bus on 2026-07-29 and cross-checked against the
@@ -110,6 +138,11 @@ WIRING = {
         pump_port=(
             "/dev/serial/by-path/pci-0000:00:14.0-usb-0:2.1.1:1.0-port0"
         ),
+        # Read from this socket's diagnose() 2026-08-27, in the same
+        # sitting as cell3's, which is the comparison that makes either
+        # value trustworthy: 50487 != 30308, so the two by-paths lead to
+        # two different pumps. (NUC1's cell1 pump is a third, 32656.)
+        pump_serial="50487",
     ),
     "cell3": CellWiring(
         serial_x="NTB3FXCE",
@@ -121,6 +154,8 @@ WIRING = {
         pump_port=(
             "/dev/serial/by-path/pci-0000:00:14.0-usb-0:7.3.1:1.0-port0"
         ),
+        # Read alongside cell2's, 2026-08-27 — see the note there.
+        pump_serial="30308",
     ),
 }
 
@@ -278,6 +313,9 @@ def _prove_reachable(
 
 
 def _open_pump(config: Config, cell_name: str) -> SyringePumpController:
+def _open_pump(
+    config: Config, cell_name: str, expect_serial: str | None
+) -> SyringePumpController:
     """Open this cell's pump and refuse to serve one that cannot talk.
 
     Goes through `PumpGantryCell`'s own opener rather than
@@ -292,6 +330,12 @@ def _open_pump(config: Config, cell_name: str) -> SyringePumpController:
     prints the pump's OWN serial number, which is the only way to
     confirm that this by-path really leads to the pump you think it
     does — the socket cannot tell you that.
+    prints the pump's OWN serial number and, when
+    `expect_serial` is given, refuses a pump that is not the expected
+    one. That check is the half `pump_port` cannot do: a by-path names
+    a socket, so swapping two cables leaves both paths valid and both
+    pumps answering, and nothing downstream would notice until the
+    wrong vessel filled.
 
     Raises:
         BenchRefusal: The pump did not open, or opened and cannot talk.
@@ -325,6 +369,24 @@ def _open_pump(config: Config, cell_name: str) -> SyringePumpController:
         f"serial {report.serial_number}  {report.supply_volts} V  "
         f"address {config.pump_address}"
     )
+    if expect_serial is None:
+        print(
+            "  (no expected serial recorded for this cell — put "
+            f'pump_serial="{report.serial_number}" in '
+            f'CellWiring["{cell_name}"] so a swapped cable is caught '
+            "here instead of in the chemistry)"
+        )
+    elif report.serial_number != expect_serial:
+        pump.close()
+        raise BenchRefusal(
+            f"{config.pump_port} leads to pump {report.serial_number}, "
+            f"but {cell_name} expects {expect_serial}. Refusing to "
+            f"serve: a by-path names a socket, so this is what two "
+            f"swapped cables look like — the wrong pump would open, "
+            f"answer, and dispense. Re-check the sockets, or update "
+            f'CellWiring["{cell_name}"].pump_serial if the pump was '
+            f"deliberately replaced."
+        )
     if not report.ok_to_initialize:
         pump.close()
         raise BenchRefusal(
@@ -372,6 +434,19 @@ def main(argv: list[str] | None = None) -> int:
         "/v1/pump/* then answers 409.",
     )
     parser.add_argument(
+        "--pump-serial",
+        default=None,
+        help="expect this ?202 serial from the pump and refuse any "
+        "other. Overrides CellWiring; use --any-pump-serial to accept "
+        "whatever answers.",
+    )
+    parser.add_argument(
+        "--any-pump-serial",
+        action="store_true",
+        help="skip the expected-serial check, for a first bring-up or a "
+        "pump that has just been replaced",
+    )
+    parser.add_argument(
         "--pump-address",
         type=int,
         default=DEFAULT_PUMP_ADDRESS,
@@ -394,6 +469,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.no_pump and args.pump_port:
         parser.error("--no-pump and --pump-port contradict each other")
+    if args.any_pump_serial and args.pump_serial:
+        parser.error(
+            "--any-pump-serial and --pump-serial contradict each other"
+        )
 
     wiring = WIRING[args.cell]
     port = args.port if args.port is not None else wiring.port
@@ -406,6 +485,15 @@ def main(argv: list[str] | None = None) -> int:
         pump_port = args.pump_port
     else:
         pump_port = wiring.pump_port
+    # Same precedence for the identity check: an explicit --pump-serial,
+    # else the bench value, unless --any-pump-serial waives it. Waiving
+    # is how a first bring-up learns the number it will then record.
+    if args.any_pump_serial:
+        pump_serial = None
+    elif args.pump_serial:
+        pump_serial = args.pump_serial
+    else:
+        pump_serial = wiring.pump_serial
 
     print(
         f"{args.cell} L1 server — NUC2, adapters named explicitly.\n"
@@ -435,6 +523,7 @@ def main(argv: list[str] | None = None) -> int:
         # motors should not have had its pump opened first.
         if pump_port is not None:
             pump = _open_pump(config, args.cell)
+            pump = _open_pump(config, args.cell, pump_serial)
         else:
             print(f"{args.cell}: no pump — /v1/pump/* will answer 409.\n")
     except BenchRefusal as refusal:

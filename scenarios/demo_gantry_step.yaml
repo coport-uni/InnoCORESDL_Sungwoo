@@ -41,6 +41,63 @@
 #        python -m orchestrator run scenarios/demo_gantry_step.yaml --step-mode
 #        python -m orchestrator run scenarios/demo_gantry_step.yaml
 
+# ── Running this scenario ───────────────────────────────────────────────
+#
+# 1. One cell server per cell this scenario names. Each is its own
+#    process and owns its devices — start them in separate terminals
+#    (or as `deploy/systemd/cell@.service` units) and leave them up.
+#    `--cell` is not needed: the shape is inferred from the config's
+#    device tables.
+#
+#      conda activate sdl
+#      cd ~/workspace/InnoCOREServer/InnoCORESDL_Sungwoo
+#      python -m server --config server/nuc1/cell1.toml
+#
+#    Ports: cell1=17054. cell1 = pump + XZ gantry.
+#
+# 2. Check each server is up and sees its hardware BEFORE any motion.
+#    `diagnose` is the last gate that can catch a device that answers
+#    reads but will not move:
+#
+#      curl -s localhost:17054/v1/health
+#      curl -s localhost:17054/v1/diagnose | python3 -m json.tool
+#
+# 3. The orchestrator reads its cell list from orchestrator/config.toml.
+#    Every cell above must be registered AND UNCOMMENTED there:
+#
+#      [cells.cell1]
+#      base_url = "http://127.0.0.1:17054"
+#
+#    Some cells ship commented out on purpose, with the reason next to
+#    them — a registered-but-down cell costs a connect timeout on every
+#    `/v1/cells` probe and on every `stop_on_failure` broadcast, because
+#    the engine POSTs /v1/stop to every REGISTERED cell, not only the
+#    ones a run touched. So uncomment a cell together with its server,
+#    and comment it back out when you power that bench down.
+#
+# 4. Dry run first — it validates every action and body field against
+#    each cell's live OpenAPI, and moves nothing:
+#
+#      python -m orchestrator validate scenarios/demo_gantry_step.yaml
+#
+# 5. Then the real run. The first hardware-touching step waits for
+#    an operator confirmation.
+#
+#      python -m orchestrator run scenarios/demo_gantry_step.yaml
+#
+#    Add `--step-mode` to pause before EVERY step. Use it only
+#    when debugging: thirteen prompts of which one matters is how
+#    an operator stops reading them.
+#
+#    A runlog is written to `runs/<UTC>-<name>/` (gitignored):
+#    meta.json, run.jsonl, scenario.yaml, vars.json.
+#
+# Stopping a server: Ctrl-C in its terminal, or find the pid with
+# `pgrep -af 'm server --config'` and `kill <pid>`. Do NOT use
+# `pkill -f 'server --config'` — the pattern matches your own shell.
+#
+# ──────────────────────────────────────────────────────────────────────────
+
 name: demo_gantry_step
 description: >
   cell1's XZ gantry bring-up. Homes the gantry, steps X out 50 mm and

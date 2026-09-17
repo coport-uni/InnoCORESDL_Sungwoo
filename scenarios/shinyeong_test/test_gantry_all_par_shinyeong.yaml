@@ -1,0 +1,251 @@
+# Three gantries moving AT THE SAME TIME. Run the sequential scenario
+# first; this one is the follow-up experiment, not a substitute.
+#
+# WHY THIS FILE IS DIFFERENT FROM EVERY OTHER SCENARIO HERE
+#   No scenario in this repository has ever used a `parallel:` block --
+#   confirmed against the full git history. The orchestrator implements
+#   one (orchestrator/engine.py gathers the children with asyncio.gather,
+#   and orchestrator/scenario.py refuses a block that names one cell
+#   twice), but it has never driven hardware. So this run tests the L2
+#   concurrency path itself, and it does that with the smallest motion
+#   that can still prove it.
+#
+# WHAT IS DELIBERATELY *NOT* PARALLEL
+#   Homing. A home is a full seek whose length depends on where the axis
+#   happens to be, so three simultaneous homes could move three frames a
+#   long way at once. They are homed one at a time below; only the short
+#   step afterwards is concurrent. The novelty is confined to the two
+#   smallest, most predictable moves in the file.
+#
+# THE OPERATOR PROBLEM, STATED PLAINLY
+#   One person cannot watch three frames at once. That is not solved by
+#   any code here. Mitigations, all of them partial:
+#     * `step_mm` is 5 mm, a tenth of the sequential scenario's step;
+#     * each parallel block carries an explicit `pause`, so the run stops
+#       and waits for you immediately before the concurrent motion --
+#       confirm_first_motion only fires once per run and will already
+#       have been spent on the first home;
+#     * every cell verifies its own move by encoder readback before the
+#       next step, so a gantry that did not travel fails the run.
+#   If you cannot see all three frames from where you stand, run the
+#   sequential scenario instead. There is no shame in that result.
+#
+# ON ABORT
+#   `stop_on_failure` broadcasts POST /v1/stop to every registered cell,
+#   but that request queues behind the move it means to interrupt
+#   (docs/L1_AUDIT.md GAP-9). With three gantries in flight it stops
+#   none of them in time. Three physical e-stops, one per frame, are the
+#   only immediate stop -- and you have two hands.
+#
+# TOPOLOGY
+#   cell1  nuc1 (this NUC)   http://127.0.0.1:17054      pump + gantry
+#   cell2  nuc2 192.168.0.120:17056                      gantry only
+#   cell3  nuc2 192.168.0.120:17058                      gantry only
+#
+# ORDER
+#   python -m orchestrator validate scenarios/test_gantry_all_par_shinyeong.yaml
+#   python -m orchestrator run scenarios/test_gantry_all_par_shinyeong.yaml --step-mode
+#   (a free run only after --step-mode has completed cleanly)
+
+name: test_gantry_all_par_shinyeong
+description: >
+  Three-cell concurrent gantry test across two NUCs. Homes cell1, cell2
+  and cell3 one at a time, then steps all three X axes out 5 mm in a
+  single parallel block and back again, verifying each cell's encoder
+  readback. Exercises the orchestrator's parallel path, which no
+  scenario has used before.
+
+params:
+  # A tenth of the sequential scenario's step. Three frames move at once
+  # here and one operator cannot watch three; small is the mitigation.
+  step_mm: 5.0
+  tolerance_mm: 0.5
+  speed_pct: 10
+  accel_pct: 0
+
+defaults:
+  on_fail: abort
+  timeout_s: 60.0
+
+steps:
+  # ── Pre-flight: every cell, before anything moves ──────────────────
+  - id: diag_cell1
+    cell: cell1
+    action: diagnose
+    method: GET
+    timeout_s: 15.0
+    save_as: d1
+
+  - id: diag_cell2
+    cell: cell2
+    action: diagnose
+    method: GET
+    timeout_s: 15.0
+    save_as: d2
+
+  - id: diag_cell3
+    cell: cell3
+    action: diagnose
+    method: GET
+    timeout_s: 15.0
+    save_as: d3
+
+  - id: verify_all_stages
+    assert: "${d1.stage.ok} == true and ${d2.stage.ok} == true and ${d3.stage.ok} == true"
+
+  # Identity is checked by EYE, not by assert, and it matters more here
+  # than anywhere else: if two of these cells were secretly the same
+  # motors, a parallel block would command them twice at once. The three
+  # diagnoses above save each cell's X adapter serial into the runlog
+  # (cell1 NTAMU6TO, cell2 NTB19XKA, cell3 NTB3FXCE on this bench) --
+  # read them there before trusting a concurrent run.
+  #
+  # It cannot be asserted: the assert language permits only the bare
+  # names true/false/null/none (orchestrator/scenario.py ASSERT_NAMES),
+  # so an interpolated string is rejected as an undefined name.
+  #
+  # The real guarantee is upstream:
+  # claude_test/test_gantry_server_shinyeong.py names all three adapters
+  # per cell and refuses to start if any is missing, so two servers
+  # cannot open the same adapter in the first place.
+
+  # ── Home, one cell at a time ───────────────────────────────────────
+  - id: c1_home
+    cell: cell1
+    action: gantry/home
+    timeout_s: 180.0
+    save_as: c1_homed
+
+  - id: c2_home
+    cell: cell2
+    action: gantry/home
+    timeout_s: 180.0
+    save_as: c2_homed
+
+  - id: c3_home
+    cell: cell3
+    action: gantry/home
+    timeout_s: 180.0
+    save_as: c3_homed
+
+  - id: verify_all_homed
+    assert: "${c1_homed.x_mm} <= ${params.tolerance_mm} and ${c2_homed.x_mm} <= ${params.tolerance_mm} and ${c3_homed.x_mm} <= ${params.tolerance_mm}"
+
+  # ── The experiment: three X axes, one step, at the same time ───────
+  # Z stays at 0 on all three. A cell only inserts an up-X-down sequence
+  # when its X target changes, so each of these is a single X traverse
+  # with the head already retracted -- the shortest motion that still
+  # proves three cells moved concurrently.
+  - id: par_x_out
+    pause: >
+      ALL THREE GANTRIES ARE ABOUT TO MOVE AT THE SAME TIME. This is the
+      first concurrent motion this bench has run. Check all three frames
+      are clear, decide which one you are watching, and keep an e-stop in
+      reach. X steps out 5 mm on each.
+    parallel:
+      - id: c1_x_out
+        cell: cell1
+        action: gantry/move
+        body:
+          x_mm: "${params.step_mm}"
+          z_mm: 0.0
+          speed_pct: "${params.speed_pct}"
+          accel_pct: "${params.accel_pct}"
+        save_as: c1_x_out
+      - id: c2_x_out
+        cell: cell2
+        action: gantry/move
+        body:
+          x_mm: "${params.step_mm}"
+          z_mm: 0.0
+          speed_pct: "${params.speed_pct}"
+          accel_pct: "${params.accel_pct}"
+        save_as: c2_x_out
+      - id: c3_x_out
+        cell: cell3
+        action: gantry/move
+        body:
+          x_mm: "${params.step_mm}"
+          z_mm: 0.0
+          speed_pct: "${params.speed_pct}"
+          accel_pct: "${params.accel_pct}"
+        save_as: c3_x_out
+
+  # Distance travelled per cell, measured minus measured. A gantry that
+  # never moved fails here even though its parallel sibling succeeded --
+  # which is the specific thing a concurrent run could hide.
+  - id: verify_c1_stepped
+    assert: "${c1_x_out.x_mm} - ${c1_homed.x_mm} >= ${params.step_mm} - ${params.tolerance_mm} and ${c1_x_out.x_mm} - ${c1_homed.x_mm} <= ${params.step_mm} + ${params.tolerance_mm}"
+
+  - id: verify_c2_stepped
+    assert: "${c2_x_out.x_mm} - ${c2_homed.x_mm} >= ${params.step_mm} - ${params.tolerance_mm} and ${c2_x_out.x_mm} - ${c2_homed.x_mm} <= ${params.step_mm} + ${params.tolerance_mm}"
+
+  - id: verify_c3_stepped
+    assert: "${c3_x_out.x_mm} - ${c3_homed.x_mm} >= ${params.step_mm} - ${params.tolerance_mm} and ${c3_x_out.x_mm} - ${c3_homed.x_mm} <= ${params.step_mm} + ${params.tolerance_mm}"
+
+  # ── And back, also together ────────────────────────────────────────
+  - id: par_x_back
+    pause: >
+      All three gantries return to their origins together. Same
+      precautions as the outbound step.
+    parallel:
+      - id: c1_x_back
+        cell: cell1
+        action: gantry/move
+        body:
+          x_mm: 0.0
+          z_mm: 0.0
+          speed_pct: "${params.speed_pct}"
+          accel_pct: "${params.accel_pct}"
+        save_as: c1_parked
+      - id: c2_x_back
+        cell: cell2
+        action: gantry/move
+        body:
+          x_mm: 0.0
+          z_mm: 0.0
+          speed_pct: "${params.speed_pct}"
+          accel_pct: "${params.accel_pct}"
+        save_as: c2_parked
+      - id: c3_x_back
+        cell: cell3
+        action: gantry/move
+        body:
+          x_mm: 0.0
+          z_mm: 0.0
+          speed_pct: "${params.speed_pct}"
+          accel_pct: "${params.accel_pct}"
+        save_as: c3_parked
+
+  - id: verify_all_parked
+    assert: "${c1_parked.x_mm} <= ${params.tolerance_mm} and ${c2_parked.x_mm} <= ${params.tolerance_mm} and ${c3_parked.x_mm} <= ${params.tolerance_mm}"
+
+  # ── Independent witnesses, read after the concurrency is over ──────
+  # status() re-reads the encoders rather than echoing what the moves
+  # returned, and sets `error` when a cell's paired Z motors disagree.
+  # Reading all three afterwards also proves every cell survived the
+  # concurrent run -- a cell that dropped off after its last move would
+  # otherwise go unnoticed.
+  - id: final_c1
+    cell: cell1
+    action: status
+    method: GET
+    timeout_s: 15.0
+    save_as: c1_final
+
+  - id: final_c2
+    cell: cell2
+    action: status
+    method: GET
+    timeout_s: 15.0
+    save_as: c2_final
+
+  - id: final_c3
+    cell: cell3
+    action: status
+    method: GET
+    timeout_s: 15.0
+    save_as: c3_final
+
+  - id: verify_no_desync_anywhere
+    assert: "${c1_final.error} == null and ${c2_final.error} == null and ${c3_final.error} == null"

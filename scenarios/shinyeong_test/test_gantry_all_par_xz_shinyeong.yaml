@@ -1,0 +1,322 @@
+# Three gantries, both axes, every motion concurrent: X out 100 mm and
+# back, then Z down 50 mm and back, all three cells at once.
+#
+# Run test_gantry_all_par_shinyeong.yaml first. This file extends it in
+# two ways, and only one of them is routine.
+#
+# ROUTINE: the Z legs. Each cell already stepped Z 50 mm down and back
+# in test_gantry_all_seq_shinyeong.yaml, so the travel below is measured
+# ground. What is new is that the three do it together.
+#
+# NOT ROUTINE: X = 100 mm. Every run on this bench so far has stopped at
+# 50 mm. The travel between 50 and 100 mm has never been driven on any
+# of these three frames, and MKSMotor._max_travel_mm = 400 mm is a
+# software clamp, not a measurement of this bench. CONFIRM BY EYE that
+# all three X axes have more than 100 mm of clear travel from home
+# before starting -- the run cannot check this for you, and a gantry
+# that runs out of rail does not fail gracefully.
+#
+# THE OPERATOR PROBLEM
+# One person cannot watch three frames at once, and this file makes the
+# moves large enough to matter. Mitigations, all partial:
+#   * every concurrent block carries an explicit `pause`, so the run
+#     stops before each one -- four gates in total, not one;
+#   * each cell verifies its own travel by encoder readback before the
+#     next step, so a gantry that did not move fails the run even while
+#     its two siblings succeeded;
+#   * Z is driven only after X has returned to the origin, so no cell is
+#     ever traversing and lowering at the same time.
+# If you cannot see all three frames, run the sequential scenario.
+#
+# ON ABORT
+# stop_on_failure broadcasts POST /v1/stop to every registered cell, but
+# that request queues behind the move it means to interrupt
+# (docs/L1_AUDIT.md GAP-9). With three gantries in flight it stops none
+# of them in time. Three physical e-stops are the only immediate stop.
+#
+# TOPOLOGY
+#   cell1  nuc1 (this NUC)   http://127.0.0.1:17054      pump + gantry
+#   cell2  nuc2 192.168.0.120:17056                      gantry only
+#   cell3  nuc2 192.168.0.120:17058                      gantry only
+#
+# ORDER
+#   python -m orchestrator validate scenarios/test_gantry_all_par_xz_shinyeong.yaml
+#   python -m orchestrator run scenarios/test_gantry_all_par_xz_shinyeong.yaml --step-mode
+
+name: test_gantry_all_par_xz_shinyeong
+description: >
+  Three-cell concurrent gantry test on both axes. Homes cell1, cell2 and
+  cell3 one at a time, then steps all three X axes out 100 mm and back
+  together, then all three Z axes down 50 mm and back together, checking
+  each cell's encoder readback after every block.
+
+params:
+  # X travel past 50 mm is UNVERIFIED on this bench -- see the header.
+  x_step_mm: 100.0
+  # Z at 50 mm is the distance the sequential run already proved on all
+  # three cells.
+  z_step_mm: 50.0
+  tolerance_mm: 0.5
+  speed_pct: 10
+  accel_pct: 0
+
+defaults:
+  on_fail: abort
+  timeout_s: 60.0
+
+steps:
+  # ── Pre-flight: every cell, before anything moves ──────────────────
+  - id: diag_cell1
+    cell: cell1
+    action: diagnose
+    method: GET
+    timeout_s: 15.0
+    save_as: d1
+
+  - id: diag_cell2
+    cell: cell2
+    action: diagnose
+    method: GET
+    timeout_s: 15.0
+    save_as: d2
+
+  - id: diag_cell3
+    cell: cell3
+    action: diagnose
+    method: GET
+    timeout_s: 15.0
+    save_as: d3
+
+  - id: verify_all_stages
+    assert: "${d1.stage.ok} == true and ${d2.stage.ok} == true and ${d3.stage.ok} == true"
+
+  # Identity is checked by EYE: the three diagnoses above save each
+  # cell's X adapter serial into the runlog (cell1 NTAMU6TO, cell2
+  # NTB19XKA, cell3 NTB3FXCE). It cannot be asserted -- the assert
+  # language permits only the bare names true/false/null/none
+  # (orchestrator/scenario.py ASSERT_NAMES), so an interpolated string
+  # is rejected as an undefined name. The guarantee that matters is
+  # upstream: claude_test/test_gantry_server_shinyeong.py names all
+  # three adapters per cell and refuses to start if any is missing.
+
+  # ── Home, one cell at a time ───────────────────────────────────────
+  - id: c1_home
+    cell: cell1
+    action: gantry/home
+    timeout_s: 180.0
+    save_as: c1_homed
+
+  - id: c2_home
+    cell: cell2
+    action: gantry/home
+    timeout_s: 180.0
+    save_as: c2_homed
+
+  - id: c3_home
+    cell: cell3
+    action: gantry/home
+    timeout_s: 180.0
+    save_as: c3_homed
+
+  - id: verify_all_homed
+    assert: "${c1_homed.x_mm} <= ${params.tolerance_mm} and ${c2_homed.x_mm} <= ${params.tolerance_mm} and ${c3_homed.x_mm} <= ${params.tolerance_mm}"
+
+  # ── X out, all three at once ───────────────────────────────────────
+  - id: par_x_out
+    pause: >
+      ALL THREE GANTRIES MOVE X TOGETHER, 100 mm. This bench has never
+      driven X past 50 mm -- the rail beyond that is unmeasured on all
+      three frames. Confirm by eye that each X axis has more than 100 mm
+      of clear travel from home. Keep an e-stop in reach.
+    parallel:
+      - id: c1_x_out
+        cell: cell1
+        action: gantry/move
+        body:
+          x_mm: "${params.x_step_mm}"
+          z_mm: 0.0
+          speed_pct: "${params.speed_pct}"
+          accel_pct: "${params.accel_pct}"
+        save_as: c1_x_out
+      - id: c2_x_out
+        cell: cell2
+        action: gantry/move
+        body:
+          x_mm: "${params.x_step_mm}"
+          z_mm: 0.0
+          speed_pct: "${params.speed_pct}"
+          accel_pct: "${params.accel_pct}"
+        save_as: c2_x_out
+      - id: c3_x_out
+        cell: cell3
+        action: gantry/move
+        body:
+          x_mm: "${params.x_step_mm}"
+          z_mm: 0.0
+          speed_pct: "${params.speed_pct}"
+          accel_pct: "${params.accel_pct}"
+        save_as: c3_x_out
+
+  # Travel per cell, measured minus measured. A gantry that never moved
+  # fails here even though its siblings succeeded -- the specific thing
+  # a concurrent block could otherwise hide.
+  - id: verify_c1_x_step
+    assert: "${c1_x_out.x_mm} - ${c1_homed.x_mm} >= ${params.x_step_mm} - ${params.tolerance_mm} and ${c1_x_out.x_mm} - ${c1_homed.x_mm} <= ${params.x_step_mm} + ${params.tolerance_mm}"
+
+  - id: verify_c2_x_step
+    assert: "${c2_x_out.x_mm} - ${c2_homed.x_mm} >= ${params.x_step_mm} - ${params.tolerance_mm} and ${c2_x_out.x_mm} - ${c2_homed.x_mm} <= ${params.x_step_mm} + ${params.tolerance_mm}"
+
+  - id: verify_c3_x_step
+    assert: "${c3_x_out.x_mm} - ${c3_homed.x_mm} >= ${params.x_step_mm} - ${params.tolerance_mm} and ${c3_x_out.x_mm} - ${c3_homed.x_mm} <= ${params.x_step_mm} + ${params.tolerance_mm}"
+
+  # ── X back, all three at once ──────────────────────────────────────
+  - id: par_x_back
+    pause: >
+      All three X axes return to their origins together, 100 mm inbound.
+      The return leg travels toward the home limit switches -- the same
+      precautions as the outbound step.
+    parallel:
+      - id: c1_x_back
+        cell: cell1
+        action: gantry/move
+        body:
+          x_mm: 0.0
+          z_mm: 0.0
+          speed_pct: "${params.speed_pct}"
+          accel_pct: "${params.accel_pct}"
+        save_as: c1_x_back
+      - id: c2_x_back
+        cell: cell2
+        action: gantry/move
+        body:
+          x_mm: 0.0
+          z_mm: 0.0
+          speed_pct: "${params.speed_pct}"
+          accel_pct: "${params.accel_pct}"
+        save_as: c2_x_back
+      - id: c3_x_back
+        cell: cell3
+        action: gantry/move
+        body:
+          x_mm: 0.0
+          z_mm: 0.0
+          speed_pct: "${params.speed_pct}"
+          accel_pct: "${params.accel_pct}"
+        save_as: c3_x_back
+
+  - id: verify_all_x_home
+    assert: "${c1_x_back.x_mm} <= ${params.tolerance_mm} and ${c2_x_back.x_mm} <= ${params.tolerance_mm} and ${c3_x_back.x_mm} <= ${params.tolerance_mm}"
+
+  # ── Z down, all three at once ──────────────────────────────────────
+  # X is back at 0 on every cell, so each of these is a straight Z move:
+  # the cell only inserts an up-X-down sequence when the X target
+  # changes. No frame traverses and lowers at the same time.
+  - id: par_z_out
+    pause: >
+      ALL THREE GANTRIES LOWER Z TOGETHER, 50 mm. z = 0 is retracted, so
+      each head DESCENDS. Clear the deck under all three frames. Each
+      cell drives a mechanically coupled Z pair -- watch for any frame
+      tilting; Z_DESYNC_LIMIT_MM is a backstop, not a substitute.
+    parallel:
+      - id: c1_z_out
+        cell: cell1
+        action: gantry/move
+        body:
+          x_mm: 0.0
+          z_mm: "${params.z_step_mm}"
+          speed_pct: "${params.speed_pct}"
+          accel_pct: "${params.accel_pct}"
+        save_as: c1_z_out
+      - id: c2_z_out
+        cell: cell2
+        action: gantry/move
+        body:
+          x_mm: 0.0
+          z_mm: "${params.z_step_mm}"
+          speed_pct: "${params.speed_pct}"
+          accel_pct: "${params.accel_pct}"
+        save_as: c2_z_out
+      - id: c3_z_out
+        cell: cell3
+        action: gantry/move
+        body:
+          x_mm: 0.0
+          z_mm: "${params.z_step_mm}"
+          speed_pct: "${params.speed_pct}"
+          accel_pct: "${params.accel_pct}"
+        save_as: c3_z_out
+
+  - id: verify_c1_z_step
+    assert: "${c1_z_out.z_mm} - ${c1_x_back.z_mm} >= ${params.z_step_mm} - ${params.tolerance_mm} and ${c1_z_out.z_mm} - ${c1_x_back.z_mm} <= ${params.z_step_mm} + ${params.tolerance_mm}"
+
+  - id: verify_c2_z_step
+    assert: "${c2_z_out.z_mm} - ${c2_x_back.z_mm} >= ${params.z_step_mm} - ${params.tolerance_mm} and ${c2_z_out.z_mm} - ${c2_x_back.z_mm} <= ${params.z_step_mm} + ${params.tolerance_mm}"
+
+  - id: verify_c3_z_step
+    assert: "${c3_z_out.z_mm} - ${c3_x_back.z_mm} >= ${params.z_step_mm} - ${params.tolerance_mm} and ${c3_z_out.z_mm} - ${c3_x_back.z_mm} <= ${params.z_step_mm} + ${params.tolerance_mm}"
+
+  # ── Z back up, all three at once ───────────────────────────────────
+  - id: par_z_back
+    pause: >
+      All three Z axes retract to 0 together. Same precautions; watch
+      for a frame that lags or tilts on the way up.
+    parallel:
+      - id: c1_z_back
+        cell: cell1
+        action: gantry/move
+        body:
+          x_mm: 0.0
+          z_mm: 0.0
+          speed_pct: "${params.speed_pct}"
+          accel_pct: "${params.accel_pct}"
+        save_as: c1_parked
+      - id: c2_z_back
+        cell: cell2
+        action: gantry/move
+        body:
+          x_mm: 0.0
+          z_mm: 0.0
+          speed_pct: "${params.speed_pct}"
+          accel_pct: "${params.accel_pct}"
+        save_as: c2_parked
+      - id: c3_z_back
+        cell: cell3
+        action: gantry/move
+        body:
+          x_mm: 0.0
+          z_mm: 0.0
+          speed_pct: "${params.speed_pct}"
+          accel_pct: "${params.accel_pct}"
+        save_as: c3_parked
+
+  - id: verify_all_parked
+    assert: "${c1_parked.x_mm} <= ${params.tolerance_mm} and ${c1_parked.z_mm} <= ${params.tolerance_mm} and ${c2_parked.x_mm} <= ${params.tolerance_mm} and ${c2_parked.z_mm} <= ${params.tolerance_mm} and ${c3_parked.x_mm} <= ${params.tolerance_mm} and ${c3_parked.z_mm} <= ${params.tolerance_mm}"
+
+  # ── Independent witnesses, after all concurrency is over ───────────
+  # status() re-reads the encoders rather than echoing what the moves
+  # returned, and sets `error` when a cell's paired Z motors disagree.
+  # Reading all three also proves every cell survived the run: a cell
+  # that dropped off after its last move would otherwise go unnoticed.
+  - id: final_c1
+    cell: cell1
+    action: status
+    method: GET
+    timeout_s: 15.0
+    save_as: c1_final
+
+  - id: final_c2
+    cell: cell2
+    action: status
+    method: GET
+    timeout_s: 15.0
+    save_as: c2_final
+
+  - id: final_c3
+    cell: cell3
+    action: status
+    method: GET
+    timeout_s: 15.0
+    save_as: c3_final
+
+  - id: verify_no_desync_anywhere
+    assert: "${c1_final.error} == null and ${c2_final.error} == null and ${c3_final.error} == null"

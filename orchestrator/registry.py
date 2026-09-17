@@ -34,6 +34,13 @@ DEFAULT_HAZARD_PREFIXES = (
     "pump/",
     "hotplate/",
     "lamp/",
+    # cell6 / cell7. `arm/program` runs a job program on a 6-axis arm;
+    # `arm/enable` energises it. Both are POSTs under this
+    # prefix, so it gates too. Erring toward one extra confirmation on a
+    # download beats missing the one before an arm moves. Deliberately in
+    # the DEFAULT list and not only in config.toml: a bench that has not
+    # copied the newest config example must not silently lose the gate.
+    "arm/",
 )
 
 #: The L1 convention: every state-changing route is a POST, every GET is a

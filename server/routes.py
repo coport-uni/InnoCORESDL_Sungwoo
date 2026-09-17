@@ -17,6 +17,11 @@ from fastapi.concurrency import run_in_threadpool
 from server.schemas import (
     AmbientRequest,
     AmbientResponse,
+    ArmJogRequest,
+    ArmJogResponse,
+    ArmPrepareResponse,
+    ArmProgramRequest,
+    ArmProgramResponse,
     CycleRequest,
     CycleResponse,
     DiagnoseResponse,
@@ -100,6 +105,9 @@ async def diagnose(request: Request) -> DiagnoseResponse:
         balance=report["balance"],
         stage=report["stage"],
         ok_to_initialize=report["ok_to_initialize"],
+        # Arm cells only; absent everywhere else.
+        arm=report.get("arm"),
+        program=report.get("program"),
     )
 
 
@@ -469,6 +477,87 @@ async def lamp_switch(request: Request, body: LampRequest) -> LampResponse:
     return LampResponse(**state)
 
 
+# ── Arm (FR5) — cell6 / cell7 ────────────────────────────────────────────────
+#
+# One motion route: /arm/program hands a .lua job program to the
+# controller and lets its own interpreter and planner run it. Plus two
+# commissioning routes, /arm/enable and /arm/jog_joint.
+
+
+@router.post(
+    "/arm/enable",
+    response_model=ArmPrepareResponse,
+    tags=["Arm"],
+    summary="Clear faults + energise the arm (no motion, but it powers up)",
+)
+async def arm_enable(request: Request) -> ArmPrepareResponse:
+    """ResetAllError -> RobotEnable(1) -> Mode(0).
+
+    Nothing moves, but holding torque comes on and the next motion
+    command will be accepted. Separate from the motion routes because it
+    is the step that throws away the fault codes — the response carries
+    what they were.
+    """
+    cell = _cell(request)
+    async with request.app.state.lock:
+        out = await run_in_threadpool(cell.prepare_arm)
+    return ArmPrepareResponse(**out)
+
+
+@router.post(
+    "/arm/jog_joint",
+    response_model=ArmJogResponse,
+    tags=["Arm"],
+    summary="Nudge ONE joint by a bounded relative amount — MOTION",
+)
+async def arm_jog_joint(
+    request: Request, body: ArmJogRequest
+) -> ArmJogResponse:
+    """Commissioning jog: one axis, relative, capped.
+
+    Not a pose route — see ``ArmJogRequest``. Short and bounded, so it
+    runs under the command lock like every other motion route.
+    """
+    cell = _cell(request)
+    async with request.app.state.lock:
+        out = await run_in_threadpool(
+            lambda: cell.jog_joint(
+                body.joint, body.delta_deg, speed_pct=body.speed_pct
+            )
+        )
+    return ArmJogResponse(**out)
+
+
+@router.post(
+    "/arm/program",
+    response_model=ArmProgramResponse,
+    tags=["Arm"],
+    summary="Run a .lua job program on the controller — MOTION",
+)
+async def arm_program(
+    request: Request, body: ArmProgramRequest
+) -> ArmProgramResponse:
+    """Load and run a Lua job program; the controller does the planning.
+
+    **The path this takes is not checked here.** A replay is refused when
+    the arm is far from the episode's first frame; a job program's first
+    move goes from wherever the arm is to a point taught inside a script
+    this server never reads, at whatever speed the script asks for. Clear
+    the frame and keep the e-stop in hand — the operator gate is the
+    guard, not the code.
+
+    Asymmetric locking on purpose: the lock covers validation, load and
+    start, and the program then runs unlocked, so ``POST /v1/stop`` is
+    not queued behind the motion it exists to abort (GAP-9,
+    LearnedPatterns #9).
+    """
+    cell = _cell(request)
+    async with request.app.state.lock:
+        await run_in_threadpool(lambda: cell.start_program(body.name))
+    result = await run_in_threadpool(cell.await_program)
+    return ArmProgramResponse(**result)
+
+
 # ── Safety ─────────────────────────────────────────────────────────────────
 
 
@@ -481,5 +570,9 @@ async def lamp_switch(request: Request, body: LampRequest) -> LampResponse:
 async def stop(request: Request) -> StopResponse:
     cell = _cell(request)
     async with request.app.state.lock:
-        await run_in_threadpool(cell.stop)
-    return StopResponse(stopped=True)
+        detail = await run_in_threadpool(cell.stop)
+    # The arm cells report which half of the stop worked; the others
+    # return None and either succeeded or raised.
+    return StopResponse(
+        stopped=True, detail=detail if isinstance(detail, dict) else None
+    )

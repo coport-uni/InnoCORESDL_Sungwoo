@@ -1,0 +1,53 @@
+# cell6 — FR5 robot arm, SYNTHESIS stage (docs/SPEC_ARM_LUA_PROGRAM.md).
+#
+# Copy to server/nuc2/cell6.toml and edit. The real .toml is gitignored.
+# Shape is auto-detected from the [arm] table, so `--config` alone is
+# enough:
+#
+#     python -m server --config server/nuc2/cell6.toml
+#
+# SAFETY: running a job program is motion, and L1 cannot bound where it
+# goes — the program's first move starts from wherever the arm is. Operator
+# at the bench, e-stop in hand, arm's reach clear. cell6 and cell7 must
+# never share an ip_address — teach-pendant work no process can detect.
+
+[server]
+port = 17064
+host = "0.0.0.0"
+log_level = "info"
+
+[arm]
+# Which arm this is, in logs, runlogs and --robot.id.
+robot_id = "fr5_a"
+# Synthesis-stage arm. Fixed network asset, so the VID:PID rule that
+# governs the serial devices does not apply.
+ip_address = "192.168.0.58"
+gripper_enabled = true
+
+# --- motion envelope ----------------------------------------------------
+# MoveJ velocity % for arm/jog_joint and claude_test/smoke_arm.py.
+jog_speed_pct = 10.0
+
+# --- Lua job programs (the motion path) ---------------------------------
+# docs/SPEC_ARM_LUA_PROGRAM.md. Programs are authored on the teach
+# pendant / WebApp and live on the controller; L1 only load-run-stops
+# them. Nothing here uploads or deletes a program.
+#
+# The controller's fixed path for job programs. Do not point this
+# elsewhere without reading the SDK manual first.
+program_dir = "/fruser"
+# Empty = any *.lua the controller holds. Naming programs here narrows a
+# motion-bearing request to a reviewed list, the way
+# allowed_repo_prefixes does for datasets. Discover names with
+# `python claude_test/probe_arm_lua.py --ip 192.168.0.58 --robot-id fr5_a`
+# (read-only, no motion). Measured on this arm 2026-08-11: test.lua,
+# example.lua, new_pr.lua, SimpleLoadIdentify.lua, Test0902.lua,
+# Test1.lua, test2.lua. Names are case-sensitive — there is no lowercase
+# test1.lua here, only Test1.lua.
+allowed_programs = ["Test1.lua"]
+# A program's length cannot be derived — the cell does not read the
+# script, so there is no frames/fps to compute a timeout from.
+max_program_s = 300.0
+# How often the cell asks the controller whether the program is still
+# running. GetCurrentLine is the only progress channel a job program has.
+program_poll_s = 0.5
