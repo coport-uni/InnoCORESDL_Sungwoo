@@ -2441,3 +2441,32 @@ later run does not have to re-derive it.
       path (`arm/program`), the cell4 one-step launcher, and the two new
       synthesis scenarios (dry-run only). Merged on the operator's
       explicit instruction with that status stated in the PR.
+
+## 2026-09-17 — nuc2: sync the Sungwoo checkout to shinyeong (issue #35)
+
+- [x] NUC2 has two checkouts under `~/workspace/InnoCOREServer/`:
+      `InnoCORESDL_Sungwoo` (main 5585025, real `external/` submodules)
+      and `InnoCORESDL_shinyeong` (main f72da9d, `external` symlinked
+      into the Sungwoo one; cell2/cell3 servers run from it since
+      2026-09-13). Operator asked for Sungwoo to match shinyeong.
+- [x] Backup `backup_Sungwoo_20260917T095406.tar.gz`, then
+      `git merge --ff-only` 5585025 -> f72da9d and `rsync -a` (no
+      delete) of the untracked scripts, logs, bench notes and
+      `server/nuc1/*.toml`. Re-run dry-run: no remaining diff. Servers
+      left running.
+- [x] Kept Sungwoo's NUC2 `orchestrator/config.toml` (shinyeong's is a
+      NUC1 config) — copied beside it as `config.toml.shinyeong`.
+- [ ] `git submodule update` in the Sungwoo checkout once the cell2/cell3
+      servers are stopped: three pins (CommonClaude, LinearMotorController,
+      PrecisionScaleController) differ from the checked-out drivers.
+- [ ] Both NUC2 checkouts are still behind `origin/main` (86425c8).
+- [x] README: added "Repository state (2026-09-17)" (what landed since
+      2026-07, with evidence pointers and the NOT-verified items called
+      out) and "Controlling the system over HTTP" (curl for health /
+      validate / run / confirm-by-resume / pause / abort, direct cell
+      commands, a browser fetch sketch behind a reverse proxy because
+      neither server sends CORS, and an httpx snippet). Route bodies
+      checked against `server/schemas.py` and `orchestrator/routes.py`;
+      `/v1/health`, `/v1/cells`, `/v1/scenarios/validate` exercised
+      against a hardware-free orchestrator on :17199 (cell4 registered
+      but down -> `reachable: false`, `cell_unreachable` issue).

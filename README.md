@@ -333,6 +333,231 @@ the manual rather than by provoking the amp.
 
 ---
 
+## Repository state (2026-09-17)
+
+Everything below is on `main` as of PR
+[#34](https://github.com/coport-uni/InnoCORESDL_Sungwoo/pull/34)
+(merge `86425c8`). The branch it came from, `test/cell1-pump-bench`, is
+deleted; `main` is the only line of work.
+
+### What landed since the 2026-07 bring-up
+
+| Area | State | Evidence |
+|---|---|---|
+| **cell1 pump** (SY-01B, 125 µL syringe) | ✅ re-verified on the bench 2026-08-27; `demo_pump_cycle.yaml` runs 20 cycles (`remaining_cycles: 19`) | ToDo.md "cell1 pump re-verified", `claude_test/smoke_cell1_pump_*.md` |
+| **cell2 / cell3 pumps** | pump support in the NUC2 launcher; each cell refuses a pump whose `?202` serial is not its own (cell2 = 50487, cell3 = 30308) | commits `870a279`, `ef68eec`, `56d7c9f`; `demo_pump2_cycle.yaml` / `demo_pump3_cycle.yaml` (21 / 22 cycles after the 2026-09 retune) |
+| **cell6 / cell7 arms** (FR5) | `ArmCell` with `arm/enable`, `arm/jog_joint`, `arm/program`; replay + jog bench-verified 2026-08-11; the `.lua` **program path is NOT bench-verified** ([#31](https://github.com/coport-uni/InnoCORESDL_Sungwoo/issues/31)) | `claude_test/smoke_arm_*.md`, `claude_test/probe_arm_lua_*.md`, `docs/SPEC_ARM_LUA_PROGRAM.md` |
+| **Taught positions** | rail station + gantry X/Z for the vials under cell1/2/3, re-taught 2026-09-13 and 2026-09-15 (cell3 Z interference fixed) | `claude_test/taught_positions_shinyeong.md` |
+| **Synthesis chain scenarios** | the multi-cell sequences (rail → gantry → pump, with and without the arm) live under `scenarios/shinyeong_test/`; `test_synthesis_noarm` and `test_synthesis_to_analysis` are **dry-run only** | `scenarios/shinyeong_test/` |
+| **cell4 one-step move** | alternative launcher that runs a whole station move as one PID step instead of stopping every ~250 mm; **NOT bench-verified** | `claude_test/test_cell4_server_shinyeong.py` |
+| **Gravimetric CV check** | designed, not run: tare once, N dispenses onto the balance, statistics from `run.jsonl` | ToDo.md "NEXT: gravimetric check" |
+| Tests | `pytest claude_test`: **162 passed**; `ruff check` clean (2026-09-17) | PR #34 `## Testing` |
+
+Still open, unchanged: GAP-9 / GAP-1 (software stop cannot preempt),
+[#13](https://github.com/coport-uni/InnoCORESDL_Sungwoo/issues/13)
+RS485 EMI, [#15](https://github.com/coport-uni/InnoCORESDL_Sungwoo/issues/15)
+amp alarm read, GAP-8 (cell6 + cell7 reach overlap unmeasured). A
+sibling branch `feat/pump-single-cycle-scenario` still exists on origin
+with two commits whose text differs from what `main` took; it was never
+opened as a PR.
+
+---
+
+## Controlling the system over HTTP (curl, a website, a script)
+
+Both layers are plain HTTP + JSON, so anything that can send a request
+can drive the bench: `curl`, a browser page, a Node/Python script, a
+Grafana button. Two rules do not change however you connect:
+
+1. **Go through the orchestrator (`:17100`) for anything that moves.**
+   It validates the scenario against each cell's live OpenAPI, holds one
+   run at a time (a second `POST /v1/runs` is a **409**), writes the
+   runlog, and **pauses before the first motion step until you confirm**.
+   Talking to a cell server directly bypasses every one of those.
+2. **The physical e-stop is the only stop.** `abort` ends the run and
+   broadcasts `/v1/stop`, but a command already in flight completes
+   first (GAP-9), and cell4's stop is a no-op (GAP-1).
+
+Addresses in the examples: orchestrator on NUC1
+(`192.168.0.126:17100`); cell ports as in the table above. Use
+`127.0.0.1` when you are on the same machine.
+
+### Read-only: is everything up?
+
+Every `GET` under `/v1` is a read-only probe and is never gated.
+
+```bash
+ORCH=http://192.168.0.126:17100
+
+curl -s $ORCH/v1/health                     # {"ok":true,"version":"0.1.0","cells":7,"active_run":null}
+curl -s $ORCH/v1/cells | python3 -m json.tool   # registry + each cell's /v1/health
+curl -s "$ORCH/v1/cells?with_status=true"   # also each cell's /v1/status (takes its device lock)
+
+# a single cell, directly (no lock taken by health; diagnose/status take it)
+curl -s http://192.168.0.126:17060/v1/health
+curl -s http://192.168.0.126:17060/v1/diagnose | python3 -m json.tool
+curl -s http://192.168.0.126:17060/v1/balance/weight      # {"weight_g":..., "stable":...}
+```
+
+### Dry-run a scenario (no device is touched)
+
+The scenario can be a **path on the orchestrator's machine** or the
+**YAML text itself**, and `params` overrides the file's `params:` block.
+
+```bash
+# by path
+curl -s -X POST $ORCH/v1/scenarios/validate \
+  -H 'Content-Type: application/json' \
+  -d '{"scenario_path": "scenarios/demo_linear_move.yaml"}'
+
+# by inline YAML, with a parameter override
+curl -s -X POST $ORCH/v1/scenarios/validate \
+  -H 'Content-Type: application/json' \
+  -d "$(python3 -c '
+import json, pathlib
+print(json.dumps({
+    "scenario_yaml": pathlib.Path("scenarios/demo_pump_cycle.yaml").read_text(),
+    "params": {"volume_uL": 100.0},
+}))')"
+# -> {"ok": true, "scenario": "demo_pump_cycle", "issues": []}
+```
+
+### Run a scenario, confirm the first motion, watch it, stop it
+
+```bash
+# 1. submit -- returns 202 with the run id; the run starts in the background
+RUN=$(curl -s -X POST $ORCH/v1/runs \
+  -H 'Content-Type: application/json' \
+  -d '{"scenario_path": "scenarios/demo_linear_move.yaml"}' \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')
+echo $RUN
+
+# 2. it is now PAUSED at the first hardware step; the gate names the step
+curl -s $ORCH/v1/runs/$RUN | python3 -c '
+import json,sys; r=json.load(sys.stdin)
+print(r["state"], "|", r["pending_confirmation"], "|", r["pending_pause"])'
+#   paused | home | None        (the step id of the first hardware step)
+
+# 3. the operator is at the bench and the frame is clear -> confirm
+#    (confirmation IS the resume call)
+curl -s -X POST $ORCH/v1/runs/$RUN/resume >/dev/null
+
+# 4. poll until it ends; every step's result is in "steps"
+while :; do
+  S=$(curl -s $ORCH/v1/runs/$RUN | python3 -c '
+import json,sys; r=json.load(sys.stdin)
+print(r["state"], r["step_index"], "/", r["total_steps"], r["current_step"])')
+  echo "$S"; case "$S" in completed*|failed*|aborted*) break;; esac; sleep 2
+done
+
+# 5. controls while it runs
+curl -s -X POST $ORCH/v1/runs/$RUN/pause     # after the current step finishes
+curl -s -X POST $ORCH/v1/runs/$RUN/resume    # optional body: {"from_step": "move_out"}
+curl -s -X POST $ORCH/v1/runs/$RUN/abort     # ends the run + broadcasts /v1/stop (GAP-9)
+
+# 6. history: live runs plus what is under runs/ on disk
+curl -s $ORCH/v1/runs | python3 -m json.tool
+```
+
+`step_mode: true` in the submit body pauses after **every** step
+(`resume` each time) — useful when watching a new scenario, tiresome
+after that. A `pause:` step inside the scenario shows up as
+`pending_pause` with the scenario's own instruction ("load the vial"),
+and is released with the same `resume`.
+
+### One device action directly on a cell (commissioning only)
+
+A cell server answers the same routes the scenarios use. There is no
+operator gate and no runlog here, so keep it to single, watched commands
+— the sort of thing rung 4 of the gantry ladder was.
+
+```bash
+C1=http://192.168.0.126:17054     # cell1: pump + XZ gantry
+C4=http://192.168.0.126:17060     # cell4: rail + balance
+C5=http://192.168.0.120:17062     # cell5: Z + hotplate + lamp
+C6=http://192.168.0.120:17064     # cell6: FR5 arm
+
+curl -s -X POST $C4/v1/balance/tare
+curl -s -X POST $C4/v1/linear/home
+curl -s -X POST $C4/v1/linear/move -H 'Content-Type: application/json' -d '{"y_mm": 470.772}'
+
+curl -s -X POST $C1/v1/gantry/home
+curl -s -X POST $C1/v1/gantry/move -H 'Content-Type: application/json' \
+     -d '{"x_mm": 260.0, "z_mm": 3.0, "speed_pct": 20, "accel_pct": 0}'
+curl -s -X POST $C1/v1/pump/initialize -H 'Content-Type: application/json' -d '{"force": 2}'
+curl -s -X POST $C1/v1/pump/cycle -H 'Content-Type: application/json' \
+     -d '{"cycles": 1, "volume_uL": 125.0, "source_port": 1, "dispense_port": 2}'
+
+curl -s -X POST $C5/v1/hotplate/temperature -H 'Content-Type: application/json' -d '{"celsius": 40.0}'
+curl -s -X POST $C5/v1/hotplate/heater -H 'Content-Type: application/json' -d '{"enabled": true}'
+curl -s -X POST $C5/v1/lamp/switch      -H 'Content-Type: application/json' -d '{"enabled": false}'
+
+curl -s -X POST $C6/v1/arm/enable
+curl -s -X POST $C6/v1/arm/jog_joint -H 'Content-Type: application/json' -d '{"joint": 1, "delta_deg": 10.0}'
+curl -s -X POST $C6/v1/arm/program   -H 'Content-Type: application/json' -d '{"name": "Test1.lua"}'
+
+curl -s -X POST $C1/v1/stop           # queues behind an in-flight command (GAP-9)
+```
+
+Every route, its body and its response schema is in each server's
+`GET /openapi.json` (Swagger UI at `/docs`), which is also what the
+orchestrator's dry run reads.
+
+### From a web page
+
+The same calls from a browser, e.g. a status panel with a **Confirm**
+button. Note that neither server sends CORS headers, so a page served
+from another origin must sit behind a reverse proxy (nginx, Caddy) that
+forwards `/v1` to the orchestrator — or be served by that proxy from the
+same origin.
+
+```html
+<script>
+const ORCH = "/orch";   // proxied to http://192.168.0.126:17100
+
+async function submit(path) {
+  const r = await fetch(`${ORCH}/v1/runs`, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({scenario_path: path}),
+  });
+  if (r.status === 409) throw new Error("a run is already active");
+  return (await r.json()).run_id;
+}
+
+async function poll(runId, onUpdate) {
+  for (;;) {
+    const run = await (await fetch(`${ORCH}/v1/runs/${runId}`)).json();
+    onUpdate(run);                    // run.state, run.current_step,
+                                      // run.pending_confirmation, run.steps
+    if (["completed", "failed", "aborted"].includes(run.state)) return run;
+    await new Promise(res => setTimeout(res, 1000));
+  }
+}
+
+const confirm = id => fetch(`${ORCH}/v1/runs/${id}/resume`, {method: "POST"});
+const abort   = id => fetch(`${ORCH}/v1/runs/${id}/abort`,  {method: "POST"});
+</script>
+```
+
+Wire **Confirm** to `confirm(id)` and enable it only while
+`run.pending_confirmation` (or `run.pending_pause`) is non-null; wire
+**Abort** to `abort(id)` and label it honestly — it ends the run, it
+does not stop a move already under way.
+
+Python is one import away from the same thing:
+
+```python
+import httpx
+
+orch = httpx.Client(base_url="http://192.168.0.126:17100/v1", timeout=10)
+run = orch.post("/runs", json={"scenario_path": "scenarios/demo_linear_move.yaml"}).json()
+orch.post(f"/runs/{run['run_id']}/resume")          # operator confirmation
+print(orch.get(f"/runs/{run['run_id']}").json()["state"])
+```
+
+---
+
 ## Writing a scenario
 
 A scenario is plain YAML — data, never code. Steps run top to bottom;
