@@ -33,7 +33,7 @@ stop_on_failure = true
 # read-only probe), so hotplate/state and lamp/state stay free.
 hazard_prefixes = [
     "gantry/", "linear/", "zstage/", "stage/",
-    "pump/", "hotplate/", "lamp/",
+    "pump/", "hotplate/", "lamp/", "arm/",
 ]
 
 # --- Cells ----------------------------------------------------------------
@@ -62,3 +62,17 @@ nuc = "nuc2"
 [cells.cell5]                # Cell 5 -- pump + single Z + hotplate + lamp
 base_url = "http://192.168.0.120:17062"  # bench-verified 2026-07-28
 nuc = "nuc2"
+
+# The two FR5 arms. Both controllers answered on the LAN 2026-08-11
+# (192.168.0.58 / .59); the base_url below is the CELL SERVER, not the
+# controller -- L2 never talks to a robot directly. Set the NUC and
+# address to wherever `python -m server --config .../cell6.toml` runs.
+# SAFETY (spec section 8.4 / GAP-8): do not put cell6 and cell7 in the
+# same parallel block until their reach overlap has been measured.
+[cells.cell6]                # FR5 arm, synthesis stage (controller .58)
+base_url = "http://192.168.0.120:17064"
+nuc = "nuc2"
+
+[cells.cell7]                # FR5 arm, analysis stage (controller .59)
+base_url = "http://192.168.0.126:17066"
+nuc = "nuc1"

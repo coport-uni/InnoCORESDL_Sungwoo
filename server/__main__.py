@@ -1,11 +1,18 @@
 """``python -m server`` entry point for the InnoCORESDL cell.
 
 Reads a TOML config (device tables — ``[pump]`` / ``[stage]`` / ``[balance]``
-/ ``[linear]`` / ``[zstage]`` / ``[hotplate]`` / ``[lamp]`` — plus
-``[server]`` for host/port/log level), opens the cell once, and hands the
-live app to uvicorn. The tables present select the cell shape, so
+/ ``[linear]`` / ``[zstage]`` / ``[hotplate]`` / ``[lamp]`` / ``[arm]`` —
+plus ``[server]`` for host/port/log level), opens the cell once, and hands
+the live app to uvicorn. The tables present select the cell shape, so
 ``--config`` alone is enough. Single worker — multiple workers would each
 try to open the same serial handles and fight for them.
+
+**Each cell shape's module is imported inside its own ``_load_*``**, not at
+the top of this file. A cell module imports its drivers at module scope, so
+a single eager import list means every NUC needs every driver installed to
+serve any cell. That first bit on 2026-08-11: cell6 is an arm, has no serial
+device at all, and still could not start because ``entris_ii`` (the balance
+driver, which belongs to cell4) was absent.
 """
 
 from __future__ import annotations
@@ -15,17 +22,17 @@ import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import uvicorn
 
-from cell.balance_linear_cell import BalanceLinearCell, BalanceLinearConfig
-from cell.pump_gantry_cell import Config, PumpGantryCell
-from cell.pump_z_thermal_cell import (
-    DEFAULT_MAX_CELSIUS,
-    PumpZThermalCell,
-    PumpZThermalConfig,
-)
 from server.app import create_app
+
+if TYPE_CHECKING:  # annotations only — never imported at run time
+    from cell.arm_cell import ArmConfig
+    from cell.balance_linear_cell import BalanceLinearConfig
+    from cell.pump_gantry_cell import Config
+    from cell.pump_z_thermal_cell import PumpZThermalConfig
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +43,8 @@ class ServerConfig:
 
 
 def _load(path: Path) -> tuple[Config, ServerConfig]:
+    from cell.pump_gantry_cell import Config
+
     raw = tomllib.loads(path.read_text(encoding="utf-8"))
     pump = raw.get("pump", {})
     stage = raw.get("stage", {})
@@ -51,6 +60,12 @@ def _load(path: Path) -> tuple[Config, ServerConfig]:
         syringe_uL=int(pump.get("syringe_uL", 125)),
         pump_init_force=int(pump.get("init_force", 2)),
         motor_serial_x=stage.get("serial_x", "NTAMU6TO"),
+        # Both required to take effect: naming one Z adapter and letting
+        # the other be auto-assigned would be the same shared-bus mistake
+        # in a form that looks configured (cell/pump_gantry_cell.py
+        # `_open_gantry`). Omit both on a single-cell bus.
+        motor_serial_z_a=stage.get("serial_z_a"),
+        motor_serial_z_b=stage.get("serial_z_b"),
         z_coord_invert=bool(stage.get("z_coord_invert", True)),
         x_coord_invert=bool(stage.get("x_coord_invert", True)),
         home_dir_z=int(stage.get("home_dir_z", 0)),
@@ -67,6 +82,8 @@ def _load(path: Path) -> tuple[Config, ServerConfig]:
 def _load_balance_linear(
     path: Path,
 ) -> tuple[BalanceLinearConfig, ServerConfig]:
+    from cell.balance_linear_cell import BalanceLinearConfig
+
     raw = tomllib.loads(path.read_text(encoding="utf-8"))
     linear = raw.get("linear", {})
     balance = raw.get("balance", {})
@@ -88,6 +105,11 @@ def _load_pump_z_thermal(
     path: Path,
 ) -> tuple[PumpZThermalConfig, ServerConfig]:
     """Parse a Cell 5 (cell5) config: pump + Z + hotplate + lamp."""
+    from cell.pump_z_thermal_cell import (
+        DEFAULT_MAX_CELSIUS,
+        PumpZThermalConfig,
+    )
+
     raw = tomllib.loads(path.read_text(encoding="utf-8"))
     pump = raw.get("pump", {})
     zstage = raw.get("zstage", {})
@@ -118,13 +140,41 @@ def _load_pump_z_thermal(
     return cell_cfg, server_cfg
 
 
+def _load_arm(path: Path) -> tuple[ArmConfig, ServerConfig]:
+    """Parse a cell6 / cell7 config: one FR5 arm.
+
+    Args:
+        path: The TOML config path.
+
+    Returns:
+        The arm config and the server config. The arm table is parsed by
+        the cell module itself so the unit tests can load the example
+        TOMLs without importing FastAPI or a driver.
+    """
+    from cell.arm_cell import ArmConfig
+
+    raw = tomllib.loads(path.read_text(encoding="utf-8"))
+    server = raw.get("server", {})
+    cell_cfg = ArmConfig.from_toml(raw.get("arm", {}))
+    server_cfg = ServerConfig(
+        host=server.get("host", "0.0.0.0"),
+        port=int(server.get("port", 17064)),  # cell6 default
+        log_level=server.get("log_level", "info"),
+    )
+    return cell_cfg, server_cfg
+
+
 def _infer_cell(path: Path) -> str:
     """Pick the cell shape from the config's tables so `--config` alone selects
-    it. A ``[zstage]`` / ``[hotplate]`` / ``[lamp]`` table → ``pump_z_thermal``
-    (cell5, Cell 5 — checked first because it also has a ``[pump]`` table); a
-    ``[linear]`` (or ``[balance]``) table → ``balance_linear`` (cell4);
-    otherwise ``pump_gantry`` (cell1–3). ``--cell`` overrides this."""
+    it. An ``[arm]`` table → ``arm`` (cell6, cell7 — the only cell with
+    no serial device at all); a ``[zstage]`` / ``[hotplate]`` / ``[lamp]``
+    table → ``pump_z_thermal`` (cell5, Cell 5 — checked before cell1–3 because
+    it also has a ``[pump]`` table); a ``[linear]`` (or ``[balance]``) table →
+    ``balance_linear`` (cell4); otherwise ``pump_gantry`` (cell1–3).
+    ``--cell`` overrides this."""
     raw = tomllib.loads(path.read_text(encoding="utf-8"))
+    if "arm" in raw:
+        return "arm"
     if any(table in raw for table in ("zstage", "hotplate", "lamp")):
         return "pump_z_thermal"
     has_bl = "linear" in raw or "balance" in raw
@@ -144,10 +194,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--cell",
-        choices=("pump_gantry", "balance_linear", "pump_z_thermal"),
+        choices=(
+            "pump_gantry",
+            "balance_linear",
+            "pump_z_thermal",
+            "arm",
+        ),
         default=None,
         help=(
-            "Cell shape to serve. Omit to auto-detect from the config: a "
+            "Cell shape to serve. Omit to auto-detect from the config: an "
+            "[arm] table → 'arm' (cell6, cell7), a "
             "[zstage]/[hotplate]/[lamp] table → 'pump_z_thermal' (cell5), a "
             "[linear] table → 'balance_linear' (cell4), otherwise "
             "'pump_gantry' (cell1–3). Pass explicitly only to override the "
@@ -166,14 +222,27 @@ def main(argv: list[str] | None = None) -> int:
     if not cfg_path.exists():
         parser.error(f"config file not found: {cfg_path}")
 
+    # Each branch imports only its own cell module — see the module
+    # docstring: an arm cell must not need the balance driver installed.
     cell_kind = args.cell or _infer_cell(cfg_path)
     if cell_kind == "balance_linear":
+        from cell.balance_linear_cell import BalanceLinearCell
+
         bl_cfg, server_cfg = _load_balance_linear(cfg_path)
         factory = lambda: BalanceLinearCell.open(bl_cfg)  # noqa: E731
+    elif cell_kind == "arm":
+        from cell.arm_cell import ArmCell
+
+        arm_cfg, server_cfg = _load_arm(cfg_path)
+        factory = lambda: ArmCell.open(arm_cfg)  # noqa: E731
     elif cell_kind == "pump_z_thermal":
+        from cell.pump_z_thermal_cell import PumpZThermalCell
+
         pzt_cfg, server_cfg = _load_pump_z_thermal(cfg_path)
         factory = lambda: PumpZThermalCell.open(pzt_cfg)  # noqa: E731
     else:
+        from cell.pump_gantry_cell import PumpGantryCell
+
         cell_cfg, server_cfg = _load(cfg_path)
         factory = lambda: PumpGantryCell.open(cell_cfg)  # noqa: E731
 

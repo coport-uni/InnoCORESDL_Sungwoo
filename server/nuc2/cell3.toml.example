@@ -1,17 +1,20 @@
 # NUC2 / Cell C -- hardware clone of Cell A (spec section 2). No new cell
 # class: the only difference from cell1 is this file.
 # Copy to server/nuc2/cell3.toml (gitignored), then:
-#   systemctl enable --now cell@nuc2-cell3
+#   python -m server --config server/nuc2/cell3.toml
+#   (or: systemctl enable --now cell@nuc2-cell3)
 
-[pump]
-# TBD: if two CH340 pumps share 1A86:7523 on this NUC, use the /dev path
-# pinned by a udev rule instead of the VID:PID (see deploy/README.md).
-port = "1A86:7523"
-syringe_uL = 125
-init_force = 2
+# NO [pump] TABLE ON PURPOSE. Neither gantry cell on NUC2 has a syringe
+# pump on the bench, so /v1/pump/* answers 409 -- which is what the
+# synthesis scenario asserts (`d3.pump.present == False`). Adding the
+# table back makes the cell try to open a pump that is not there.
 
 [stage]
-serial_x = "TBD-CELL3-X"   # TBD: FTDI serial of this cell's X adapter
+# ALL THREE ADAPTERS ARE NAMED -- see server/nuc2/cell2.toml.example for
+# why. Serials read off NUC2's live bus 2026-07-29.
+serial_x = "NTB3FXCE"
+serial_z_a = "NTA4FH8Q"
+serial_z_b = "NT9ZVXLU"
 z_coord_invert = true
 x_coord_invert = true
 

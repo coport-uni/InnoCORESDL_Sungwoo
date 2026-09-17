@@ -1,0 +1,47 @@
+# cell7 — FR5 robot arm, ANALYSIS stage (docs/SPEC_ARM_LUA_PROGRAM.md).
+#
+# Copy to server/nuc1/cell7.toml and edit. The real .toml is gitignored.
+# Same shape as cell6, config apart (spec D1):
+#
+#     python -m server --config server/nuc1/cell7.toml
+#
+# SAFETY: running a job program is motion, and L1 cannot bound where it
+# goes — the program's first move starts from wherever the arm is.
+# Operator at the bench, e-stop in hand, arm's reach clear. Do NOT put
+# cell6 and cell7 in the same parallel block of a scenario until their
+# reach overlap has been measured (GAP-8).
+
+[server]
+port = 17066
+host = "0.0.0.0"
+log_level = "info"
+
+[arm]
+robot_id = "fr5_b"
+# Analysis-stage arm. Must differ from cell6's 192.168.0.58; changed on
+# the teach pendant before both arms join the LAN (spec §8.3).
+ip_address = "192.168.0.59"
+gripper_enabled = true
+
+# --- motion envelope ----------------------------------------------------
+jog_speed_pct = 10.0
+
+# --- Lua job programs (the motion path) ---------------------------------
+# docs/SPEC_ARM_LUA_PROGRAM.md. See cell6.toml.example for the annotated
+# version of these four keys.
+program_dir = "/fruser"
+# Discover names with
+# `python claude_test/probe_arm_lua.py --ip 192.168.0.59 --robot-id fr5_b`
+# (read-only, no motion), then name them here. Measured on this arm
+# 2026-08-11: test0403.lua, Cell7Test1.lua.
+#
+# This list is read ONCE, at server start: adding a program here needs a
+# restart. That is deliberate — it puts a person between "a new script
+# exists on the controller" and "one HTTP request moves the arm with it",
+# the same job allowed_repo_prefixes does for datasets. Leaving the list
+# EMPTY permits any *.lua the controller holds, which means a scenario
+# can launch a new program with no config change and no restart. That is
+# a real convenience and a real loss of control; choose deliberately.
+allowed_programs = ["Cell7Test1.lua"]
+max_program_s = 300.0
+program_poll_s = 0.5

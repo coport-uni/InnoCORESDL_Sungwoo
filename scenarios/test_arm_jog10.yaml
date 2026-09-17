@@ -1,0 +1,385 @@
+# T1 acceptance test (docs/SPEC_ARM_REPLAY_CELL.md §7 T1), BOTH arms in
+# one run: joint 1 +10 deg and back, three rounds, on cell6 then cell7.
+#
+# The spec's acceptance is "cell6 팔과 cell7 팔 각각 3/3", so it belongs in
+# one scenario with one runlog rather than two files someone has to
+# remember to run in pairs. The arms are driven STRICTLY IN SEQUENCE and
+# never in a `parallel` block: their reach overlap has not been measured
+# (spec §8.4 / GAP-8).
+#
+# Why this is a scenario and not `claude_test/smoke_arm.py`: spec D8 puts
+# the 10 deg test in a bench script to keep the arm action set
+# replay-only. Running it from L2 instead is a deliberate change, for the
+# operator confirmation gate, the runlog, and one execution path shared
+# with every other cell. The cost is one non-replay route,
+# `arm/jog_joint`, kept as narrow as the job allows — ONE joint, a
+# RELATIVE step, capped at 15 deg and 30 % in the cell. Not a pose
+# interface.
+#
+# What is asserted, and why it is not the endpoint:
+#   * `achieved_delta_deg` — the MEASURED increment, from two encoder
+#     reads either side of the move. LearnedPatterns #33: an endpoint
+#     assert passes on an arm that never moved but happened to start
+#     there. Spec J4 says the same.
+#   * `max_other_axis_delta_deg` — joints 2-6 must hold (spec J6),
+#     computed in the cell from that same pair of reads.
+#   * the return leg, so each round ends where it began (spec J7).
+#
+# There is deliberately no `robot_id == 'fr5_a'` assert: `assert:`
+# interpolates values UNQUOTED, so a string lands as a bare name and the
+# grammar (comparisons plus true/false/none/null) rejects it. `validate`
+# cannot catch that, having no values to interpolate — LearnedPatterns
+# #25's shape. Which arm is which is pinned by `cell:` and recorded in
+# the runlog.
+#
+# SAFETY (spec §8):
+#   1. THIS MOVES TWO ROBOT ARMS. Joint 1 is the base rotation, so the
+#      whole arm sweeps. Operator at the bench, hardware e-stop in hand,
+#      both arms' reach clear before the confirmation is given.
+#   2. The hardware e-stop is the stop that counts.
+#   3. The run starts from wherever it finds each arm. If joint 1 at
+#      +10 deg would hit a limit or a fixture, reposition first.
+#   4. The two arms are NOT interchangeable: different joint-6 soft
+#      limits (cell6 ±175, cell7 ±360) and different active tool frames
+#      (1 vs 0). LearnedPatterns #43, #44.
+#
+# Verified on hardware 2026-08-11, 3/3 on both arms — reports in
+# `claude_test/smoke_arm_fr5_a_20260811T033622Z.md` and
+# `claude_test/smoke_arm_fr5_b_20260811T031924Z.md`.
+#
+#   python -m orchestrator validate scenarios/test_arm_jog10.yaml
+#   python -m orchestrator run scenarios/test_arm_jog10.yaml
+
+# ── Running this scenario ───────────────────────────────────────────────
+#
+# 1. One cell server per cell this scenario names. Each is its own
+#    process and owns its devices — start them in separate terminals
+#    (or as `deploy/systemd/cell@.service` units) and leave them up.
+#    `--cell` is not needed: the shape is inferred from the config's
+#    device tables.
+#
+#      conda activate sdl
+#      cd ~/workspace/InnoCOREServer/InnoCORESDL_Sungwoo
+#      python -m server --config server/nuc2/cell6.toml
+#      python -m server --config server/nuc1/cell7.toml
+#
+#    Ports: cell6=17064, cell7=17066. cell6 = FR5 arm, synthesis stage; cell7
+#    = FR5 arm, analysis stage.
+#
+# 2. Check each server is up and sees its hardware BEFORE any motion.
+#    `diagnose` is the last gate that can catch a device that answers
+#    reads but will not move:
+#
+#      curl -s localhost:17064/v1/health
+#      curl -s localhost:17066/v1/health
+#      curl -s localhost:17064/v1/diagnose | python3 -m json.tool
+#      curl -s localhost:17066/v1/diagnose | python3 -m json.tool
+#
+# 3. The orchestrator reads its cell list from orchestrator/config.toml.
+#    Every cell above must be registered AND UNCOMMENTED there:
+#
+#      [cells.cell6]
+#      base_url = "http://127.0.0.1:17064"
+#      [cells.cell7]
+#      base_url = "http://127.0.0.1:17066"
+#
+#    Some cells ship commented out on purpose, with the reason next to
+#    them — a registered-but-down cell costs a connect timeout on every
+#    `/v1/cells` probe and on every `stop_on_failure` broadcast, because
+#    the engine POSTs /v1/stop to every REGISTERED cell, not only the
+#    ones a run touched. So uncomment a cell together with its server,
+#    and comment it back out when you power that bench down.
+#
+# 4. Dry run first — it validates every action and body field against
+#    each cell's live OpenAPI, and moves nothing:
+#
+#      python -m orchestrator validate scenarios/test_arm_jog10.yaml
+#
+# 5. Then the real run. The first hardware-touching step waits for
+#    an operator confirmation.
+#
+#      python -m orchestrator run scenarios/test_arm_jog10.yaml
+#
+#    Add `--step-mode` to pause before EVERY step. Use it only
+#    when debugging: thirteen prompts of which one matters is how
+#    an operator stops reading them.
+#
+#    A runlog is written to `runs/<UTC>-<name>/` (gitignored):
+#    meta.json, run.jsonl, scenario.yaml, vars.json.
+#
+# Stopping a server: Ctrl-C in its terminal, or find the pid with
+# `pgrep -af 'm server --config'` and `kill <pid>`. Do NOT use
+# `pkill -f 'server --config'` — the pattern matches your own shell.
+#
+# ──────────────────────────────────────────────────────────────────────────
+
+name: test_arm_jog10
+description: >
+  T1 acceptance test for both FR5 arms, in sequence: joint 1 +10 deg and
+  back, three rounds each, every round verified on the encoder by its
+  increment rather than its endpoint, with joints 2-6 checked for
+  coupling.
+
+params:
+  joint: 1
+  jog_deg: 10.0
+  jog_back_deg: -10.0
+  # Spec J4/J7: ±0.5 deg on the increment and on the return.
+  tolerance_deg: 0.5
+  # Spec J6: the other five axes must not move more than this.
+  coupling_deg: 0.5
+  # Well under the cell's 30 % cap. A commissioning move is slow.
+  speed_pct: 10.0
+
+defaults:
+  on_fail: abort        # a motion step must never be retried blindly
+  timeout_s: 30.0
+
+steps:
+  # ══ cell6 (a) ══════════════════════════════════════════════════
+  - id: a_check
+    cell: cell6
+    action: diagnose
+    method: GET
+    save_as: a_diag
+
+  - id: a_assert_reachable
+    assert: "${a_diag.arm.ok} == True and ${a_diag.replay.running} == False"
+
+  # Clears a latched controller fault, energises, selects automatic mode.
+  # Its own step because it DISCARDS EVIDENCE — the response reports
+  # `error_before`, so the runlog keeps what was wrong. Nothing moves
+  # here, but holding torque comes on.
+  # MOTION begins here. `arm/` is in the orchestrator's
+  # hazard_prefixes, so this first POST is where the operator
+  # confirmation lands for the whole run.
+  - id: a_enable
+    cell: cell6
+    action: arm/enable
+    timeout_s: 30.0
+    save_as: a_en
+
+  - id: a_assert_fault_cleared
+    assert: "${a_en.fault_cleared} == True"
+
+  - id: a_r1_out
+    cell: cell6
+    action: arm/jog_joint
+    body:
+      joint: "${params.joint}"
+      delta_deg: "${params.jog_deg}"
+      speed_pct: "${params.speed_pct}"
+    timeout_s: 60.0
+    save_as: a_r1o
+
+  - id: a_r1_assert_increment
+    assert: "${a_r1o.achieved_delta_deg} >= ${params.jog_deg} - ${params.tolerance_deg} and ${a_r1o.achieved_delta_deg} <= ${params.jog_deg} + ${params.tolerance_deg}"
+
+  - id: a_r1_assert_no_coupling
+    assert: "${a_r1o.max_other_axis_delta_deg} <= ${params.coupling_deg}"
+
+  - id: a_r1_home
+    cell: cell6
+    action: arm/jog_joint
+    body:
+      joint: "${params.joint}"
+      delta_deg: "${params.jog_back_deg}"
+      speed_pct: "${params.speed_pct}"
+    timeout_s: 60.0
+    save_as: a_r1h
+
+  - id: a_r1_assert_returned
+    assert: "${a_r1h.achieved_delta_deg} >= ${params.jog_back_deg} - ${params.tolerance_deg} and ${a_r1h.achieved_delta_deg} <= ${params.jog_back_deg} + ${params.tolerance_deg}"
+
+  - id: a_r2_out
+    cell: cell6
+    action: arm/jog_joint
+    body:
+      joint: "${params.joint}"
+      delta_deg: "${params.jog_deg}"
+      speed_pct: "${params.speed_pct}"
+    timeout_s: 60.0
+    save_as: a_r2o
+
+  - id: a_r2_assert_increment
+    assert: "${a_r2o.achieved_delta_deg} >= ${params.jog_deg} - ${params.tolerance_deg} and ${a_r2o.achieved_delta_deg} <= ${params.jog_deg} + ${params.tolerance_deg}"
+
+  - id: a_r2_assert_no_coupling
+    assert: "${a_r2o.max_other_axis_delta_deg} <= ${params.coupling_deg}"
+
+  - id: a_r2_home
+    cell: cell6
+    action: arm/jog_joint
+    body:
+      joint: "${params.joint}"
+      delta_deg: "${params.jog_back_deg}"
+      speed_pct: "${params.speed_pct}"
+    timeout_s: 60.0
+    save_as: a_r2h
+
+  - id: a_r2_assert_returned
+    assert: "${a_r2h.achieved_delta_deg} >= ${params.jog_back_deg} - ${params.tolerance_deg} and ${a_r2h.achieved_delta_deg} <= ${params.jog_back_deg} + ${params.tolerance_deg}"
+
+  - id: a_r3_out
+    cell: cell6
+    action: arm/jog_joint
+    body:
+      joint: "${params.joint}"
+      delta_deg: "${params.jog_deg}"
+      speed_pct: "${params.speed_pct}"
+    timeout_s: 60.0
+    save_as: a_r3o
+
+  - id: a_r3_assert_increment
+    assert: "${a_r3o.achieved_delta_deg} >= ${params.jog_deg} - ${params.tolerance_deg} and ${a_r3o.achieved_delta_deg} <= ${params.jog_deg} + ${params.tolerance_deg}"
+
+  - id: a_r3_assert_no_coupling
+    assert: "${a_r3o.max_other_axis_delta_deg} <= ${params.coupling_deg}"
+
+  - id: a_r3_home
+    cell: cell6
+    action: arm/jog_joint
+    body:
+      joint: "${params.joint}"
+      delta_deg: "${params.jog_back_deg}"
+      speed_pct: "${params.speed_pct}"
+    timeout_s: 60.0
+    save_as: a_r3h
+
+  - id: a_r3_assert_returned
+    assert: "${a_r3h.achieved_delta_deg} >= ${params.jog_back_deg} - ${params.tolerance_deg} and ${a_r3h.achieved_delta_deg} <= ${params.jog_back_deg} + ${params.tolerance_deg}"
+
+  # Read the encoder again through a different route, so the verdict
+  # does not rest on one reading (LearnedPatterns #34).
+  - id: a_final_status
+    cell: cell6
+    action: status
+    method: GET
+    timeout_s: 15.0
+    save_as: a_post
+
+  - id: a_assert_idle
+    assert: "${a_post.busy} == False"
+
+  # ══ cell7 (b) ══════════════════════════════════════════════════
+  - id: b_check
+    cell: cell7
+    action: diagnose
+    method: GET
+    save_as: b_diag
+
+  - id: b_assert_reachable
+    assert: "${b_diag.arm.ok} == True and ${b_diag.replay.running} == False"
+
+  # Clears a latched controller fault, energises, selects automatic mode.
+  # Its own step because it DISCARDS EVIDENCE — the response reports
+  # `error_before`, so the runlog keeps what was wrong. Nothing moves
+  # here, but holding torque comes on.
+  - id: b_enable
+    cell: cell7
+    action: arm/enable
+    timeout_s: 30.0
+    save_as: b_en
+
+  - id: b_assert_fault_cleared
+    assert: "${b_en.fault_cleared} == True"
+
+  - id: b_r1_out
+    cell: cell7
+    action: arm/jog_joint
+    body:
+      joint: "${params.joint}"
+      delta_deg: "${params.jog_deg}"
+      speed_pct: "${params.speed_pct}"
+    timeout_s: 60.0
+    save_as: b_r1o
+
+  - id: b_r1_assert_increment
+    assert: "${b_r1o.achieved_delta_deg} >= ${params.jog_deg} - ${params.tolerance_deg} and ${b_r1o.achieved_delta_deg} <= ${params.jog_deg} + ${params.tolerance_deg}"
+
+  - id: b_r1_assert_no_coupling
+    assert: "${b_r1o.max_other_axis_delta_deg} <= ${params.coupling_deg}"
+
+  - id: b_r1_home
+    cell: cell7
+    action: arm/jog_joint
+    body:
+      joint: "${params.joint}"
+      delta_deg: "${params.jog_back_deg}"
+      speed_pct: "${params.speed_pct}"
+    timeout_s: 60.0
+    save_as: b_r1h
+
+  - id: b_r1_assert_returned
+    assert: "${b_r1h.achieved_delta_deg} >= ${params.jog_back_deg} - ${params.tolerance_deg} and ${b_r1h.achieved_delta_deg} <= ${params.jog_back_deg} + ${params.tolerance_deg}"
+
+  - id: b_r2_out
+    cell: cell7
+    action: arm/jog_joint
+    body:
+      joint: "${params.joint}"
+      delta_deg: "${params.jog_deg}"
+      speed_pct: "${params.speed_pct}"
+    timeout_s: 60.0
+    save_as: b_r2o
+
+  - id: b_r2_assert_increment
+    assert: "${b_r2o.achieved_delta_deg} >= ${params.jog_deg} - ${params.tolerance_deg} and ${b_r2o.achieved_delta_deg} <= ${params.jog_deg} + ${params.tolerance_deg}"
+
+  - id: b_r2_assert_no_coupling
+    assert: "${b_r2o.max_other_axis_delta_deg} <= ${params.coupling_deg}"
+
+  - id: b_r2_home
+    cell: cell7
+    action: arm/jog_joint
+    body:
+      joint: "${params.joint}"
+      delta_deg: "${params.jog_back_deg}"
+      speed_pct: "${params.speed_pct}"
+    timeout_s: 60.0
+    save_as: b_r2h
+
+  - id: b_r2_assert_returned
+    assert: "${b_r2h.achieved_delta_deg} >= ${params.jog_back_deg} - ${params.tolerance_deg} and ${b_r2h.achieved_delta_deg} <= ${params.jog_back_deg} + ${params.tolerance_deg}"
+
+  - id: b_r3_out
+    cell: cell7
+    action: arm/jog_joint
+    body:
+      joint: "${params.joint}"
+      delta_deg: "${params.jog_deg}"
+      speed_pct: "${params.speed_pct}"
+    timeout_s: 60.0
+    save_as: b_r3o
+
+  - id: b_r3_assert_increment
+    assert: "${b_r3o.achieved_delta_deg} >= ${params.jog_deg} - ${params.tolerance_deg} and ${b_r3o.achieved_delta_deg} <= ${params.jog_deg} + ${params.tolerance_deg}"
+
+  - id: b_r3_assert_no_coupling
+    assert: "${b_r3o.max_other_axis_delta_deg} <= ${params.coupling_deg}"
+
+  - id: b_r3_home
+    cell: cell7
+    action: arm/jog_joint
+    body:
+      joint: "${params.joint}"
+      delta_deg: "${params.jog_back_deg}"
+      speed_pct: "${params.speed_pct}"
+    timeout_s: 60.0
+    save_as: b_r3h
+
+  - id: b_r3_assert_returned
+    assert: "${b_r3h.achieved_delta_deg} >= ${params.jog_back_deg} - ${params.tolerance_deg} and ${b_r3h.achieved_delta_deg} <= ${params.jog_back_deg} + ${params.tolerance_deg}"
+
+  # Read the encoder again through a different route, so the verdict
+  # does not rest on one reading (LearnedPatterns #34).
+  - id: b_final_status
+    cell: cell7
+    action: status
+    method: GET
+    timeout_s: 15.0
+    save_as: b_post
+
+  - id: b_assert_idle
+    assert: "${b_post.busy} == False"
+

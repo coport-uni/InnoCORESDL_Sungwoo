@@ -1891,3 +1891,553 @@ hardware code that has not passed the gate this entry installs.
       bench and recorded (LearnedPatterns #39, README bench note):
       push the carriage near home by hand before the run so the homing
       travel fits between drops. Interim until the RS485 isolator.
+
+## 2026-08-11 — cell6 / cell7: ArmReplayCell (docs/SPEC_ARM_REPLAY_CELL.md)
+
+Two FR5 arms as L1 cells. Operator-assigned addresses: cell6 =
+synthesis stage `192.168.0.58`, cell7 = analysis stage `192.168.0.59`.
+Replay target chosen by the operator:
+`coport-uni/FR5_task3_turn_the_sliver_air_valve_90_degress_counterclockwise_200`
+episode 10 (200 episodes, 20 fps, ~723 frames ≈ 36 s).
+
+- [x] Pin `external/FR5ControllerVLA` as a submodule (D4) and record the
+      "pinned but not installed" + "own conda env" exceptions in
+      `external/SUBMODULES.md`.
+- [x] `cell/arm_replay_cell.py`: `ArmReplayCell` + `ArmReplayConfig`,
+      `prefetch_episode` / `start_replay` / `await_replay`, two-stage
+      `stop()`, SDK session hand-over around the subprocess.
+- [x] `Cell` protocol + `_no_arm` stubs in the three existing cells.
+- [x] Server: `arm/prefetch` + `arm/replay` routes, schemas,
+      `_load_arm_replay`, `--cell arm_replay`, `[arm]` shape inference.
+- [x] Make the cell imports in `server/__main__.py` lazy — an arm cell
+      has no serial device and must not need `entris_ii` installed.
+- [x] `server/nuc2/cell6.toml.example`, `server/nuc1/cell7.toml.example`.
+- [x] `claude_test/smoke_arm.py` (T1) and `scenarios/demo_arm_replay.yaml`
+      (T4); `arm/` added to the orchestrator's hazard prefixes.
+- [x] T0 unit tests green (61 arm + 57 orchestrator = 118), `ruff check`
+      + `ruff format --check` clean.
+- [x] **Bench, read-only (2026-08-11)**: both controllers reachable;
+      cell6 server up on 17064 against the real arm; `health`,
+      `diagnose`, 10× `status`, the seven wrong-action 409s, the D6
+      prefix 400, the schema 422, the no-env 503 and `stop` (13–33 ms)
+      all verified. Console output kept for the PR.
+- [x] Two real SDK defects found and fixed — `LearnedPatterns.md` #40
+      (joint read via a stream cell6 does not serve; wrapper hard-codes
+      error 0) and #41 (`MoveJ`/`StopMotion` spin forever on a latched
+      `reconnect_flag`; `POST /v1/stop` hung and wedged shutdown).
+- [x] **T1 given a YAML path**: `arm/jog_joint` (ONE joint, RELATIVE,
+      capped at 15° / 30% in the cell) + `scenarios/test_arm_jog10.yaml`,
+      21 steps, dry run 0 issues. A deliberate narrowing of spec D8,
+      which wanted the 10° test kept out of `/v1`: the trade is one
+      bounded route for the orchestrator's operator gate and a runlog.
+      Asserts the MEASURED increment and the other-axis coupling, never
+      an endpoint (LearnedPatterns #33).
+- [x] **T1 first attempt ran (operator, 2026-08-11) and FAILED**:
+      `arm/jog_joint -> HTTP 500: MoveJ rejected with SDK error 154`.
+      Root cause was not the cell: the controller held a latched fault
+      (`GetRobotErrorCode -> main=1 sub=1`) with servos down, and it
+      accepts reads in that state. Fixed by adding a readiness gate
+      (409 naming the cause), `POST /v1/arm/enable` as an explicit
+      fault-clearing action that reports `error_before`, and an honest
+      `diagnose` (`fault` + `ready`, verified on the arm: `ok=True`,
+      `ready=False`, `fault=[1,1]`). LearnedPatterns #42.
+- [x] **`sdl` conda env created** (conda-forge, python 3.12 + fastapi
+      0.141.1 + uvicorn), so CLAUDE.md's documented
+      `python -m server --config …` works on this NUC. The arm cell
+      needs no driver packages thanks to the lazy imports.
+- [x] **T1 second attempt (operator, 2026-08-11): still 154 — and that
+      corrected the diagnosis.** `enable` reported
+      `error_before [1,1] → error_after [0,0]`, then the next
+      `arm/jog_joint` failed in 0.011 s with 154, and a read right after
+      showed `[0,1,1]` again (10/10 polls). ResetAllError only masks the
+      condition. Located by comparing the two arms:
+      cell6 `GetRobotCurJointsConfig -> [14, 0]` (**error 14**,
+      "RobotMotionError" per FR5Controller.py) with 20004 closed, vs
+      cell7 `[0, 7]`, error `[0,0]`, 20004 open. #40's "cell6 does not
+      serve 20004" was the same fault, not a separate quirk.
+      LearnedPatterns #42 corrected.
+- [x] **Scenario bug of mine, found by the real T3 run**:
+      `assert: "${diag.arm.robot_id} == 'fr5_a'"` cannot work —
+      `assert:` interpolates UNQUOTED, so a string becomes a bare name
+      and the grammar allows only comparisons plus
+      true/false/none/null. `validate` cannot catch it (no values to
+      interpolate, so the finished expression is never parsed) —
+      LearnedPatterns #25's shape again. Removed, with the reason in the
+      file.
+- [x] `scenarios/test_arm_jog10_cell7.yaml` + cell7 registered in
+      `orchestrator/config.toml`; cell7's server verified up on 17066
+      with `ok=True, ready=True, fault=[0,0]`.
+- [x] **Third T1 attempt settled it: 154 is NOT the latched fault.**
+      `runs/20260811T031205Z-test_arm_jog10` shows `enable` reading
+      `[1,1] → [0,0]`, the gate reading `(0,0)`, and MoveJ still
+      answering 154. So the code stopped claiming what it cannot know:
+      `prepare_arm` now returns `fault_cleared` + an `error_settled`
+      re-read instead of `ready: true`. LearnedPatterns #42, second
+      correction.
+- [x] **The readiness gate did its job on hardware**: it refused
+      `arm/replay` with a 409 before spawning any subprocess
+      (`runs/20260811T031226Z-demo_arm_replay`), and prefetch in the same
+      run returned `{cached: true, frames: 715, fps: 20}`.
+- [x] **cell6's fault localised to the motion subsystem** (operator
+      reported a joint command-point error on the pendant). Sharp
+      pattern: every motion query answers **error 14**
+      (`GetRobotCurJointsConfig`, `GetTargetPayload`) while every state
+      and kinematics query answers 0 — joint reads, torques, speeds,
+      soft limits, and both `GetForwardKin` and `GetInverseKin` on the
+      exact rejected target. The commanded point is kinematically valid
+      and inside the soft limits; the subsystem refuses *any* target.
+- [x] **Found while diagnosing: the two arms have different joint-6 soft
+      limits** — cell6 `[-175, +175]`, cell7 `[-360, +360]`, everything
+      else identical. A dataset recorded on cell7 can contain a wrist
+      angle cell6 refuses mid-trajectory. LearnedPatterns #43.
+- [ ] Consider pre-scanning an episode's joint column against
+      `GetJointSoftLimitDeg` in the probe, if cross-arm replay is
+      wanted. One extra XMLRPC call; the action column is already read.
+- [ ] **cell6's CONTROLLER is down, not just faulted**: error 14 on
+      motion queries, a fault that re-latches after every refused MoveJ,
+      no port 20004 ever, and by the end of the session no port 20003
+      either (ConnectionRefused while ICMP still replied). Needs a power
+      cycle and the teach pendant. Not a software problem.
+- [x] **T1 PASSED ON cell7, 3/3** (operator, run
+      `20260811T031924Z-test_arm_jog10_cell7`). Worst increment error
+      **0.0013°** against ±0.5° (~380x margin), worst other-axis
+      movement 0.0004°, `arm/enable` clean before/after/settled. Report
+      committed at `claude_test/smoke_arm_fr5_b_20260811T031924Z.md`.
+      This proves the whole motion path on real hardware: the
+      `arm/jog_joint` route, the XMLRPC `GetForwardKin` → `MoveJ` path
+      that replaced the unusable SDK wrappers (#40/#41), the encoder
+      read-back, and the increment-based verdict.
+- [x] **`SDK error 154` root-caused and fixed: a hard-coded `tool=0`.**
+      `GetForwardKin` answers in the controller's ACTIVE tool frame, so
+      the `desc_pos` passed to `MoveJ` alongside the joint target lives
+      in that frame. `GetActualTCPNum(1)` → cell6 **1**, cell7 **0**. On
+      cell7 the literal happened to match and the point was accepted; on
+      cell6 the joint target and the Cartesian pose described points in
+      different frames, which the pendant shows as a joint command-point
+      error. `_move_j` now reads the frame and raises rather than
+      guessing. LearnedPatterns #44 — and note two earlier diagnoses of
+      154 (latched fault, controller down) were wrong; both were real
+      conditions, neither was the cause.
+- [x] **T1 ACCEPTANCE MET — both arms 3/3** (spec §7 T1):
+      cell7 `20260811T031924Z-test_arm_jog10_cell7`, worst increment
+      error 0.0013°; cell6 `20260811T033622Z-test_arm_jog10`, worst
+      0.0010° (best round 0.00005°). Reports committed at
+      `claude_test/smoke_arm_fr5_b_20260811T031924Z.md` and
+      `claude_test/smoke_arm_fr5_a_20260811T033622Z.md`.
+- [ ] DoD items still open: T3 (replay E2E + stop measurement), T4
+      (step-mode scenario run), and the `docs/L1_AUDIT.md` entry.
+- [ ] T3 replay: blocked behind the same cell6 fault; re-target at cell7
+      or wait for cell6. Needs the operator
+      at the bench with the hardware e-stop. This is the spec's
+      acceptance test; nothing merges without it.
+- [x] **lerobot env built (2026-08-11)**: conda's Anaconda ToS gate
+      (LearnedPatterns #28) sidestepped by using conda-forge only —
+      the ToS is the user's to accept, not mine. Needed a compiler too:
+      this NUC has no `gcc`, and `evdev` is a hard Linux dep of lerobot,
+      so `c-compiler` (gcc 14.4.0) went into the env from conda-forge.
+      `lerobot 0.5.1 + torch 2.10.0`, `lerobot-replay` on PATH. Installed
+      non-editable on purpose so the submodule stays clean.
+- [x] **`arm/prefetch` verified on the real network**: episode 10 →
+      `{cached: true, frames: 715, fps: 20, duration_s: 35.75}` in 22 s.
+      Cross-checked against the dataset's own `meta/episodes` parquet
+      read straight from HuggingFace: 715 frames — the two agree, so the
+      number is not just the cell repeating itself.
+- [ ] **T3 replay — NOT RUN**: it is motion, so same gate as T1.
+      Note the cell's computed budget for this episode: 715/20 × 1.5 =
+      **53.6 s**.
+- [x] **Approach cap added after a real measurement**: the arm sat
+      **97.2 deg** from episode 10's first frame (joint 6 at −98.1 vs
+      −1.0). The spec's step-4 pre-move would have answered a replay
+      request with a right-angle wrist swing, so `start_replay` now
+      refuses past `MAX_START_APPROACH_DEG` (30°) and names the pose to
+      jog to. Same reasoning as LearnedPatterns #39.
+- [ ] T4 step-mode run of `demo_arm_replay.yaml` (follows T3).
+- [x] **`scenarios/demo_arm_replay_cell7.yaml` written** — T4 re-targeted
+      at cell7, since cell6 is blocked on its controller fault (#42). A
+      separate file, not a param: `cell:` is resolved against the
+      registry before interpolation, same reason `test_arm_jog10_cell7`
+      exists. Adds one assert the cell6 file does not have,
+      `diag.arm.ready == True`, so a latched fault fails the run at a
+      read instead of at the replay launch; clearing it stays manual
+      (`POST /v1/arm/enable`), because a scenario that cleared faults on
+      its way past them would re-issue the move that caused one.
+      `validate` passes (9 steps).
+- [x] **T4 on cell7 RAN, and FAILED — correctly** (operator, run
+      `20260811T033044Z-demo_arm_replay_cell7`).
+      `replay ended 12.68 deg from the episode's last frame`. The arm
+      did not move at all: `lerobot-replay` exited 0 after the full
+      38 s, the gripper cycled the whole time, and every ServoJ tick
+      raised `Fault -502: 'Format string requests 8 items from array,
+      but array has only 7 items.'` The cell's encoder check is the only
+      thing that caught it. Full write-up: LearnedPatterns #45.
+- [ ] **Fix upstream in `external/FR5ControllerVLA`** (its own repo, its
+      own ToDo + issue): `fairino_follower.py:437` sends 7 params to
+      `ServoJ`; cell7's controller (`v3.9.3.1` / `V3.9.15-QX`) wants 8,
+      cell6's (`v3.8.1` / `V3.7.78`) is the one the 7-param form was
+      pinned for. Probe the arity once at `connect()` and cache it — a
+      blind switch to 8 just moves the breakage to the other arm. Then
+      bump the submodule pin here and re-run T4.
+- [x] **`claude_test/episode_joint_range.py`** — answers #43's question
+      before anything moves: per-joint travel of an episode vs the
+      target controller's soft limits, read-only, exit 1 when a joint
+      leaves them. Run against **cell6** 2026-08-11: episode 10 of the
+      task3 dataset is **within limits**, worst margin +26.46° (joint
+      1). So cell6 is a legitimate host for the arity experiment above —
+      the #43 hazard does not bite for this episode. Indexed in
+      `claude_test/README.md`; `ruff check` + `ruff format --check`
+      pass.
+- [ ] **T4 on cell7 — still unproven, and blocked on the arm's position
+      once the ServoJ arity is fixed.** The
+      dataset is a SYNTHESIS-stage recording; on the analysis arm it
+      plays the same joint trajectory into a different workcell, so the
+      reach has to be walked before the confirmation is given. The arm
+      also has to be parked within 30° of episode 10's first frame or
+      `arm/replay` refuses (it was 97.2° away when last measured) —
+      `arm/jog_joint`, 15° per step, is the way in. Operator at the
+      bench with the hardware e-stop.
+- [x] GitHub issue registered: **#30** "cell6/cell7: ArmReplayCell — two
+      FR5 arms as L1 cells (SPEC_ARM_REPLAY_CELL)", opened 2026-08-11.
+      Every item in this section — T1, T3, T4, the approach cap, the
+      cell7 scenario — belongs to it; do not open a second one.
+- [x] **T1's two per-arm scenarios merged into one** (user request):
+      `scenarios/test_arm_jog10.yaml` now drives cell6 then cell7 in a
+      single run, 42 steps, `validate` clean. `test_arm_jog10_cell7.yaml`
+      deleted. Rationale: the spec's acceptance is "each arm 3/3", so one
+      runlog covering both is the artifact that proves it, instead of two
+      files someone has to remember to run in pairs. The arms stay
+      STRICTLY SEQUENTIAL — never a `parallel` block, since their reach
+      overlap is unmeasured (GAP-8). Confirmed there is no way to
+      parameterise this: `step.cell` is checked against the registry
+      before any interpolation, and the loader has no repeat construct.
+      T4's two files stay split on purpose — a replay is episode-specific
+      and the arms differ in joint-6 limits and tool frame (#43, #44), so
+      pairing them would imply a compatibility nobody has established.
+- [x] **`scenarios/test_arm_jog30_par.yaml`** (user request): both arms
+      jog joint 1 by ±30° **at the same time**, twice, 27 steps,
+      `validate` clean. Written as a SIBLING file, not an edit to
+      `test_arm_jog10.yaml`: that file is the T1 acceptance artifact and
+      two committed bench reports name the runs it produced, so turning
+      it parallel would break that correspondence.
+      **This file knowingly breaks GAP-8** (spec §8.4), which forbids
+      cell6 and cell7 in one `parallel:` block until their reach overlap
+      is measured. It cannot be checked in software: each controller
+      reports poses in its OWN base frame (`GetRobotInstallAngle` is
+      [0, 135] on both — a mounting ANGLE, not a position), so nothing
+      can compute the distance between the two arms. Running the file
+      asserts, on the operator's eye alone, that they cannot touch in a
+      ±30° joint-1 sweep. The file says so in a box at the top and
+      carries a `pause:` before EACH concurrent block, because
+      `confirm_first_motion` fires once per run and is spent on the first
+      `arm/enable`. Enables and diagnoses stay one-at-a-time; only the
+      jogs are concurrent.
+- [x] **`MAX_JOG_DEG` raised 15° → 30°** (user request) plus the schema
+      bound, after T1 passed 3/3 on both arms at 10° with a worst
+      increment error of 0.0013°. Still a real cap — a bound a request
+      can lift is not a bound. Joint 1 is the base rotation, so 30° is a
+      substantial sweep and the operator gate does the real work.
+      Added the tests the cap never had: 30° exactly is accepted, past it
+      is `InvalidArgError` with nothing commanded, and an over-speed
+      request is **clamped** rather than rejected (the safe answer to "go
+      faster than allowed" on a commissioning move is "go at the limit",
+      not a 400 that tempts someone to raise the limit).
+      Caught by the dry run first: the running servers were still serving
+      `±15`, so `validate` failed with `body_mismatch` until they were
+      restarted — the dry run doing exactly its job.
+- [x] **Parallel ±30° jog VERIFIED on hardware** (operator, run
+      `20260811T040822Z-test_arm_jog30_par`): 2/2 rounds, all 8 moves,
+      worst increment error **0.0007°** at triple T1's displacement,
+      worst other-axis movement 0.0004°. Report at
+      `claude_test/smoke_arm_par30_20260811T040822Z.md`. Concurrency is
+      proven from the runlog rather than assumed — each pair took the
+      *same* 18.8 s instead of summing, and the children finished out of
+      submission order. This also exercises the raised 30° cap on real
+      hardware. It still does NOT measure reach overlap, so GAP-8 stands.
+
+- [x] **Second arm motion path: run a `.lua` job program on the
+      controller** (`POST /v1/arm/program`). replay is untouched and both
+      paths coexist; they refuse each other with a 409, because a servo
+      session and a job program are two owners of the same axes. The
+      controller does the planning here, so the PC leaves the real-time
+      loop — and the trade is that the cell never reads the script, so it
+      has no expected end pose and cannot claim the arm arrived anywhere.
+      `docs/SPEC_ARM_LUA_PROGRAM.md` §6.4 says so and the response schema
+      repeats it. Scope is deliberately **execute-only**: `LuaUpload` /
+      `LuaDelete` / `LoadDefaultProgConfig` are all out, so nothing here
+      writes to the controller's filesystem or arms a boot-time motion.
+      Guarded by a bare-name check (no `/`, `\`, `..`) plus a config
+      allow-list, the same shape as `allowed_repo_prefixes`.
+- [x] **Phase-0 probe VERIFIED on cell6**
+      (`claude_test/probe_arm_lua_fr5_a_20260811T042141Z.md`, 7/7
+      read-only, no motion). Settled three things that had been assumed:
+      raw `GetProgramState()` really is `(error, state)`; `GetLuaList()`
+      really is `(error, count, "a;b;c;")` with a trailing `;`; and the
+      program is **`Test1.lua` with a capital T** — there is no lowercase
+      `test1.lua` on that arm, and `ProgramLoad` takes the name literally.
+      It also **disproved** a claim the spec draft had made from reading
+      the SDK alone: the `GetProgramState()` wrapper does not raise on
+      this controller, because its port-20004 stream is alive. The
+      wrapper is still unusable (it reads `robot_state`, a different
+      field, and hard-codes success), but for the reason measured, not
+      the one guessed. Spec §4.1 carries the correction.
+- [x] **`Test1.lua` RUN on cell6 hardware — and it found two real bugs.**
+      The first `POST /v1/arm/program` answered `200 completed:true` in
+      **2.8 ms** for a program that then ran **23.6 s** and swung joint 1
+      through **91.27°**. `ProgramRun` returns on acceptance and the
+      state does not reach "running" for 160 ms, so the first poll read
+      the pre-start idle as "finished"; separately `GetCurrentLine`
+      resets to 0 at the end, so `last_line` was always 0. Fixed with
+      `_confirm_started()` (poll until the controller leaves the stopped
+      state, 5 s grace vs 160 ms measured, `DeviceFaultError` if it never
+      does) and a high-water mark for `last_line`. Both pinned by
+      regression tests whose fake now reproduces the lag and the reset.
+      Written up as LearnedPatterns #46.
+- [x] **`arm/program` VERIFIED on both arms** after the fix
+      (`claude_test/bench_arm_program_20260811.md`). cell6 `Test1.lua`
+      23.789 s / `last_line` 18; cell7 `Cell7Test1.lua` 25.298 s /
+      `last_line` 13; no fault on either, `busy` false afterwards, and
+      the HTTP response now arrives when the program ends rather than
+      2.8 ms in. Both programs return to their own start pose (within
+      0.002–0.004°), which is worth remembering: **`last_line` is the
+      only evidence the script ran** — a pose check would pass on an arm
+      that never moved. Still open: `POST /v1/stop` has not been timed
+      against a running program, so GAP-9 is not disproved for this
+      path, and `scenarios/demo_arm_program.yaml` validates (0 issue)
+      but has not been run end to end — the operator gate wants a
+      console confirmation and auto-answering it would defeat the gate.
+- [ ] **`allowed_programs` is read once, at server start.** Adding a
+      program to the allow-list needs a restart; leaving the list empty
+      permits any `*.lua` the controller holds and needs neither a
+      restart nor a config change. That trade — a person in the loop vs.
+      scenario-only iteration — is currently resolved toward the person
+      on both cells. Revisit if the bench starts iterating on programs
+      often enough that the restart is what gets skipped.
+- [x] **lerobot replay path REMOVED from L1** (user request), with the
+      record written *before* the deletion so the reasoning survives it:
+      **LearnedPatterns #47** covers why it went — the PC never left the
+      arm's real-time loop, only recorded motions could be expressed, and
+      a second conda env plus torch isolation plus HF caching plus a
+      prefetch route plus a start-pose guard was a lot of machinery for
+      "move the arm" — and, deliberately, **what it was better at**:
+      executing a *learned policy* (nothing to pre-load onto a
+      controller) and stronger completion evidence (an episode has a last
+      recorded frame to check against; a job program has no end pose the
+      cell can know). `docs/SPEC_ARM_REPLAY_CELL.md` keeps the design
+      under a superseded banner and `external/FR5ControllerVLA` stays
+      pinned, so VLA rollouts come back from git rather than from
+      scratch.
+      Removed: `cell/arm_replay_cell.py` → **`cell/arm_cell.py` /
+      `ArmCell`** (1940 → 1254 lines), `LerobotRunner`, `start_replay` /
+      `await_replay` / `prefetch_episode` / `_approach_start`,
+      `POST /v1/arm/prefetch` and `/v1/arm/replay` with their schemas,
+      `demo_arm_replay*.yaml`, `episode_joint_range.py`, the 11 replay
+      config keys, and the replay stubs on the other three cells.
+      `--cell arm_replay` → `--cell arm`. `from_toml` now ignores unknown
+      keys so a bench TOML still carrying the old ones starts instead of
+      refusing to.
+      `ruff` clean, `pytest claude_test/test_arm_cell.py` 68 passed.
+- [x] **Re-verified on both arms AFTER the rename** — a refactor of a
+      motion path is not verified by the tests that survived it
+      (CLAUDE.md rule 4). Both servers restarted on `cell/arm_cell.py`;
+      `arm/prefetch` and `arm/replay` are gone from the OpenAPI and
+      `diagnose` no longer carries a `replay` block. cell6 `Test1.lua`
+      **23.786 s / line 18**, cell7 `Cell7Test1.lua` **25.293 s / line
+      13** — both within ~10 ms of the pre-refactor numbers, so the
+      removal changed the surface and not the behaviour. Rejection gates
+      re-checked with no motion (case / traversal / extension → 400) and
+      `orchestrator validate` ok, 10 steps.
+
+## 2026-08-27 — cell2/cell3 from a TOML config, not a claude_test launcher (issue #32)
+
+- [x] **Why it could not be done before.** `PumpGantryCell.open` opened
+      the gantry through `MKSMotor.open_xz(serial_x)`, which names X and
+      takes **whichever two FTDI adapters remain** for the Z pair. That
+      is right on a bus carrying one cell (cell1) and wrong on NUC2,
+      which carries seven adapters across three cells: cell2 started
+      that way grabs cell3's or cell5's Z motors, and starting both
+      gantries at once is impossible because the second takes motors the
+      first already drives. `claude_test/test_gantry_server_shinyeong.py`
+      worked around it by naming all three adapters and handing the
+      opened cell to `server.app.create_app`.
+- [x] `cell/pump_gantry_cell.py`: `Config.motor_serial_z_a` /
+      `motor_serial_z_b` (default `None`) + `_open_gantry`. Both set →
+      three explicit `MKSMotor.open` calls; either unset → `open_xz`,
+      unchanged. Deliberately all-or-nothing: naming one Z and letting
+      the other be auto-assigned is the same shared-bus mistake wearing
+      a configured look. A named adapter that will not open raises
+      `TransportError` naming the serial — pyftdi says only "no device",
+      and on a shared bus the likely cause is another cell's server
+      holding it, not an unplugged cable — and closes the adapters
+      already opened instead of leaking them.
+- [x] `server/__main__.py`: `_load` reads `stage.serial_z_a` /
+      `stage.serial_z_b`.
+- [x] `server/nuc2/cell2.toml.example` / `cell3.toml.example`: the real
+      serials from the 2026-07-29 bus census, replacing the
+      `TBD-CELL2-X` placeholders. **`[pump]` removed from both** — no
+      syringe pump is on either bench, and the synthesis scenario
+      asserts `d2.pump.present == False` / `d3.pump.present == False`,
+      which a present-but-unopenable pump would break.
+- [x] `ruff check` + `ruff format --check` clean; `pytest claude_test`
+      **162 passed**. `_load` on both examples yields the three serials,
+      `pump_port=None`, ports 17056/17058; `server/nuc1/cell1.toml`
+      still parses to `Z_A=None Z_B=None`, so cell1's path is untouched.
+      `_open_gantry` dispatch exercised against a mocked `MKSMotor` in
+      all four shapes (named / unset / half-named / missing adapter).
+- [ ] **NOT VERIFIED ON THE BENCH — CLAUDE.md rule 4.** The gantries are
+      on NUC2 and this session runs on NUC1, so nothing here has opened
+      a real adapter. Stays in the working tree, uncommitted, until
+      cell2 and cell3 have been served from their TOML files on NUC2 and
+      moved. What to watch there is exactly what the launcher checks and
+      `python -m server` does not: that each server opens its own three
+      adapters and leaves the other cell's alone.
+- [ ] Decide what happens to `claude_test/test_gantry_server_shinyeong.py`
+      once the TOML path is verified. It still does two things the server
+      does not — prints the whole bus with each adapter labelled by owner,
+      and refuses to serve unless all three motors answer an encoder read
+      (LearnedPatterns #24). Folding the encoder check into
+      `PumpGantryCell.open` would help every gantry cell, not just NUC2's.
+
+## 2026-08-27 — cell1 pump re-verified on the bench; gravimetric CV deferred
+
+- [x] **The pump is back on cell1 and works.** `1A86:7523` enumerated
+      (bus 003 dev 019), `server/nuc1/cell1.toml` still carries its
+      `[pump]` table, and cell1's server answers `pump_ok: true`.
+      `diagnose`: fw **8.33**, serial **32656**, supply **24.0 V**,
+      config `4 way|9600|100K|TSY|high|XLP|AUTO`. This is the first
+      bench use since the link was left flapping (see the 2026-07-29
+      entries); the MINAS amp was OFF for all of it, and no
+      `[pump-link] reopened` appeared in either run.
+- [x] `scenarios/test_pump_prime_1cycle.yaml` — new. `demo_pump_cycle`
+      with the batched `pump/cycle` step removed. That step's schema is
+      `cycles: ge=1`, so the demo's floor is two cycles (1 unrolled + 1
+      batched); this file exists for the single-shot case. Every other
+      step and assert is the demo's, unchanged.
+- [x] **Bench run, 1 cycle @ 125 uL** (`20260827T063233Z-test_pump_prime_1cycle`,
+      `--step-mode`): completed, 16/16. Measured per step —
+      `initialize` 6.17 s (returns `valve: "4"`), valve move 0.56 s,
+      `aspirate` 125 uL 3.27 s, `dispense` to 0 3.12 s. One cycle is
+      therefore **~7.5 s**, not the ~7.0 s at 100 uL recorded on
+      2026-07-29.
+- [x] **Bench run, 20 cycles @ 125 uL** (`20260827T064658Z-demo_pump_cycle`,
+      params `volume_uL: 125.0`, `remaining_cycles: 19`): completed,
+      19/19. Batched step **155.78 s** for 19 cycles = **8.20 s/cycle**,
+      `cycles_done: 19`, `final_valve: "2"`, syringe left empty.
+      Total transferred ~2.5 mL. The operator edited those two params
+      into `demo_pump_cycle.yaml` rather than passing `--param`.
+- [x] 125.0 uL is the **full stroke** of this syringe and the boundary
+      of the driver's accepted range (`[0, Config.syringe_uL]`, closed).
+      It is accepted and arrives; `init_force: 2` (one-third) is the
+      right homing code for the 125 uL barrel's top stop.
+- [ ] **Fix the stale comment.** Both scenarios say "A full-stroke
+      plunger home is ~24 s at the init speed" above `initialize`'s
+      `timeout_s: 60.0`. Measured twice today at **6.2-6.4 s** with
+      `init_force: 2`. The 60 s timeout is still right (the driver's own
+      settle budget is 30 s); only the prose is wrong. Check whether the
+      24 s figure came from a different force code before rewriting it.
+
+## 2026-08-27 — NEXT: gravimetric check that 100 uL really is 100 uL (CV)
+
+Deferred by the user. Everything below was established this session so a
+later run does not have to re-derive it.
+
+- [ ] **Goal.** Dispense 100 uL onto the cell4 balance N times and
+      compute the CV of the delivered mass. Needs three cells' devices
+      at once: cell1's pump AND gantry, cell4's rail AND balance.
+- [ ] **BLOCKER — cell4's rail is down.** Measured today:
+      `health` → `stage_ok: false`, `driver_versions.linear: null`;
+      `diagnose` → `stage: {model: null, version: null, ok: false}`,
+      `ok_to_initialize: false`; `status` → `stage_x_mm: null`. The
+      **balance is fine** (`G     -   0.0005 g`, SerNo 0047304196), as
+      is cell1's gantry (x=0, z=0, `error: null`). Nothing can be
+      weighed at a position until the MINAS amp is powered and
+      `stage.ok` reads true.
+- [ ] **The blocker's fix reintroduces the EMI storm.** Powering the
+      MINAS amp is what brings back the LP #20 conducted-noise coupling
+      that knocks the pump's CH340 off USB — i.e. enabling the balance
+      degrades the very link being measured. `PumpGantryCell` reconnects
+      and re-issues, so expect `[pump-link] reopened` lines mid-run and
+      do not read them as a failure. Rail workaround unchanged:
+      hand-park the carriage near home, split long moves into <=50 mm.
+- [ ] **No existing scenario weighs a dispense.** The motion skeleton is
+      already written in `scenarios/shinyeong_test/test_synthesis_seq_shinyeong.yaml`
+      (rail -> cell1 station -> gantry X -> descend -> `pump/cycle` ->
+      retract), but its only dispense assert is
+      `${disp.cycles_done} == 1` — a control-path check, not a mass one.
+      The balance calls to graft in are in
+      `scenarios/demo_weigh_at_position.yaml`: `balance/tare` (POST) and
+      `balance/weight` (GET -> `{weight_g, stable}`).
+- [ ] **Taught coordinates to reuse** (from the synthesis scenario,
+      measured 2026-08-13): `rail_cell1_mm: 470.772`, `c1_x_mm: 260.0`,
+      `c1_z_mm: 215.0`, `z_up_mm: 3.0`. **Z is 215, NOT the taught
+      223.654** — 223.654 drove the head into the vial: the descent
+      stalled at 222.27, the paired Z motors ended 1.40 mm apart, and
+      the balance read 29.2 g of head resting on it. A taught Z is only
+      valid for the pan loading it was taught with.
+- [ ] **Design constraint 1: the CV cannot be computed in the YAML.**
+      `_ALLOWED_ASSERT_NODES` (`orchestrator/scenario.py`) has no
+      `ast.Call`, so no `abs()`, no `sqrt()` — which is why every
+      "within +/- x" in the repo is written as two comparisons.
+      Arithmetic (`+ - * / %`) IS allowed, so a per-dispense difference
+      (`${w2.weight_g} - ${w1.weight_g}`) can be asserted; mean, SD and
+      CV must be computed outside, from `run.jsonl`. There is also no
+      loop, so N replicates get unrolled.
+- [ ] **Design constraint 2: tare and weigh must share one rail
+      position.** `demo_weigh_at_position.yaml` budgets
+      `max_drift_g: 0.05` for what carrying the balance does to a
+      reading — **50 mg, half of a 100 uL dispense**. So the rail moves
+      to the cell1 station ONCE and does not move again until the last
+      weight is read.
+- [ ] **Proposed shape.** Pre-flight both cells -> `linear/home` ->
+      `linear/move(470.772)` -> `gantry/home` -> `gantry/move(x=260)` ->
+      `gantry/move(z=215)` -> `balance/tare` -> confirm ~0 -> N x
+      [`pump/cycle(cycles=1, volume_uL=100)` + `balance/weight`
+      `save_as: w1..wN`] -> `gantry/move(z=3)`. Tare ONCE and read
+      cumulative mass; dispense i = `w_i - w_(i-1)`. Assert only a sane
+      per-dispense range in the YAML (e.g. 90-110 mg); do the statistics
+      afterwards.
+- [ ] **Measurement notes.** Balance readability 0.5 mg contributes a CV
+      floor of only ~0.14 % at 100 mg (d/sqrt(12)), so it is not the
+      limiting term. **Evaporation is** — 10-20 cycles is several
+      minutes with the vial open. Use a lid or an evaporation trap, or
+      accept a downward drift in the later replicates.
+- [ ] **Open decisions.** How many replicates (10 is the ISO 8655
+      count); whether the amp can be powered for this bench session.
+
+## 2026-08-27 — branch hygiene before the pump bench work
+
+- [x] The working tree carried **37 uncommitted files** on
+      `feat/arm-cell` (arm cell rename + Lua specs + shinyeong's
+      cell2/cell3 tests and synthesis scenarios). Created
+      `test/cell1-pump-bench` off it and committed them as `efba65f`,
+      a restore point — **local only, nothing pushed**; origin still has
+      only `main`, and `feat/arm-cell` still sits at `a6dc89f`.
+- [x] Checked that `efba65f` does not touch the pump path: its
+      `server/routes.py` and `server/schemas.py` hunks are arm-only (no
+      pump/aspirate/dispense/valve/cycle lines either side), and its
+      `cell/pump_gantry_cell.py` change is the gantry's
+      `motor_serial_z_a`/`_z_b` + `_open_gantry` work. So pump commits
+      made here can be cherry-picked onto a clean branch off
+      `origin/main` without conflict when it is time to push.
+
+## 2026-09-17 — land test/cell1-pump-bench on main (issue #33)
+
+- [x] Working tree at session start: `_shinyeong` synthesis scenarios
+      moved by the operator into `scenarios/shinyeong_test/` (with the
+      six `test_gantry_*_shinyeong.yaml` already there); two new ones
+      (`test_synthesis_noarm_shinyeong.yaml`,
+      `test_synthesis_to_analysis_shinyeong.yaml`); 2026-09-13/15 rows
+      in `claude_test/taught_positions_shinyeong.md`; `demo_pump2_cycle`
+      / `demo_pump3_cycle` `remaining_cycles` retuned to 20 / 21 on the
+      bench; new `claude_test/test_cell4_server_shinyeong.py` and the
+      2026-09-15 fr5_b Lua probe.
+- [x] `pytest claude_test` had one failure: `test_pump_cycle_demo` still
+      pinned `1 + remaining_cycles == 30` while `ad91a81` set the demo
+      to 20 cycles. Pin moved to 20. 162 passed, ruff clean.
+- [x] Indexed the two new `claude_test/` files in `claude_test/README.md`;
+      fixed the moved-scenario path in the 2026-08-27 CV notes above.
+- [x] Verification for the PR (`## Testing`): pytest + ruff only in this
+      session. Bench evidence on the branch: arm replay + jog
+      (`claude_test/smoke_arm_*`), cell1 pump 2026-08-27, taught
+      positions 2026-09-13/15. **NOT bench-verified**: the Lua program
+      path (`arm/program`), the cell4 one-step launcher, and the two new
+      synthesis scenarios (dry-run only). Merged on the operator's
+      explicit instruction with that status stated in the PR.

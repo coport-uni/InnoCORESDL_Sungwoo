@@ -95,6 +95,14 @@ def create_app(cell_factory: CellFactory | None = None) -> FastAPI:
                 ),
             },
             {
+                "name": "Arm",
+                "description": (
+                    "cell6 / cell7's FR5 arm. Replay-only: a request "
+                    "names a recorded dataset episode, never a pose. "
+                    "Prefetch downloads; replay moves."
+                ),
+            },
+            {
                 "name": "Safety",
                 "description": (
                     "Abort now. On Cell 5 this also stops the heater, the "

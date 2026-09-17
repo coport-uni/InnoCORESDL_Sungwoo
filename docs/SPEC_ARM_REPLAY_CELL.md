@@ -1,8 +1,34 @@
-# 개발사양서: ArmReplayCell (cell6, cell7)
+# 개발사양서: ArmReplayCell (cell6, cell7) — **SUPERSEDED**
+
+> ## ⚠ 이 설계는 구현되었고, 벤치에서 동작했고, 그 뒤 제거되었다
+>
+> **상태: 히스토리 문서.** 여기 기술된 replay 경로(`arm/prefetch`,
+> `arm/replay`, `ArmReplayCell`, `lerobot-replay` 서브프로세스)는
+> 2026-08-11 리포에서 삭제되었다. 현행 팔 모션 경로는
+> **`docs/SPEC_ARM_LUA_PROGRAM.md`** — 컨트롤러의 `.lua` 잡 프로그램이다.
+>
+> **왜 지웠는지는 `LearnedPatterns.md` #47에 있다.** 요약: 동작하지
+> 않아서가 아니라 이 레이어에 맞는 모양이 아니어서다. ① 에피소드 내내 PC가
+> 실시간 루프에 묶인다 ② 녹화된 동작만 존재하므로 모션 하나를 추가하려면
+> 데이터셋 하나를 만들어야 한다 ③ 별도 conda env·torch 격리·HF 캐시·prefetch
+> 라우트·시작자세 가드까지 "팔을 움직인다"에 비해 운영 표면이 크다.
+>
+> **replay가 더 나았던 점도 #47에 적어 두었다** — 학습된 정책 실행은 replay
+> 계열만 할 수 있고(정책은 포즈를 연속 생성하므로 컨트롤러에 미리 올릴
+> 것이 없다), 종료 검증도 더 강하다(마지막 프레임 대비 축 오차를 잴 수
+> 있다). VLA 롤아웃이 다시 범위에 들어오면 이 문서와 git 히스토리에서
+> 되살리면 된다. `external/FR5ControllerVLA` 서브모듈 핀은 그래서 남겨
+> 두었다.
+>
+> 아래 본문은 **당시 설계 그대로**이며 현재 코드와 일치하지 않는다.
+> 여기 나오는 파일·라우트·테스트 상당수는 더 이상 존재하지 않는다.
+> (`ArmReplayCell` → `ArmCell`, `cell/arm_replay_cell.py` →
+> `cell/arm_cell.py`.) 단, §7 T1(joint 1 ±10° 인수 시험)과 그 벤치 기록은
+> 여전히 유효하다 — `arm/jog_joint`는 남아 있다.
 
 대상 저장소: `coport-uni/InnoCORESDL_Sungwoo`
 연계 저장소: `coport-uni/FR5ControllerVLA` (huggingface/lerobot fork)
-문서 버전: v1.0, 2026-08-10
+문서 버전: v1.0, 2026-08-10 (superseded 2026-08-11)
 실행 주체: Claude Code
 
 ---

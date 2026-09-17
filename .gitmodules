@@ -25,3 +25,6 @@
 [submodule "external/ESP32S3BOX3MotorController"]
 	path = external/ESP32S3BOX3MotorController
 	url = https://github.com/coport-uni/ESP32S3BOX3MotorController
+[submodule "external/FR5ControllerVLA"]
+	path = external/FR5ControllerVLA
+	url = https://github.com/coport-uni/FR5ControllerVLA

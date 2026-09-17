@@ -69,6 +69,8 @@ only by config.
 | **cell3** (Cell C) | NUC2 · 17058 | pump + gantry (`PumpGantryCell`) | identical clone of Cell A | built, no bench run |
 | **cell4** | NUC1 · 17060 | balance + linear (`BalanceLinearCell`) | MINAS A6 linear rail (`LinearMotorController`, RS-485) · the Phase's **single** Entris-II balance (`entris_ii`, Sartorius CDC) that shuttles under cell1–3 to weigh each dispense | ✅ **bench-verified** |
 | **cell5** (Cell 5) | NUC2 · 17062 | pump + Z + thermal (`PumpZThermalCell`) | syringe pump (*not fitted yet* — optional `[pump]` table) · **one** MKS SERVO57D as a standalone Z axis (`mks_motor`, FTDI `NTB3EP5R`) · IKA RCT digital hotplate (`HotplateController`, STM32 VCP, direct USB port) · IR lamp on a Tapo P110M plug (`SmartPlugController`, LAN `192.168.0.237`) | ⚠ **Z + hotplate + lamp bench-verified; cell incomplete — no pump** |
+| **cell6** | 17064 | arm (`ArmCell`) | Fairino FR5 6-axis arm, **synthesis stage**, controller at `192.168.0.58` (XMLRPC :20003). Motion is a `.lua` **job program the controller already holds**: `Mode(0)` → `ProgramLoad` → `ProgramRun`, and the firmware plans and interpolates | ✅ **bench-verified** — `Test1.lua`, 23.786 s, `last_line` 18 |
+| **cell7** | 17066 | arm (`ArmCell`) | identical clone of cell6, **analysis stage**, controller at `192.168.0.59` | ✅ **bench-verified** — `Cell7Test1.lua`, 25.293 s, `last_line` 13 |
 
 Special properties per cell worth remembering:
 
@@ -76,6 +78,32 @@ Special properties per cell worth remembering:
   driver's paired-Z desync interlock — the highest-stakes subsystem.
 - **cell4**: holds the *only* balance in the Phase, and its `stop()` is
   currently a no-op (GAP-1).
+- **cell6/cell7**: the only cells with **no serial device** — the arm is
+  reached over the LAN. Their action set is not a pose interface: a
+  request names a `.lua` job program the controller already holds, and
+  the *controller* executes it. `/v1/arm/program` is the one route the
+  server does **not** hold its command lock across, so `/v1/stop` still
+  answers while a program runs.
+
+  Two things this path cannot do, and both matter more than they sound.
+  It **cannot bound where the arm goes** — the program's first move
+  starts from wherever the arm is toward a point taught inside a script
+  L1 never reads. And a `200` **does not mean the arm arrived
+  anywhere**: with no expected end pose to compare against, it means the
+  controller returned to idle unfaulted and the encoder answered. Judge
+  `joints_deg` yourself if the end pose matters.
+
+  The **hardware e-stop button is the stop that counts**: on cell6 the
+  SDK's own safety-stop check reads a state stream that controller does
+  not serve, so it can never see one (LearnedPatterns #40). Do not put
+  cell6 and cell7 in the same scenario `parallel` block until their
+  reach overlap has been measured (GAP-8).
+
+  A `lerobot-replay` path lived here until 2026-08-11 and was removed —
+  it worked, but it kept this machine inside the arm's real-time loop
+  and could only express recorded motions. `LearnedPatterns.md` #47 has
+  the reasoning and what it was better at; `docs/SPEC_ARM_REPLAY_CELL.md`
+  keeps the design for whoever needs VLA policy rollouts back.
 - **cell5**: the only cell that **heats** — uniquely, its `stop()` also
   kills the heater, the stirrer, and the lamp, not just motion.
 
@@ -419,7 +447,74 @@ step; prefer it only when debugging, since thirteen prompts of which one
 matters is how an operator stops reading them.
 
 Ports are per cell (SDLClaude `ARCHITECTURE.md`): cell1=17054,
-cell2=17056, cell3=17058, cell4=17060, cell5=17062, orchestrator=17100.
+cell2=17056, cell3=17058, cell4=17060, cell5=17062, **cell6=17064,
+cell7=17066**, orchestrator=17100.
+
+### Running a scenario, server first
+
+The same five steps are repeated as a comment block at the top of every
+file in `scenarios/`, naming that scenario's own cells and ports — so the
+file you are about to run tells you how to run it.
+
+**1. Start one cell server per cell the scenario names.** Each is its own
+process and owns its devices, so they go in separate terminals (or as
+`deploy/systemd/cell@.service` units) and stay up. `--cell` is never
+needed — the shape comes from the config's device tables.
+
+```bash
+conda activate sdl
+cd ~/workspace/InnoCOREServer/InnoCORESDL_Sungwoo
+python -m server --config server/nuc2/cell6.toml    # :17064  FR5 arm, synthesis
+python -m server --config server/nuc1/cell7.toml    # :17066  FR5 arm, analysis
+```
+
+A cell whose real `.toml` does not exist yet needs
+`cp server/<nuc>/cellN.toml.example server/<nuc>/cellN.toml` first; the
+real files are gitignored.
+
+**2. Check every server before any motion.** `diagnose` is the last gate
+that can catch a device which answers reads but will not move — an arm
+reports `ready` and `fault` separately for exactly that reason
+(`LearnedPatterns.md` #42, #44).
+
+```bash
+curl -s localhost:17064/v1/health
+curl -s localhost:17064/v1/diagnose | python3 -m json.tool
+```
+
+**3. Register those cells in `orchestrator/config.toml`, uncommented.**
+Some ship commented out on purpose, with the reason beside them: a
+registered-but-down cell costs a connect timeout on every `/v1/cells`
+probe and every `stop_on_failure` broadcast, because the engine POSTs
+`/v1/stop` to every *registered* cell, not only the ones a run touched.
+Uncomment a cell together with its server; comment it back out when that
+bench powers down.
+
+**4. Dry run.** Validates every action and body field against each cell's
+live OpenAPI, and moves nothing. It cannot catch everything — an
+`assert:` is only parsed once real values are interpolated
+(`LearnedPatterns.md` #25) — but it catches wrong routes and wrong fields.
+
+```bash
+python -m orchestrator validate scenarios/test_arm_jog10.yaml
+```
+
+**5. Run it.** The first hardware-touching step waits for an operator
+confirmation.
+
+```bash
+python -m orchestrator run scenarios/test_arm_jog10.yaml --step-mode   # debugging
+python -m orchestrator run scenarios/test_arm_jog10.yaml               # normal
+```
+
+Each run writes `runs/<UTC>-<name>/` (gitignored): `meta.json`,
+`run.jsonl`, `scenario.yaml`, `vars.json`. `run.jsonl` is where the
+measured numbers live, so bench evidence gets copied out of it into
+`claude_test/smoke_*.md`.
+
+To stop a server: `Ctrl-C` in its terminal, or `pgrep -af 'm server
+--config'` then `kill <pid>`. **Not** `pkill -f 'server --config'` — that
+pattern also matches the shell you typed it in.
 
 ---
 

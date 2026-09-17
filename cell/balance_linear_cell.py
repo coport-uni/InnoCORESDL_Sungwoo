@@ -366,6 +366,21 @@ class BalanceLinearCell(Cell):
     ) -> tuple[float, float]:
         raise _no_gantry()
 
+    # ── Arm (cell6 / cell7 only) ────────────────────────────────────────
+    def prepare_arm(self) -> dict:
+        raise _absent("arm")
+
+    def jog_joint(
+        self, joint: int, delta_deg: float, *, speed_pct: float | None = None
+    ) -> dict:
+        raise _absent("arm")
+
+    def start_program(self, name: str) -> dict:
+        raise _absent("arm")
+
+    def await_program(self) -> dict:
+        raise _absent("arm")
+
     # ── Safety / lifecycle ──────────────────────────────────────────────
     def stop(self) -> None:
         # The MINAS RS485 standard-protocol driver exposes no async halt; a
