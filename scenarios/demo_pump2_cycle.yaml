@@ -142,7 +142,7 @@ params:
   init_force: 2
   # TOTAL MINUS ONE: cycle 1 is unrolled below, so for N total cycles
   # set N - 1 here. 29 -> 30 cycles (the priming count).
-  remaining_cycles: 19
+  remaining_cycles: 20
 
 defaults:
   on_fail: abort     # plunger and valve state carry across steps --

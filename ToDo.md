@@ -2358,7 +2358,7 @@ later run does not have to re-derive it.
       do not read them as a failure. Rail workaround unchanged:
       hand-park the carriage near home, split long moves into <=50 mm.
 - [ ] **No existing scenario weighs a dispense.** The motion skeleton is
-      already written in `scenarios/test_synthesis_seq_shinyeong.yaml`
+      already written in `scenarios/shinyeong_test/test_synthesis_seq_shinyeong.yaml`
       (rail -> cell1 station -> gantry X -> descend -> `pump/cycle` ->
       retract), but its only dispense assert is
       `${disp.cycles_done} == 1` — a control-path check, not a mass one.
@@ -2417,3 +2417,27 @@ later run does not have to re-derive it.
       `motor_serial_z_a`/`_z_b` + `_open_gantry` work. So pump commits
       made here can be cherry-picked onto a clean branch off
       `origin/main` without conflict when it is time to push.
+
+## 2026-09-17 — land test/cell1-pump-bench on main (issue #33)
+
+- [x] Working tree at session start: `_shinyeong` synthesis scenarios
+      moved by the operator into `scenarios/shinyeong_test/` (with the
+      six `test_gantry_*_shinyeong.yaml` already there); two new ones
+      (`test_synthesis_noarm_shinyeong.yaml`,
+      `test_synthesis_to_analysis_shinyeong.yaml`); 2026-09-13/15 rows
+      in `claude_test/taught_positions_shinyeong.md`; `demo_pump2_cycle`
+      / `demo_pump3_cycle` `remaining_cycles` retuned to 20 / 21 on the
+      bench; new `claude_test/test_cell4_server_shinyeong.py` and the
+      2026-09-15 fr5_b Lua probe.
+- [x] `pytest claude_test` had one failure: `test_pump_cycle_demo` still
+      pinned `1 + remaining_cycles == 30` while `ad91a81` set the demo
+      to 20 cycles. Pin moved to 20. 162 passed, ruff clean.
+- [x] Indexed the two new `claude_test/` files in `claude_test/README.md`;
+      fixed the moved-scenario path in the 2026-08-27 CV notes above.
+- [x] Verification for the PR (`## Testing`): pytest + ruff only in this
+      session. Bench evidence on the branch: arm replay + jog
+      (`claude_test/smoke_arm_*`), cell1 pump 2026-08-27, taught
+      positions 2026-09-13/15. **NOT bench-verified**: the Lua program
+      path (`arm/program`), the cell4 one-step launcher, and the two new
+      synthesis scenarios (dry-run only). Merged on the operator's
+      explicit instruction with that status stated in the PR.
