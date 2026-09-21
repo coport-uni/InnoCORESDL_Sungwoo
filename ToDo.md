@@ -2473,3 +2473,65 @@ later run does not have to re-derive it.
       `/v1/health`, `/v1/cells`, `/v1/scenarios/validate` exercised
       against a hardware-free orchestrator on :17199 (cell4 registered
       but down -> `reachable: false`, `cell_unreachable` issue).
+
+## 2026-09-21 — shinyeong bench backup: repair the CAN id scan tool, index the cell3 tools (issue #37)
+
+Proposed from the `sosadTT` fork as pull requests; nothing is pushed to
+`coport-uni/InnoCORESDL_Sungwoo` directly. Work happens in a separate
+clone (`InnoCORESDL_pr_sosadTT`) so the bench checkout — which the
+cell1/cell4/cell6/cell7 servers run from — keeps its branch, its files
+and its git identity. No hardware is touched by any step here.
+
+PR-A `fix/can-id-scan-duplicate`
+- [x] `claude_test/test_can_id_scan_shinyeong.py` on `main` is 313 lines
+      with two shebangs, and it does not run at all: `from __future__
+      import annotations` appears at line 55 and again at line 202, and
+      a `__future__` import is only legal at the top of a file, so the
+      whole module fails to compile.
+
+          $ python claude_test/test_can_id_scan_shinyeong.py --help
+          SyntaxError: from __future__ imports must occur at the
+          beginning of the file          (exit 1)
+
+      `ast.parse` accepts it — the `__future__` rule is enforced when
+      compiling to bytecode, not while building the tree — which is why
+      a syntax check alone does not catch it. `ruff check` does: 9
+      errors, F811 redefinitions among them.
+- [x] History of the file: 143 lines at `7e7fe66`, 169 at `b685748`,
+      313 at `57de7af` (fix_merge). The merge left the corrected
+      169-line version in place and appended the old 143-line one after
+      it (169 + 1 blank + 143 = 313). The appended copy carries the
+      verdict "the id hypothesis is EXCLUDED. Look at the CAN wiring",
+      which was measured wrong on 2026-09-02 and was replaced by
+      "INCONCLUSIVE" in the 169-line version.
+- [x] Drop the appended copy, keeping lines 1-169 unchanged (checked
+      byte-identical to the copy NUC2 has been running, which is how the
+      bench has had a working tool all along).
+- [x] Verify: `ruff check` 9 errors -> clean; `ruff format --check`
+      clean; `py_compile` exit 1 -> exit 0; one shebang; 169 lines;
+      0 x "EXCLUDED", 1 x "INCONCLUSIVE"; file mode unchanged (664).
+      `--help` needs the `external/` driver (`mks_motor`, `ftd2xx`),
+      which this clone does not check out, so it was run on NUC2, whose
+      copy has the same sha256 (ee16a2d5...): exit 0 with the usage
+      text; the 313-line file there exits 1 with the SyntaxError.
+      `--help` returns from `parse_args` (line 131) before the first
+      hardware call (line 139), so no device was touched.
+
+PR-C `docs/shinyeong-bench-notes`
+- [ ] Index the four cell3 tools missing from `claude_test/README.md`:
+      `test_cell3_z_sync`, `test_cell3_home_switch`,
+      `test_cell3_switch_height`, `test_cell3_zb_only`.
+- [ ] Add LearnedPatterns entries (#48 on) for the September findings
+      not yet recorded, each checked against #1-#47 first so nothing is
+      duplicated.
+- [ ] Check every figure against a runlog, a server log or
+      `taught_positions_shinyeong.md`, and name the source in the PR. A
+      claim that cannot be traced is left out or marked "not verified".
+- [ ] Keep the PR under 400 lines; split README / LearnedPatterns if not.
+
+Out of scope, recorded so it is not lost: the three submodule pins
+(CommonClaude b7957c5, LinearMotorController 0e78c42,
+PrecisionScaleController 622a688) are ahead of what `main` records and
+stay uncommitted in the bench checkout. All three commits are on their
+remotes, so nothing can be lost, but a fresh clone gets the old drivers
+and cell4 dies at startup on `scale.set_ambient`.
