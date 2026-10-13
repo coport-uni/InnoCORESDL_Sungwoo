@@ -2473,3 +2473,139 @@ later run does not have to re-derive it.
       `/v1/health`, `/v1/cells`, `/v1/scenarios/validate` exercised
       against a hardware-free orchestrator on :17199 (cell4 registered
       but down -> `reachable: false`, `cell_unreachable` issue).
+
+## 2026-09-30 — cell5: a fan on a second Tapo plug (new `fan` action set)
+
+Operator request: add the fan's smart plug to cell5. The plug is
+`plug2`, found at 192.168.0.77 — `ip neigh` on nuc1 shows that address
+as `18:69:45:71:02:7c`, the MAC `device_list.md` lists for `plug2`
+(tapo p110m) under its stale 192.168.1.79. So the config names the bare
+IP and the cell synthesises the entry, as it does for the lamp
+(see LP #29); nothing changes inside `external/`.
+
+- [x] `cell/pump_z_thermal_cell.py`: `fan_target` in the config (None =
+      no fan, `[fan]` table optional), `read_fan` / `set_fan`, a `fan`
+      block in `diagnose()`, `fan_on` in `status()`. The lamp's plug
+      helpers become shared by both plugs rather than copied.
+- [x] `cell/cell_protocol.py` + the 409 stubs in the other three cells.
+- [x] `server/`: `FanRequest` / `FanResponse`, `GET /v1/fan/state`,
+      `POST /v1/fan/switch`, `[fan]` in `_load_pump_z_thermal` and in
+      the shape inference, the OpenAPI tag.
+- [x] `stop()` and the operator gate (`fan/` in the hazard prefixes):
+      both are the operator's call — asked before coding.
+      Answers: `stop()` switches the fan OFF with everything else;
+      `fan/` is NOT a hazard prefix (no first-motion gate).
+- [x] `server/nuc2/cell5.toml.example`: `[fan] target = "192.168.0.77"`.
+- [x] `claude_test/`: fake L1 + orchestrator tests, the arm cell's 409
+      list, a `fan` suite in `smoke_l1.py`, `preflight.py`.
+      Plus `test_pump_z_thermal_cell.py` (14 unit tests over fakes).
+      The `smoke_l1.py` fan suite is only DEFINED — the operator
+      said not to run the smoke test this session, and it was not.
+- [x] `scenarios/demo_cell5_fan_blink.yaml` for the bench run.
+- [x] Docs: README, CLAUDE.md, ADDING_A_CELL.md action-set table.
+- [ ] `pytest claude_test` + `ruff check`.
+- [ ] Bench verification on NUC2 with the operator (the fan visibly
+      starts and stops; `fan/state` agrees). cell5 is not registered in
+      the orchestrator and its Z motor is unpowered, so this waits on
+      the bench. **Nothing is committed before that run** (rule 4).
+
+## 2026-10-12 — cell5 fan: serve the fan routes from the NUC2 test server
+
+Follow-up to #39. `demo_cell5_fan_blink.yaml` failed dry-run
+(`unknown_action fan/state`): the cell5 server on NUC2 ran from the
+`InnoCORESDL_shinyeong` checkout (f72da9d, no fan code) via
+`claude_test/test_cell5_server_shinyeong.py`, which also never opened
+the Tapo plugs (`plug=None`).
+
+- [x] `test_cell5_server_shinyeong.py`: read `[lamp]`/`[fan]` from
+      cell5.toml and open `SmartPlugController.from_files()` as
+      `PumpZThermalCell.open()` does (fallback `plug=None` → 409).
+      ruff passes.
+- [x] Stage on NUC2 `InnoCORESDL_Sungwoo` (same HEAD as local):
+      `cell/pump_z_thermal_cell.py`, `cell/cell_protocol.py`,
+      `server/{routes,schemas,app}.py`, the test server, and a new
+      `server/nuc2/cell5.toml` (pump/zstage from the shinyeong
+      checkout; lamp = plug1, fan = plug2 by IP, never "all").
+      Checksums match; config parses; app builds.
+- [ ] Operator restarts the cell5 server from `InnoCORESDL_Sungwoo`
+      (stop the shinyeong-checkout process first — one owner per port).
+- [ ] `/v1/fan/state` 200, `orchestrator validate` clean.
+- [ ] Bench run of `demo_cell5_fan_blink.yaml` with the operator
+      watching the IR lamp (lamp lights ⇒ targets swapped ⇒ abort).
+- [x] `claude_test/README.md` row for `test_cell5_server_shinyeong.py`
+      (issue #40).
+- [x] Restarted cell5 on NUC2 from `InnoCORESDL_Sungwoo` (operator's
+      go, PID 493522): `fan/state` 200 (plug2), `lamp/state` 200
+      (plug1), `orchestrator validate` ok (10 steps).
+- [x] The IKA RCT digital **is** attached today (`/dev/ttyACM0`, reads
+      "RCT digital", plate 19 °C, heater off) — switched to the full
+      `python -m server` (operator's go, PID 494108) with
+      `[hotplate] max_celsius = 60.0` in cell5.toml: `hotplate/state`,
+      `fan/state`, `lamp/state` all 200, diagnose pump/stage ok,
+      `orchestrator validate` ok (10 steps).
+- [x] Bench run of `demo_cell5_fan_blink.yaml` by the operator: three
+      runs `completed` (runlogs `20261012T115241Z`, `115837Z`,
+      `115853Z`), operator confirmed the fan blinked, `fan/state` and
+      `lamp/state` both off afterwards. Issue #40 closed.
+- [x] LearnedPatterns #48 (which checkout the server runs from; a
+      `[fan]` table needs an explicit `[lamp]` target).
+- [x] **No commit / PR** — the operator's decision (2026-10-12); the
+      change stays in the working tree. Issue #40 closed.
+
+## 2026-10-13 — cell5 hotplate routes 500 after the IKA's USB link re-enumerates
+
+Diagnosis only (no device touched, no restart), issue #41.
+
+- [x] Found the cause on NUC2: kernel logged a full USB disconnect of
+      the IKA (0483:5740, port 3-4.1) at 10-12 23:04:33 (→ `ttyACM1`)
+      and 10-13 10:03:38 (→ `ttyACM0`). The server started 10-12 23:58
+      (PID 506729) still holds `/dev/ttyACM1 (deleted)`; every hotplate
+      read fails in `rct_digital._flush_input` with
+      `termios.error (5, Input/output error)`; `_hotplate_call` maps
+      only `RctError`, so `hotplate/state` and `status` answer 500 (5×).
+- [x] Code fix (`cell/pump_z_thermal_cell.py`): `_hotplate_call` catches
+      `OSError` + `termios.error` (not an OSError subclass), closes the
+      dead handle, reopens once via `[hotplate] port` / `find_rct_port()`
+      and retries; no RCT, failed open, or a second failure →
+      `TransportError`; every reopen logs a stderr line with the last
+      commanded heater/stirrer state. 5 unit tests
+      (`test_pump_z_thermal_cell.py`, `DeadHotplate`); 147 tests pass,
+      ruff clean. Copied to NUC2 `_Sungwoo` (md5 verified).
+- [x] Restarted cell5 on NUC2 (operator's go): PID 527753 holds
+      `/dev/ttyACM0` + `/dev/ttyUSB1`; `hotplate/state` and `status`
+      answer 200 again.
+- [ ] The reconnect path itself is verified only by unit tests — the
+      bench proof is the next USB drop: look for `hotplate link lost …
+      reopened on` in `claude_test/server_cell5.log` instead of a 500.
+- [ ] Operator: find what happened at the bench at 10-12 23:04 and
+      10-13 10:03 (power cycle, cable/hub, EMI) — the drop is physical.
+- [ ] No commit / PR (operator's standing decision this week).
+
+## 2026-10-13 — how cell2/cell3 are launched on NUC2 vs `python -m server` (issue #42)
+
+Investigation only, no file under `cell/` / `server/` / `claude_test/`
+changed, no device touched. NUC2 inspected over ssh (read-only).
+
+- [x] Both paths end in the same `server.app.create_app` +
+      `PumpGantryCell`; routes, schemas, error mapping are identical.
+      The launcher differs only in how the cell is opened: all three
+      FTDI serials hard-coded in `WIRING`, bus census printed with each
+      adapter's owner, refusal unless all three motors answer an
+      encoder read (LearnedPatterns #24), pump opened by by-path and
+      refused unless its `?202` serial is the recorded 50487 / 30308,
+      motors opened before the pump. `python -m server` does none of
+      these; the TOML path can name both Z serials since 2026-08-27
+      (issue #32) but is still unverified on the bench, and the example
+      TOMLs carry no `[pump]` table.
+- [x] NUC2 state today: cell2 (PID 192343) and cell3 (PID 187461) have
+      been served by the launcher for ~12 days; cell5 (PID 527753) by
+      `python -m server`. No `server/nuc2/cell2.toml` / `cell3.toml`
+      exist — only the `.example` files.
+- [x] The launcher at HEAD (`57de7af fix_merge`) does not compile:
+      `_open_pump` defined twice (lines 315-316), duplicated docstring,
+      two consecutive `pump = _open_pump(...)` calls. Same on NUC1 and
+      NUC2. The running processes hold the pre-merge code in memory, so
+      a restart of either gantry server fails on both paths. Issue #42.
+- [ ] Choose: strip the merge duplicates from the launcher (restores
+      the known-good path), or create the two TOMLs and bench-verify
+      #32 on NUC2 — do it BEFORE stopping either running process.

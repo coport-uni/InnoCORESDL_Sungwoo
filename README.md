@@ -721,6 +721,7 @@ so a misdirected call is legible instead of a crash.
 | ZStage | `zstage/home`, `zstage/move` | cell5 |
 | Hotplate | `hotplate/state`, `hotplate/temperature`, `hotplate/heater`, `hotplate/speed`, `hotplate/stirrer` | cell5 |
 | Lamp | `lamp/state`, `lamp/switch` | cell5 |
+| Fan | `fan/state`, `fan/switch` | cell5 (optional `[fan]` table; **not bench-verified**, issue #39) |
 | Safety | `stop` | all (see GAP-9) |
 
 L2 never hardcodes these — it reads each cell's `GET /openapi.json`,
@@ -955,6 +956,18 @@ Hard-won bench rules from the 2026-07-28 bring-up (details in
 - A lamp `target` may be a bare IP unknown to the submodule's
   `device_list.md` — the cell synthesises the entry, so a re-DHCPed
   plug never needs an edit under `external/`.
+- **The fan is a second Tapo plug with its own `fan` action set**
+  (added 2026-09-30, issue #39; **code and unit tests only — not
+  bench-verified**). The `[fan]` table is optional; without it
+  `/v1/fan/*` answers 409. On the NUC2 bench it is `plug2` at
+  `192.168.0.77` — named by IP, because `device_list.md` still has
+  plug2 under a stale address. Three rules: the cell refuses to
+  start if the fan target is `"all"` or the lamp's (a `fan/switch`
+  must never light the IR lamp); `/v1/stop` switches the fan off
+  with the heater, stirrer and lamp; and `fan/` is deliberately
+  **not** a hazard prefix, so a fan switch does not wait for the
+  first-motion confirmation. `scenarios/demo_cell5_fan_blink.yaml`
+  is the bench run for it.
 
 ### The XZ gantry needs a udev rule before it will open at all
 

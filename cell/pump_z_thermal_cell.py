@@ -1,4 +1,4 @@
-"""Real Cell 5 (cell5): pump + single Z stage + hotplate + IR lamp.
+"""Real Cell 5 (cell5): pump + single Z stage + hotplate + IR lamp + fan.
 
 Composition confirmed with the user on 2026-07-27 — four devices in one
 cell, one server, one owner:
@@ -8,7 +8,11 @@ Syringe pump            ``sy01b`` (same driver + code path as cell1–3)
 Z stage, 1 motor        ``mks_motor``, ONE MKS SERVO57D over FTDI/CAN
 Hotplate                IKA RCT digital (``external/HotplateController``)
 IR lamp                 Tapo plug (``external/SmartPlugController``)
+Fan (optional)          a second Tapo plug, same driver
 ======================  ==========================================
+
+The fan was added on 2026-09-30 (issue #39). It is optional: a config
+with no ``[fan]`` table builds the cell without one.
 
 Differences from the other cells that matter:
 
@@ -21,14 +25,18 @@ Differences from the other cells that matter:
   motion command after a limit stop is dropped" quirk (CLAUDE.md
   Folder-specific rules #3).
 - **This cell heats.** ``stop()`` therefore stops the motor *and* the
-  heater *and* the lamp — an e-stop that left a heater running would be
-  worse than useless. Every one of the four devices is attempted even if
-  an earlier one fails.
-- **The lamp is network-attached** (python-kasa over the LAN), not
-  serial. Its credentials live in
+  heater *and* the lamp *and* the fan — an e-stop that left a heater
+  running would be worse than useless. Every device is attempted even
+  if an earlier one fails.
+- **The lamp and the fan are network-attached** (python-kasa over the
+  LAN), not serial. Their credentials live in
   ``external/SmartPlugController/secure.env``, written by the operator.
   When they are absent the cell still opens — pump, Z and hotplate work
-  and the lamp methods raise 409.
+  and the lamp and fan methods raise 409.
+- **The lamp and the fan are two plugs, two action sets.** They share
+  the plug driver and nothing else: a scenario that switches the fan
+  must not be able to light an IR lamp by naming the wrong target, so
+  ``open()`` refuses a fan target that is also the lamp's.
 - ``heating`` / ``stirring`` are the **last commanded state**: the RCT
   digital protocol has no readback for either.
 
@@ -40,6 +48,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import sys
+import termios
 from dataclasses import dataclass
 
 from mks_motor import MKSMotor, prepare_usb_nodes, release_ftdi_sio
@@ -99,10 +108,24 @@ class PumpZThermalConfig:
     # Lamp: device name or IP as written in the plug driver's
     # device_list.md. "all" would switch every plug on the bench.
     # A bare IP that the list does not mention is still addressable: the
-    # cell synthesises the entry (see _resolve_lamp). That keeps a bench
+    # cell synthesises the entry (see _resolve_plug). That keeps a bench
     # re-IP out of external/, which is a submodule and must not carry
     # local-only edits (CLAUDE.md Overview).
     lamp_target: str = "all"
+    # Fan: a second plug, named the same way as the lamp's. None (an
+    # omitted [fan] table) builds the cell without a fan, and the fan
+    # endpoints answer 409. Never "all", and never the lamp's target.
+    fan_target: str | None = None
+
+
+# What a dead serial handle raises: pyserial's SerialException is an
+# OSError, and the driver's input flush reaches termios directly, whose
+# error is NOT an OSError subclass (seen as errno 5 after the IKA's USB
+# re-enumeration, issue #41).
+_HOTPLATE_LINK_ERRORS: tuple[type[BaseException], ...] = (
+    OSError,
+    termios.error,
+)
 
 
 def _no_balance() -> WrongStateError:
@@ -136,17 +159,23 @@ def _no_arm() -> WrongStateError:
     return WrongStateError("Cell 5 has no robot arm", command="arm")
 
 
-def _no_lamp() -> WrongStateError:
-    # Not "absent hardware" but "unconfigured": the plug needs
+def _no_plug(family: str) -> WrongStateError:
+    # Not "absent hardware" but "unconfigured": a plug needs
     # credentials in the driver's secure.env, written by the operator.
     return WrongStateError(
-        "lamp plug is not configured (see SmartPlugController/secure.env)",
-        command="lamp",
+        f"{family} plug is not configured (see SmartPlugController/secure.env)",
+        command=family,
     )
 
 
+def _no_fan() -> WrongStateError:
+    # Not "broken" but "not fitted": no [fan] table in the config.
+    return WrongStateError("Cell 5 has no fan configured", command="fan")
+
+
 class PumpZThermalCell(Cell):
-    """cell5 = pump + single Z + hotplate + IR lamp, behind ``Cell``."""
+    """cell5 = pump + single Z + hotplate + IR lamp + fan, behind
+    ``Cell``."""
 
     def __init__(
         self,
@@ -170,9 +199,21 @@ class PumpZThermalCell(Cell):
         self._heating = False
         self._stirring = False
         self._lamp_on: bool | None = None
+        self._fan_on: bool | None = None
 
     @classmethod
     def open(cls, config: PumpZThermalConfig) -> PumpZThermalCell:
+        # Checked before any port is opened: a fan target that also
+        # names the lamp's plug would light an IR lamp on `fan/switch`.
+        fan = config.fan_target
+        if fan is not None and (
+            fan.lower() == "all" or fan == config.lamp_target
+        ):
+            raise InvalidArgError(
+                f"[fan] target {fan!r} must name one plug of its own, "
+                f'not "all" and not the lamp\'s ({config.lamp_target!r})',
+                command="fan",
+            )
         pump: SyringePumpController | None = None
         if config.pump_enabled:
             pump_cfg = SyringePumpController.Config(
@@ -211,11 +252,12 @@ class PumpZThermalCell(Cell):
         hotplate = RctDigital(port)
         original = float(hotplate.read_target_temperature())
         # A missing plug config must not keep the whole cell down: the
-        # lamp methods raise 409 and diagnose reports it as absent.
+        # lamp and fan methods raise 409 and diagnose reports them as
+        # absent.
         try:
             plug: SmartPlugController | None = SmartPlugController.from_files()
         except ControllerError as exc:
-            print(f"warning: lamp plug unavailable: {exc}", file=sys.stderr)
+            print(f"warning: smart plugs unavailable: {exc}", file=sys.stderr)
             plug = None
         return cls(pump, z, hotplate, plug, config, original)
 
@@ -260,21 +302,29 @@ class PumpZThermalCell(Cell):
                 "ok": True,
             },
             "hotplate": hotplate,
-            "lamp": self._lamp_diagnosis(),
+            "lamp": self._plug_diagnosis(self._cfg.lamp_target),
+            "fan": self._fan_diagnosis(),
             "ok_to_initialize": ok_to_initialize,
             "versions": versions,
         }
 
-    def _lamp_diagnosis(self) -> dict:
+    def _plug_diagnosis(self, target: str) -> dict:
         if self._plug is None:
             return {"present": False, "ok": False, "error": "not configured"}
-        entries = self._resolve_lamp()
+        entries = self._resolve_plug(target)
         return {
             "present": True,
-            "target": self._cfg.lamp_target,
+            "target": target,
             "devices": [e.name for e in entries],
             "ok": bool(entries),
         }
+
+    def _fan_diagnosis(self) -> dict:
+        if self._cfg.fan_target is None:
+            # Absent by configuration, like the pump: ok=True so the
+            # cell is not reported faulted for a fan it never had.
+            return {"present": False, "ok": True}
+        return self._plug_diagnosis(self._cfg.fan_target)
 
     def status(self) -> dict:
         return {
@@ -299,6 +349,7 @@ class PumpZThermalCell(Cell):
             "heating": self._heating,
             "stirring": self._stirring,
             "lamp_on": self._lamp_on,
+            "fan_on": self._fan_on,
         }
 
     # ── Balance (none on Cell 5) ────────────────────────────────────────
@@ -398,8 +449,59 @@ class PumpZThermalCell(Cell):
         return self._z_mm
 
     # ── Hotplate ────────────────────────────────────────────────────────
+    def _reopen_hotplate(self, command: str, reason: BaseException) -> None:
+        """Replace a dead hotplate handle with one on the current node.
+
+        The IKA's USB link drops and re-enumerates on this bench (issue
+        #41: ``ttyACM0`` ↔ ``ttyACM1``), after which the old handle
+        answers every read with ``termios.error`` / ``OSError``. The
+        driver has no reconnect of its own, so the cell closes the stale
+        handle, resolves the port again and opens a fresh one.
+
+        The RCT protocol has no readback, so ``_heating`` /
+        ``_stirring`` are left as last commanded: a cable bump leaves
+        the device as it was, a power cycle resets it, and nothing on
+        the wire says which.
+
+        Args:
+            command: Name reported in the error envelope.
+            reason: The link error that triggered the reopen.
+
+        Raises:
+            TransportError: No RCT on the bus, or opening it failed.
+        """
+        try:
+            self._hotplate.close()
+        except Exception:  # noqa: BLE001 — the handle is already dead
+            pass
+        port = self._cfg.hotplate_port or find_rct_port()
+        if port is None:
+            raise TransportError(
+                f"hotplate link lost ({reason}) and no IKA RCT found by "
+                "USB VID:PID to reopen",
+                command=command,
+            )
+        try:
+            self._hotplate = RctDigital(port)
+        except _HOTPLATE_LINK_ERRORS as exc:
+            raise TransportError(
+                f"hotplate link lost ({reason}); reopen on {port} failed: "
+                f"{exc}",
+                command=command,
+            ) from exc
+        print(
+            f"warning: hotplate link lost ({reason}); reopened on {port} "
+            f"(last commanded heating={self._heating} "
+            f"stirring={self._stirring})",
+            file=sys.stderr,
+        )
+
     def _hotplate_call(self, command: str, fn):
         """Run a driver call, translating ``RctError`` to a CellError.
+
+        A dead serial handle (``OSError`` / ``termios.error``, the
+        signature of a USB re-enumeration) is reopened once and the call
+        retried; a second failure is reported as ``TransportError``.
 
         Args:
             command: Name reported in the error envelope.
@@ -410,11 +512,21 @@ class PumpZThermalCell(Cell):
 
         Raises:
             InvalidArgError: Value outside the device's accepted range.
-            TransportError: The serial link failed.
+            TransportError: The serial link failed, also after a reopen.
             DeviceFaultError: Any other hotplate fault.
         """
         try:
-            return fn()
+            try:
+                return fn()
+            except _HOTPLATE_LINK_ERRORS as exc:
+                self._reopen_hotplate(command, exc)
+                try:
+                    return fn()
+                except _HOTPLATE_LINK_ERRORS as retry_exc:
+                    raise TransportError(
+                        f"hotplate link failed again after reopen: {retry_exc}",
+                        command=command,
+                    ) from retry_exc
         except RctRangeError as exc:
             raise InvalidArgError(str(exc), command=command) from exc
         except RctCommError as exc:
@@ -491,55 +603,65 @@ class PumpZThermalCell(Cell):
             ),
         }
 
-    # ── Lamp (IR lamp on a Tapo plug) ───────────────────────────────────
+    # ── Smart plugs (shared by the lamp and the fan) ────────────────────
     # python-kasa is async; the server already runs these methods in a
     # worker thread, so that thread has no running loop and asyncio.run
     # is safe here (same pattern the old demo_scenario used).
-    def _resolve_lamp(self) -> list[DeviceEntry]:
-        """Match ``lamp_target`` against the list, or synthesise by IP.
+    def _resolve_plug(self, target: str) -> list[DeviceEntry]:
+        """Match ``target`` against the driver's list, or synthesise by IP.
 
         The driver's ``device_list.md`` lives inside the submodule, which
         must carry no local-only edits, so a bench whose plug got a new
-        DHCP address configures the bare IP as ``lamp_target`` and the
-        cell builds the entry itself.
+        DHCP address configures the bare IP as the target and the cell
+        builds the entry itself.
+
+        Args:
+            target: Device name or IP of one plug (or ``"all"``).
 
         Returns:
             Matching entries; empty when the target names nothing.
         """
         assert self._plug is not None
-        entries = self._plug.resolve_targets(self._cfg.lamp_target)
+        entries = self._plug.resolve_targets(target)
         if entries:
             return entries
         try:
-            ipaddress.ip_address(self._cfg.lamp_target)
+            ipaddress.ip_address(target)
         except ValueError:
             return []
-        return [
-            DeviceEntry(
-                device_type="tapo",
-                name=self._cfg.lamp_target,
-                mac="",
-                ip=self._cfg.lamp_target,
-            )
-        ]
+        return [DeviceEntry(device_type="tapo", name=target, mac="", ip=target)]
 
-    def _lamp_entries(self):
+    def _plug_entries(self, family: str, target: str) -> list[DeviceEntry]:
         if self._plug is None:
-            raise _no_lamp()
-        entries = self._resolve_lamp()
+            raise _no_plug(family)
+        entries = self._resolve_plug(target)
         if not entries:
             raise WrongStateError(
-                f"no plug matches {self._cfg.lamp_target!r} in device_list.md",
-                command="lamp",
+                f"no plug matches {target!r} in device_list.md",
+                command=family,
             )
         return entries
 
-    def read_lamp(self) -> dict:
-        entries = self._lamp_entries()
+    def _read_plug(self, family: str, target: str) -> dict:
+        """Read one action set's plug(s) over the LAN.
+
+        Args:
+            family: ``"lamp"`` or ``"fan"``, for the error envelope.
+            target: That action set's configured plug target.
+
+        Returns:
+            ``is_on`` (true only when every matched plug is on),
+            ``target`` and the matched ``devices``.
+
+        Raises:
+            WrongStateError: No credentials, or the target names nothing.
+            TransportError: A plug could not be reached or read.
+        """
+        entries = self._plug_entries(family, target)
 
         async def _read_targets():
-            # Only this cell's plug(s) — read_all() would poll every
-            # device in the driver's list, including other benches'.
+            # Only this action set's plug(s) — read_all() would poll
+            # every device in the driver's list, including other benches'.
             return await asyncio.gather(
                 *(self._plug.read(entry) for entry in entries)
             )
@@ -547,41 +669,83 @@ class PumpZThermalCell(Cell):
         try:
             mine = asyncio.run(_read_targets())
         except (ControllerError, OSError) as exc:
-            raise TransportError(str(exc), command="lamp") from exc
+            raise TransportError(str(exc), command=family) from exc
         failed = [r for r in mine if not r.ok]
         if failed:
             raise TransportError(
                 "; ".join(f"{r.entry.name}: {r.error}" for r in failed),
-                command="lamp",
+                command=family,
             )
-        self._lamp_on = bool(mine and all(r.is_on for r in mine))
         return {
-            "is_on": self._lamp_on,
-            "target": self._cfg.lamp_target,
+            "is_on": bool(mine and all(r.is_on for r in mine)),
+            "target": target,
             "devices": [r.entry.name for r in mine],
         }
 
-    def set_lamp(self, *, enabled: bool) -> dict:
-        entries = self._lamp_entries()
+    def _switch_plug(self, family: str, target: str, *, enabled: bool) -> dict:
+        """Switch one action set's plug(s) on or off.
+
+        Args:
+            family: ``"lamp"`` or ``"fan"``, for the error envelope.
+            target: That action set's configured plug target.
+            enabled: True switches on, False off.
+
+        Returns:
+            ``is_on`` (the commanded state), ``target`` and ``devices``.
+
+        Raises:
+            WrongStateError: No credentials, or the target names nothing.
+            TransportError: The driver could not reach the LAN.
+            DeviceFaultError: A plug refused or failed the switch.
+        """
+        entries = self._plug_entries(family, target)
         try:
             results = asyncio.run(
                 self._plug.switch_many(entries, turn_on=enabled)
             )
         except (ControllerError, OSError) as exc:
-            raise TransportError(str(exc), command="lamp") from exc
+            raise TransportError(str(exc), command=family) from exc
         failed = [r for r in results if not r.ok]
         if failed:
             raise DeviceFaultError(
-                "lamp switch failed: "
+                f"{family} switch failed: "
                 + "; ".join(f"{r.entry.name}: {r.error}" for r in failed),
-                command="lamp",
+                command=family,
             )
-        self._lamp_on = enabled
         return {
-            "is_on": self._lamp_on,
-            "target": self._cfg.lamp_target,
+            "is_on": enabled,
+            "target": target,
             "devices": [r.entry.name for r in results],
         }
+
+    # ── Lamp (IR lamp on a Tapo plug) ───────────────────────────────────
+    def read_lamp(self) -> dict:
+        state = self._read_plug("lamp", self._cfg.lamp_target)
+        self._lamp_on = state["is_on"]
+        return state
+
+    def set_lamp(self, *, enabled: bool) -> dict:
+        state = self._switch_plug(
+            "lamp", self._cfg.lamp_target, enabled=enabled
+        )
+        self._lamp_on = state["is_on"]
+        return state
+
+    # ── Fan (on a second Tapo plug; optional) ───────────────────────────
+    def _fan_target(self) -> str:
+        if self._cfg.fan_target is None:
+            raise _no_fan()
+        return self._cfg.fan_target
+
+    def read_fan(self) -> dict:
+        state = self._read_plug("fan", self._fan_target())
+        self._fan_on = state["is_on"]
+        return state
+
+    def set_fan(self, *, enabled: bool) -> dict:
+        state = self._switch_plug("fan", self._fan_target(), enabled=enabled)
+        self._fan_on = state["is_on"]
+        return state
 
     # ── Arm (cell6 / cell7 only) ────────────────────────────────────────
     def prepare_arm(self) -> dict:
@@ -600,11 +764,15 @@ class PumpZThermalCell(Cell):
 
     # ── Safety / lifecycle ──────────────────────────────────────────────
     def stop(self) -> None:
-        """Stop everything: Z motor, pump, heater, lamp.
+        """Stop everything: Z motor, pump, heater, lamp, fan.
 
         Every device is attempted even when an earlier one fails — a stop
         that gave up halfway could leave the heater running. The first
         failure is reported afterwards.
+
+        The fan goes off with everything else (the operator's call,
+        2026-09-30, issue #39): stop leaves nothing this cell switched
+        on still powered. It is attempted last, after the heat sources.
 
         Raises:
             DeviceFaultError: One or more devices did not stop.
@@ -637,6 +805,11 @@ class PumpZThermalCell(Cell):
                 self.set_lamp(enabled=False)
             except Exception as exc:  # noqa: BLE001
                 failures.append(f"lamp: {exc}")
+            if self._cfg.fan_target is not None:
+                try:
+                    self.set_fan(enabled=False)
+                except Exception as exc:  # noqa: BLE001
+                    failures.append(f"fan: {exc}")
         if failures:
             raise DeviceFaultError(
                 "stop incomplete: " + "; ".join(failures), command="stop"

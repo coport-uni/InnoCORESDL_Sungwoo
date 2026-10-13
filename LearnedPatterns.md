@@ -1716,3 +1716,40 @@ format below. Newest entries at the bottom.
   is fighting the task. And when a working path is removed, write down
   what it was better at — otherwise the next person rediscovers the
   reason by rebuilding it.
+
+## 48. The fan routes were in the tree, and the cell5 server on the bench was running from a different checkout
+
+- **Problem** (2026-10-12): `demo_cell5_fan_blink.yaml` failed its dry
+  run with `unknown_action fan/state` on all five fan steps, while
+  cell5's `/v1/health` was green and `/v1/openapi.json` listed the
+  hotplate and lamp routes — just no fan. The fan code (issue #39) was
+  sitting in this checkout's working tree.
+- **Cause**: two separate facts. (1) The process on NUC2 port 17062 was
+  `claude_test/test_cell5_server_shinyeong.py` started from the
+  `InnoCORESDL_shinyeong` checkout at f72da9d, a commit from before the
+  fan action set existed; `pgrep` showed the same relative script path
+  as this repo, and only `/proc/<pid>/cwd` revealed the other directory.
+  (2) That launcher never opened the Tapo plugs at all (`plug=None`),
+  so even on a fan-bearing checkout `/v1/fan/*` would have answered
+  409. A third surprise: the launcher exists because "the bench has no
+  hotplate", but `find_rct_port()` found an IKA RCT digital on
+  `/dev/ttyACM0` (plate 19 °C, heater off) — the bench had changed
+  and the comment had not.
+- **Fix**: staged the fan-bearing `cell/` and `server/` modules in the
+  `InnoCORESDL_Sungwoo` checkout on NUC2 (same HEAD as here), taught the
+  launcher to read `[lamp]`/`[fan]` and open
+  `SmartPlugController.from_files()` exactly as `open()` does, wrote a
+  `server/nuc2/cell5.toml` with the shinyeong checkout's bench-verified
+  `[pump]`/`[zstage]` plus `[hotplate] max_celsius = 60.0`, lamp =
+  plug1 by IP, fan = plug2 by IP — then, since the hotplate is attached,
+  ran the full `python -m server` instead of the launcher. Three fan
+  blink runs completed; fan and lamp read off afterwards.
+- **Rule**: before debugging a missing route, ask *which checkout* the
+  server was started from — `readlink /proc/<pid>/cwd`, then `git log
+  -1` there — not just whether the process is up. And a cell5 config
+  with a `[fan]` table **must** also name the lamp's plug: `lamp_target`
+  defaults to `"all"`, and `/v1/stop` switches the lamp target off, so
+  an omitted `[lamp]` turns the e-stop into "every Tapo plug on the
+  bench off", the fan among them. Bench notes that say what hardware is
+  absent carry a date for a reason; re-check the bus before trusting
+  them.

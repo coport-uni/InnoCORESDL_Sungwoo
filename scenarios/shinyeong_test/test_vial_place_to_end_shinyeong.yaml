@@ -1,0 +1,130 @@
+# 2026-09-30: rail home -> cell6 vial placement -> rail end. Steps copied by id from
+# test_synthesis_to_analysis_shinyeong.yaml; keep params in step with that file.
+name: test_vial_place_to_end_shinyeong
+description: Rail home -> cell6 places the vial (Task1_original.lua) -> rail to rail_end_mm. No dispensing. Steps
+  copied by id from test_synthesis_to_analysis_shinyeong.
+params:
+  program: Task1_original.lua
+  arm_last_line: 29
+  arm_min_elapsed_s: 20.0
+  analysis_program_vial: pick_and_place_vial.lua
+  analysis_program_head: pick_and_place_head.lua
+  analysis_vial_last_line: 25
+  analysis_vial_min_s: 10.0
+  analysis_head_last_line: 31
+  analysis_head_min_s: 10.0
+  analysis_program_zensor: zensor.lua
+  analysis_zensor_last_line: 16
+  analysis_zensor_min_s: 10.0
+  analysis_program_wash: ZensorWash.lua
+  analysis_program_init_head: init_head.lua
+  analysis_wash_last_line: 61
+  analysis_wash_min_s: 55.0
+  rail_home_mm: 17.98
+  rail_cell1_mm: 491.752
+  rail_cell2_mm: 729.246
+  rail_cell3_mm: 947.5
+  rail_end_mm: 978.0
+  c1_x_mm: 249.985
+  c1_z_mm: 225.0
+  c2_x_mm: 250.004
+  c2_z_mm: 225.0
+  c3_x_mm: 243.0
+  c3_z_mm: 223.0
+  z_up_mm: 3.0
+  volume_uL: 100.0
+  source_port: 1
+  dispense_port: 2
+  init_force: 2
+  rail_tol_mm: 2.0
+  gantry_tol_mm: 0.5
+  speed_pct: 10
+  accel_pct: 0
+defaults:
+  on_fail: abort
+  timeout_s: 30.0
+steps:
+- id: diag_cell6
+  cell: cell6
+  action: diagnose
+  method: GET
+  timeout_s: 20.0
+  save_as: d6
+- id: diag_cell4
+  cell: cell4
+  action: diagnose
+  method: GET
+  timeout_s: 30.0
+  save_as: d4
+- id: diag_cell1
+  cell: cell1
+  action: diagnose
+  method: GET
+  timeout_s: 30.0
+  save_as: d1
+- id: diag_cell2
+  cell: cell2
+  action: diagnose
+  method: GET
+  timeout_s: 20.0
+  save_as: d2
+- id: diag_cell3
+  cell: cell3
+  action: diagnose
+  method: GET
+  timeout_s: 20.0
+  save_as: d3
+- id: verify_arm_ready
+  assert: ${d6.arm.ok} == True and ${d6.arm.ready} == True and ${d6.program.running} == False
+- id: verify_rail_and_balance
+  assert: ${d4.stage.ok} == True and ${d4.balance.ok} == True
+- id: verify_all_gantries_up
+  assert: ${d1.stage.z_a_mm} <= ${params.z_up_mm} + ${params.gantry_tol_mm} and ${d1.stage.z_b_mm} <= ${params.z_up_mm}
+    + ${params.gantry_tol_mm} and ${d2.stage.z_a_mm} <= ${params.z_up_mm} + ${params.gantry_tol_mm} and ${d2.stage.z_b_mm}
+    <= ${params.z_up_mm} + ${params.gantry_tol_mm} and ${d3.stage.z_a_mm} <= ${params.z_up_mm} + ${params.gantry_tol_mm}
+    and ${d3.stage.z_b_mm} <= ${params.z_up_mm} + ${params.gantry_tol_mm}
+- id: rail_home
+  cell: cell4
+  action: linear/move
+  body:
+    y_mm: ${params.rail_home_mm}
+  timeout_s: 180.0
+  save_as: railed
+- id: verify_railed
+  assert: ${railed.y_mm} - ${params.rail_home_mm} <= ${params.rail_tol_mm} and ${params.rail_home_mm} - ${railed.y_mm}
+    <= ${params.rail_tol_mm}
+- id: rail_park_home
+  cell: cell4
+  action: linear/move
+  body:
+    y_mm: ${params.rail_home_mm}
+  timeout_s: 240.0
+  on_fail: retry
+  retries: 2
+- id: arm_enable
+  cell: cell6
+  action: arm/enable
+  save_as: en
+- id: verify_enabled
+  assert: ${en.fault_cleared} == True
+- id: arm_program
+  cell: cell6
+  action: arm/program
+  body:
+    name: ${params.program}
+  timeout_s: 360.0
+  save_as: prog
+- id: verify_arm_done
+  assert: ${prog.completed} == True and ${prog.last_line} >= ${params.arm_last_line} and ${prog.elapsed_s} >= ${params.arm_min_elapsed_s}
+- id: rail_to_end
+  cell: cell4
+  action: linear/move
+  body:
+    y_mm: ${params.rail_end_mm}
+  timeout_s: 240.0
+  on_fail: retry
+  retries: 2
+  save_as: railend
+- id: verify_rail_at_end
+  assert: ${railend.y_mm} - ${params.rail_end_mm} <= ${params.rail_tol_mm} and ${params.rail_end_mm} - ${railend.y_mm}
+    <= ${params.rail_tol_mm}

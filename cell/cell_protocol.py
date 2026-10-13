@@ -7,7 +7,8 @@ devices behind one interface. Four implementations satisfy the
 * :class:`PumpGantryCell` (cell1–3) — pump + XZ gantry.
 * :class:`BalanceLinearCell` (cell4) — balance + linear Y rail.
 * :class:`PumpZThermalCell` (cell5, Cell 5) — pump + single Z stage +
-  hotplate + IR lamp on a Tapo plug.
+  hotplate + IR lamp on a Tapo plug + (optionally) a fan on a
+  second one.
 * :class:`ArmCell` (cell6, cell7) — one FR5 robot arm, running `.lua`
   job programs on the controller.
 
@@ -132,6 +133,11 @@ class Cell(Protocol):
     # network-attached device in any cell; still owned by exactly one cell.
     def read_lamp(self) -> dict: ...
     def set_lamp(self, *, enabled: bool) -> dict: ...
+    # Fan actions (a fan on a second Tapo plug) — Cell 5 / cell5.
+    # Its own set rather than a second lamp target: a scenario
+    # that means the fan must not be able to light the IR lamp.
+    def read_fan(self) -> dict: ...
+    def set_fan(self, *, enabled: bool) -> dict: ...
     # Arm actions (one FR5) — cell6 / cell7. Deliberately NOT a pose
     # interface: a request names a `.lua` job program the controller
     # already holds (ADDING_A_CELL.md, "a robot arm is just another

@@ -57,6 +57,7 @@ ADDRESS_FIELDS: tuple[tuple[str, str, str], ...] = (
     ("stage", "serial_x", "ftdi"),
     ("zstage", "serial", "ftdi"),
     ("lamp", "target", "plug"),
+    ("fan", "target", "plug"),
 )
 
 #: Auto-detect signatures for a ``serial`` field left unset, as ``(VID,
@@ -310,8 +311,9 @@ def check_config(
                     key,
                     text,
                     "ok",
-                    "LAN device -- must appear in the plug driver's "
-                    "device_list.md, with credentials in secure.env",
+                    "LAN device -- a name from the plug driver's "
+                    "device_list.md or a bare IP, with credentials "
+                    "in secure.env",
                 )
             )
             continue

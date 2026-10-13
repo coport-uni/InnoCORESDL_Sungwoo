@@ -28,7 +28,8 @@ Usage:
 
     # cell5 / Cell 5 (pump + single Z + hotplate + IR lamp)
     python claude_test/smoke_l1.py --base-url http://127.0.0.1:17062 \
-        --suite discovery --suite lamp --suite hotplate --suite zstage \
+        --suite discovery --suite fan --suite lamp --suite hotplate \
+        --suite zstage \
         --suite pump --out claude_test/smoke_cell5.md
 """
 
@@ -304,6 +305,38 @@ def _suites(step_mm: float, volume_uL: float) -> dict[str, tuple[Check, ...]]:
                 body={"enabled": False},
                 expect="the lamp visibly goes out; is_on false",
                 briefing="Turns the lamp off.",
+            ),
+        ),
+        "fan": (
+            Check(
+                "fan_read",
+                "Read the fan plug's state over the LAN",
+                "fan/state",
+                "GET",
+                expect=(
+                    "is_on matches the fan; a 409 here means the cell "
+                    "has no [fan] table or no plug credentials"
+                ),
+            ),
+            Check(
+                "fan_on",
+                "Switch the fan on",
+                "fan/switch",
+                body={"enabled": True},
+                expect="the fan visibly spins up; is_on true",
+                briefing=(
+                    "THE FAN WILL START. Confirm it is the FAN that "
+                    "starts and that the IR lamp stays dark -- a lit "
+                    "lamp here means the two plug targets are swapped."
+                ),
+            ),
+            Check(
+                "fan_off",
+                "Switch the fan off",
+                "fan/switch",
+                body={"enabled": False},
+                expect="the fan visibly spins down; is_on false",
+                briefing="Turns the fan off.",
             ),
         ),
         "gantry": (
@@ -654,7 +687,8 @@ def main(argv: list[str] | None = None) -> int:
         choices=sorted([*_suites(DEFAULT_STEP_MM, DEFAULT_VOLUME_UL), *PROBES]),
         help=(
             "Repeatable. Recommended order, lowest risk first: discovery, "
-            "balance, lamp, hotplate, linear, zstage, pump, gantry. The "
+            "balance, fan, lamp, hotplate, linear, zstage, pump, gantry. "
+            "The "
             "'stop' (A4) and 'concurrency' (A7) probes need --motion."
         ),
     )

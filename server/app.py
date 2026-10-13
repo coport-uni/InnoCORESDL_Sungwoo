@@ -95,6 +95,13 @@ def create_app(cell_factory: CellFactory | None = None) -> FastAPI:
                 ),
             },
             {
+                "name": "Fan",
+                "description": (
+                    "Cell 5's fan, switched through a second Tapo plug "
+                    "over the LAN. Optional: 409 without a [fan] table."
+                ),
+            },
+            {
                 "name": "Arm",
                 "description": (
                     "cell6 / cell7's FR5 arm. Replay-only: a request "
@@ -106,7 +113,7 @@ def create_app(cell_factory: CellFactory | None = None) -> FastAPI:
                 "name": "Safety",
                 "description": (
                     "Abort now. On Cell 5 this also stops the heater, the "
-                    "stirrer and the lamp."
+                    "stirrer, the lamp and the fan."
                 ),
             },
         ],

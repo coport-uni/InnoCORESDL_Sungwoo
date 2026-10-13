@@ -573,6 +573,10 @@ async def test_heater_and_lamp_are_gated_but_reads_are_not(
     assert guarded.is_hazardous("hotplate/state", "GET") is False
     assert guarded.is_hazardous("lamp/state", "GET") is False
     assert guarded.is_hazardous("status", "GET") is False
+    # The fan is deliberately not gated (operator's decision,
+    # 2026-09-30, issue #39): it neither heats nor moves a stage.
+    assert guarded.is_hazardous("fan/switch") is False
+    assert guarded.is_hazardous("fan/state", "GET") is False
 
     engine = Engine(guarded, registry, client)
     text = scenario_yaml(
@@ -615,6 +619,7 @@ async def test_wrong_shape_action_fails_cleanly_at_runtime(
 
 
 CELL5_BLINK = REPO_ROOT / "scenarios" / "demo_cell5_lamp_blink.yaml"
+CELL5_FAN_BLINK = REPO_ROOT / "scenarios" / "demo_cell5_fan_blink.yaml"
 CELL5_HOTPLATE = REPO_ROOT / "scenarios" / "demo_cell5_hotplate_30c.yaml"
 CELL5_Z_CYCLES = REPO_ROOT / "scenarios" / "demo_cell5_z_cycles.yaml"
 
@@ -778,6 +783,38 @@ async def test_cell5_lamp_blink_demo(engine: Engine, fake_l1: FakeL1) -> None:
     ]
     assert switches == [True, False, True, False, True, False]
     assert fake_l1.lamp_on["cell5"] is False
+
+
+async def test_cell5_fan_blink_demo(
+    config: OrchestratorConfig,
+    registry: Registry,
+    client: Any,
+    fake_l1: FakeL1,
+) -> None:
+    """The fan demo runs straight through with the motion gate ON.
+
+    `fan/` is not a hazard prefix, so a run whose only actions are
+    fan switches never pauses for a confirmation — and it must
+    never touch the lamp, which shares the plug driver.
+    """
+    guarded = OrchestratorConfig(
+        log_dir=config.log_dir,
+        retry_delay_s=0.0,
+        confirm_first_motion=True,
+    )
+    engine = Engine(guarded, registry, client)
+    text = CELL5_FAN_BLINK.read_text(encoding="utf-8")
+    _s, issues = await engine.validate(text)
+    assert [str(i) for i in issues] == []
+    run = await engine.create_run(text, params=FAST_HOLDS)
+    await engine.wait(run.run_id)
+    assert run.state is RunState.COMPLETED
+    switches = [
+        c[3]["enabled"] for c in fake_l1.calls if c[2] == "/v1/fan/switch"
+    ]
+    assert switches == [True, False, True, False]
+    assert fake_l1.fan_on["cell5"] is False
+    assert not [c for c in fake_l1.calls if c[2].startswith("/v1/lamp")]
 
 
 async def test_cell5_hotplate_demo(engine: Engine, fake_l1: FakeL1) -> None:

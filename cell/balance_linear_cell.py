@@ -88,7 +88,7 @@ def _no_gantry() -> WrongStateError:
 
 def _absent(family: str) -> WrongStateError:
     # Defensive stub for the action sets only Cell 5 (cell5) has: the
-    # single Z stage, the hotplate and the IR lamp.
+    # single Z stage, the hotplate, the IR lamp and the fan.
     return WrongStateError(
         f"balance+linear cell has no {family}", command=family
     )
@@ -360,6 +360,12 @@ class BalanceLinearCell(Cell):
 
     def set_lamp(self, *, enabled: bool) -> dict:
         raise _absent("lamp")
+
+    def read_fan(self) -> dict:
+        raise _absent("fan")
+
+    def set_fan(self, *, enabled: bool) -> dict:
+        raise _absent("fan")
 
     def move_gantry(
         self, x_mm: float, z_mm: float, *, speed_pct: int, accel_pct: int

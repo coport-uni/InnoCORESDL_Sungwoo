@@ -228,9 +228,9 @@ def _no_stage() -> WrongStateError:
 
 
 def _no_thermal() -> WrongStateError:
-    # Hotplate and lamp belong to Cell 5.
+    # Hotplate, lamp and fan belong to Cell 5.
     return WrongStateError(
-        "arm cell has no hotplate or lamp", command="thermal"
+        "arm cell has no hotplate, lamp or fan", command="thermal"
     )
 
 
@@ -1196,6 +1196,12 @@ class ArmCell(Cell):
         raise _no_thermal()
 
     def set_lamp(self, *, enabled: bool) -> dict:
+        raise _no_thermal()
+
+    def read_fan(self) -> dict:
+        raise _no_thermal()
+
+    def set_fan(self, *, enabled: bool) -> dict:
         raise _no_thermal()
 
     # ── Safety / lifecycle ──────────────────────────────────────────────

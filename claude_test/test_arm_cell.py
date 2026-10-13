@@ -525,6 +525,8 @@ def test_unreadable_encoder_is_a_transport_error():
         lambda c: c.set_hotplate_stirrer(enabled=True),
         lambda c: c.read_lamp(),
         lambda c: c.set_lamp(enabled=True),
+        lambda c: c.read_fan(),
+        lambda c: c.set_fan(enabled=True),
     ],
 )
 def test_other_action_sets_are_409(call):

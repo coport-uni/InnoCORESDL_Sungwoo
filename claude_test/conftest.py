@@ -168,6 +168,12 @@ _SCHEMAS: dict[str, Any] = {
         "properties": {"enabled": {"type": "boolean"}},
         "required": ["enabled"],
     },
+    "FanRequest": {
+        "type": "object",
+        "title": "FanRequest",
+        "properties": {"enabled": {"type": "boolean"}},
+        "required": ["enabled"],
+    },
 }
 
 _COMMON_PATHS: dict[str, Any] = {
@@ -199,7 +205,8 @@ _GANTRY_PATHS: dict[str, Any] = {
     **_PUMP_PATHS,
 }
 
-#: Cell 5 (cell5): single Z + hotplate + IR lamp, on top of the pump.
+#: Cell 5 (cell5): single Z + hotplate + IR lamp + fan, on top of the
+#: pump.
 _THERMAL_PATHS: dict[str, Any] = {
     "/v1/zstage/home": _post("zstage_home"),
     "/v1/zstage/move": _post("zstage_move", "ZStageMoveRequest"),
@@ -212,6 +219,8 @@ _THERMAL_PATHS: dict[str, Any] = {
     "/v1/hotplate/stirrer": _post("hotplate_stirrer", "StirrerRequest"),
     "/v1/lamp/state": _get("lamp_state"),
     "/v1/lamp/switch": _post("lamp_switch", "LampRequest"),
+    "/v1/fan/state": _get("fan_state"),
+    "/v1/fan/switch": _post("fan_switch", "FanRequest"),
     **_PUMP_PATHS,
 }
 
@@ -227,7 +236,7 @@ _SHAPE_PATHS: dict[str, dict[str, Any]] = {
 _SHAPE_FAMILIES: dict[str, set[str]] = {
     "linear": {"linear", "balance"},
     "gantry": {"gantry", "pump"},
-    "thermal": {"zstage", "hotplate", "lamp", "pump"},
+    "thermal": {"zstage", "hotplate", "lamp", "fan", "pump"},
 }
 
 #: Families that belong to some shape; anything else is a real 404.
@@ -269,6 +278,7 @@ class FakeL1:
         self.plate_c: dict[str, float] = dict.fromkeys(shapes, 21.5)
         self.heating: dict[str, bool] = dict.fromkeys(shapes, False)
         self.lamp_on: dict[str, bool] = dict.fromkeys(shapes, False)
+        self.fan_on: dict[str, bool] = dict.fromkeys(shapes, False)
         #: Valve readback (`?6`) and contained volume per cell. "-" is
         #: what the real cell reports for a pumpless shape; a pump answers
         #: a port digit only after pump/initialize homes it.
@@ -497,6 +507,17 @@ class FakeL1:
                     "is_on": self.lamp_on[cell],
                     "target": "ir_lamp",
                     "devices": ["ir_lamp"],
+                },
+            )
+        if action in ("fan/state", "fan/switch"):
+            if action == "fan/switch":
+                self.fan_on[cell] = bool(body["enabled"])
+            return httpx.Response(
+                HTTP_OK,
+                json={
+                    "is_on": self.fan_on[cell],
+                    "target": "fan",
+                    "devices": ["fan"],
                 },
             )
         return httpx.Response(404, json={"message": f"no route {action}"})

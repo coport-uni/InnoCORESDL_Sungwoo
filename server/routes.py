@@ -25,6 +25,8 @@ from server.schemas import (
     CycleRequest,
     CycleResponse,
     DiagnoseResponse,
+    FanRequest,
+    FanResponse,
     HealthResponse,
     HeaterRequest,
     HeaterResponse,
@@ -477,6 +479,37 @@ async def lamp_switch(request: Request, body: LampRequest) -> LampResponse:
     return LampResponse(**state)
 
 
+# ── Fan (on a second Tapo plug) — Cell 5 / cell5 ────────────────────────────
+
+
+@router.get(
+    "/fan/state",
+    response_model=FanResponse,
+    tags=["Fan"],
+    summary="Read the fan plug's on/off state over the LAN",
+)
+async def fan_state(request: Request) -> FanResponse:
+    cell = _cell(request)
+    async with request.app.state.lock:
+        state = await run_in_threadpool(cell.read_fan)
+    return FanResponse(**state)
+
+
+@router.post(
+    "/fan/switch",
+    response_model=FanResponse,
+    tags=["Fan"],
+    summary="Switch the fan on or off",
+)
+async def fan_switch(request: Request, body: FanRequest) -> FanResponse:
+    cell = _cell(request)
+    async with request.app.state.lock:
+        state = await run_in_threadpool(
+            lambda: cell.set_fan(enabled=body.enabled)
+        )
+    return FanResponse(**state)
+
+
 # ── Arm (FR5) — cell6 / cell7 ────────────────────────────────────────────────
 #
 # One motion route: /arm/program hands a .lua job program to the
@@ -565,7 +598,9 @@ async def arm_program(
     "/stop",
     response_model=StopResponse,
     tags=["Safety"],
-    summary="Abort all motion now (Cell 5 also kills heater, stirrer, lamp)",
+    summary=(
+        "Abort all motion now (Cell 5 also kills heater, stirrer, lamp, fan)"
+    ),
 )
 async def stop(request: Request) -> StopResponse:
     cell = _cell(request)

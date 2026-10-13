@@ -168,8 +168,8 @@ def _no_pump() -> WrongStateError:
 
 def _absent(family: str) -> WrongStateError:
     # Defensive stub for the action sets only Cell 5 (cell5) has: the
-    # single Z stage, the hotplate and the IR lamp. Same contract as the
-    # stubs above — a stray call gets 409, not an AttributeError.
+    # single Z stage, the hotplate, the IR lamp and the fan. Same contract
+    # as the stubs above — a stray call gets 409, not an AttributeError.
     return WrongStateError(f"pump+gantry cell has no {family}", command=family)
 
 
@@ -787,6 +787,12 @@ class PumpGantryCell(Cell):
 
     def set_lamp(self, *, enabled: bool) -> dict:
         raise _absent("lamp")
+
+    def read_fan(self) -> dict:
+        raise _absent("fan")
+
+    def set_fan(self, *, enabled: bool) -> dict:
+        raise _absent("fan")
 
     # ── Arm (cell6 / cell7 only) ────────────────────────────────────────
     def prepare_arm(self) -> dict:

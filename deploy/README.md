@@ -66,7 +66,8 @@ extra prerequisites for that cell:
 
 - The plug's credentials go in `external/SmartPlugController/secure.env`
   and its name in that driver's `device_list.md`. Without them the cell
-  still starts — only the lamp endpoints answer 409.
+  still starts — only the lamp endpoints answer 409. The optional
+  fan (`[fan]` table) is a second plug using the same credentials.
 - Never run the hotplate driver's own dashboard
   (`hotplate_controller/server.py`) at the same time as cell5: one owner
   per serial port.

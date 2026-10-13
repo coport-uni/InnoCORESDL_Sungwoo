@@ -1,0 +1,135 @@
+# Cell 5 (cell5): switch the fan on and off twice.
+#
+# The fan hangs on a second Tapo plug (plug2, 192.168.0.77), separate
+# from the IR lamp's. Two on/off cycles paced by `wait_s` holds, long
+# enough to see the blades spin up and coast down. There is no loop
+# construct in the scenario language, so the cycles are written out.
+#
+# Field names from server/schemas.py: fan/switch -> {enabled}
+# (NOT {on}: YAML 1.1 resolves a bare `on:` key to boolean True,
+# LearnedPatterns #8).
+#
+# `fan/` is NOT a hazard prefix (operator's decision, 2026-09-30, issue
+# #39), so this run does not wait for a first-motion confirmation: the
+# fan starts as soon as the run does. Keep the blades clear.
+#
+# WATCH THE LAMP on the first run. The fan and the IR lamp share the
+# plug driver; if the lamp lights instead of the fan spinning, the two
+# `target` values in server/nuc2/cell5.toml are swapped -- abort.
+#
+# NOT bench-verified yet (2026-09-30): dry-run only.
+#
+#   python -m orchestrator validate scenarios/demo_cell5_fan_blink.yaml
+#   python -m orchestrator run scenarios/demo_cell5_fan_blink.yaml
+
+# ── Running this scenario ───────────────────────────────────────────────
+#
+# 1. One cell server per cell this scenario names. Each is its own
+#    process and owns its devices — start them in separate terminals
+#    (or as `deploy/systemd/cell@.service` units) and leave them up.
+#    `--cell` is not needed: the shape is inferred from the config's
+#    device tables.
+#
+#      conda activate sdl
+#      cd ~/workspace/InnoCOREServer/InnoCORESDL_Sungwoo
+#      # server/nuc2/cell5.toml needs a [fan] table -- see
+#      # server/nuc2/cell5.toml.example.
+#      python -m server --config server/nuc2/cell5.toml
+#
+#    Ports: cell5=17062. cell5 = pump + Z + hotplate + lamp + fan.
+#
+# 2. Check the server is up and sees the fan plug BEFORE the run:
+#
+#      curl -s localhost:17062/v1/health
+#      curl -s localhost:17062/v1/diagnose | python3 -m json.tool
+#      curl -s localhost:17062/v1/fan/state
+#
+#    A 409 on fan/state means the [fan] table is missing or the plug
+#    credentials (external/SmartPlugController/secure.env) are.
+#
+# 3. The orchestrator reads its cell list from orchestrator/config.toml.
+#    cell5 must be registered AND UNCOMMENTED there:
+#
+#      [cells.cell5]
+#      base_url = "http://192.168.0.120:17062"
+#
+#    It ships commented out on purpose — a registered-but-down cell
+#    costs a connect timeout on every `/v1/cells` probe and on every
+#    `stop_on_failure` broadcast. Uncomment it together with its server,
+#    and comment it back out when you power that bench down.
+#
+# 4. Dry run first — it validates every action and body field against
+#    the cell's live OpenAPI, and switches nothing:
+#
+#      python -m orchestrator validate scenarios/demo_cell5_fan_blink.yaml
+#
+# 5. Then the real run. No confirmation prompt: see the note above.
+#
+#      python -m orchestrator run scenarios/demo_cell5_fan_blink.yaml
+#
+#    A runlog is written to `runs/<UTC>-<name>/` (gitignored):
+#    meta.json, run.jsonl, scenario.yaml, vars.json.
+#
+# ──────────────────────────────────────────────────────────────────────────
+
+name: cell5_fan_blink
+description: >
+  Switch Cell 5's fan on and off twice, verify the plug reports the
+  commanded state, and leave the fan off.
+
+params:
+  blink_hold_s: 3.0
+
+defaults:
+  on_fail: abort
+  timeout_s: 15.0
+
+steps:
+  - id: check_fan_reachable
+    cell: cell5
+    action: fan/state
+    method: GET
+    timeout_s: 10.0
+    save_as: pre
+
+  - id: fan1_on
+    cell: cell5
+    action: fan/switch
+    body:
+      enabled: true
+    save_as: f1on
+
+  - id: verify_on
+    assert: "${f1on.is_on} == True"
+
+  - id: hold1_on
+    wait_s: "${params.blink_hold_s}"
+
+  - id: fan1_off
+    cell: cell5
+    action: fan/switch
+    body:
+      enabled: false
+
+  - id: hold1_off
+    wait_s: "${params.blink_hold_s}"
+
+  - id: fan2_on
+    cell: cell5
+    action: fan/switch
+    body:
+      enabled: true
+
+  - id: hold2_on
+    wait_s: "${params.blink_hold_s}"
+
+  - id: fan2_off
+    cell: cell5
+    action: fan/switch
+    body:
+      enabled: false
+    save_as: last
+
+  # Never leave the run with the fan running.
+  - id: verify_off
+    assert: "${last.is_on} == False"

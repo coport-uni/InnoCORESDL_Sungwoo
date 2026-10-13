@@ -26,6 +26,10 @@ DEFAULT_RETRY_DELAY_S = 1.0
 #: confirmation when ``confirm_first_motion`` is on (CLAUDE.md
 #: Folder-specific rules #3, spec §6.4). A heater coming on unattended is
 #: the same class of hazard as a motor starting unattended.
+#:
+#: ``fan/`` (cell5's fan plug) is deliberately NOT here: the operator
+#: decided on 2026-09-30 (issue #39) that a fan switching is not
+#: gated. A bench that wants the gate adds it in its config.toml.
 DEFAULT_HAZARD_PREFIXES = (
     "gantry/",
     "linear/",

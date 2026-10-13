@@ -41,6 +41,7 @@ into **two layers** (see SDLClaude `ARCHITECTURE.md` → "Cell contract"):
 | **Action set** (per family) | ZStage | `home_zstage()`, `move_zstage(z_mm, *, speed_pct, accel_pct)` |
 | **Action set** (per family) | Hotplate | `read_hotplate()`, `set_hotplate_temperature(c)`, `set_hotplate_heater(*, enabled)`, `set_hotplate_speed(rpm)`, `set_hotplate_stirrer(*, enabled)` |
 | **Action set** (per family) | Lamp | `read_lamp()`, `set_lamp(*, enabled)` |
+| **Action set** (per family) | Fan | `read_fan()`, `set_fan(*, enabled)` |
 
 Rules:
 - **Always implement the Substrate** (discovery + lifecycle) — that's what the
@@ -78,7 +79,7 @@ Rules:
   the same goes for `off`, `yes`, `no`, `y`, `n`.
 - **If the cell can heat or energize something, `stop()` must kill that
   too**, not just motion. `PumpZThermalCell.stop()` is the reference: it
-  attempts motor, pump, heater, stirrer and lamp, and reports whatever did
+  attempts motor, pump, heater, stirrer, lamp and fan, and reports whatever did
   not stop instead of giving up at the first failure.
 
 **Worked example — Cell 5 (cell5).** Four devices in one cell (pump +

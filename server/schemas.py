@@ -59,6 +59,7 @@ class StatusResponse(BaseModel):
     heating: bool | None = None
     stirring: bool | None = None
     lamp_on: bool | None = None
+    fan_on: bool | None = None
     # cell6 / cell7 (arm) only; None on cells without an arm. Degrees,
     # joint 1 first, read from the encoder. A Lua job program runs ON the
     # controller and does not hold this process's SDK session, so this
@@ -248,6 +249,21 @@ class LampRequest(BaseModel):
 
 
 class LampResponse(BaseModel):
+    is_on: bool | None = Field(
+        description="None when the plug's state could not be read."
+    )
+    target: str = Field(description="Plug name/IP from the driver's list.")
+    devices: list[str] = Field(default_factory=list)
+
+
+# ── Fan (on a second Tapo plug) — Cell 5 / cell5 ─────────────────────────────
+
+
+class FanRequest(BaseModel):
+    enabled: bool
+
+
+class FanResponse(BaseModel):
     is_on: bool | None = Field(
         description="None when the plug's state could not be read."
     )

@@ -18,6 +18,9 @@ cell shapes live here (the SDLClaude reference implementations):
   motor as a standalone Z axis + an IKA hotplate + an IR lamp on a Tapo
   plug. Four devices, one server; its own `zstage` / `hotplate` / `lamp`
   action sets, and the only cell whose `stop()` also kills heat and power.
+  An optional fifth device, a **fan** on a second Tapo plug (`[fan]`
+  table, `fan` action set, issue #39), is switched off by `stop()` too
+  but is *not* a hazard prefix in the orchestrator.
 
 **Drivers as submodules.** Every hardware driver is its own upstream repo,
 tracked as a **git submodule** under `external/`. The four the cells use
@@ -103,7 +106,7 @@ scenario files across the cells of both NUCs. Its design document is
 | `cell/cell_protocol.py` | `Cell` protocol + `CellError` hierarchy the server maps to HTTP. |
 | `cell/pump_gantry_cell.py` | `PumpGantryCell` (cell1–3) — pump (`sy01b`) + XZ gantry (ESP32 `mks_motor`, paired-Z interlock), no balance. |
 | `cell/balance_linear_cell.py` | `BalanceLinearCell` — real cell4: MINAS A6 linear rail (`lmc`) + Entris-II balance, no pump. Run with `python -m server --config server/nuc1/cell4.toml` (shape auto-detected from the `[linear]` table). |
-| `cell/pump_z_thermal_cell.py` | `PumpZThermalCell` — Cell 5 (cell5): pump + single Z (`mks_motor`) + hotplate (`external/HotplateController`) + IR lamp on a Tapo plug (`external/SmartPlugController`). Shape auto-detected from the `[zstage]`/`[hotplate]`/`[lamp]` tables. |
+| `cell/pump_z_thermal_cell.py` | `PumpZThermalCell` — Cell 5 (cell5): pump + single Z (`mks_motor`) + hotplate (`external/HotplateController`) + IR lamp on a Tapo plug (`external/SmartPlugController`). Optional fan on a second Tapo plug (`[fan]` table). Shape auto-detected from the `[zstage]`/`[hotplate]`/`[lamp]`/`[fan]` tables. |
 | `server/` | FastAPI **L1 `/v1` server** — thin HTTP bridge over the cell (mirrors `sy01b-server`). `server/nuc1/`, `server/nuc2/` hold the per-NUC cell config examples. |
 | `orchestrator/` | the **L2 orchestrator** (package): registry, cell client, scenario loader + dry-run validator, run engine, runlog, `/v1` API, CLI. |
 | `scenarios/` | scenario YAML files. `demo_linear_move.yaml` is the first real-hardware demo (spec §8.3). |

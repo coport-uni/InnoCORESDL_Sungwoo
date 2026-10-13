@@ -1,7 +1,8 @@
 """``python -m server`` entry point for the InnoCORESDL cell.
 
 Reads a TOML config (device tables — ``[pump]`` / ``[stage]`` / ``[balance]``
-/ ``[linear]`` / ``[zstage]`` / ``[hotplate]`` / ``[lamp]`` / ``[arm]`` —
+/ ``[linear]`` / ``[zstage]`` / ``[hotplate]`` / ``[lamp]`` / ``[fan]`` /
+``[arm]`` —
 plus ``[server]`` for host/port/log level), opens the cell once, and hands
 the live app to uvicorn. The tables present select the cell shape, so
 ``--config`` alone is enough. Single worker — multiple workers would each
@@ -104,7 +105,8 @@ def _load_balance_linear(
 def _load_pump_z_thermal(
     path: Path,
 ) -> tuple[PumpZThermalConfig, ServerConfig]:
-    """Parse a Cell 5 (cell5) config: pump + Z + hotplate + lamp."""
+    """Parse a Cell 5 (cell5) config: pump + Z + hotplate + lamp
+    (+ an optional fan)."""
     from cell.pump_z_thermal_cell import (
         DEFAULT_MAX_CELSIUS,
         PumpZThermalConfig,
@@ -115,6 +117,7 @@ def _load_pump_z_thermal(
     zstage = raw.get("zstage", {})
     hotplate = raw.get("hotplate", {})
     lamp = raw.get("lamp", {})
+    fan = raw.get("fan", {})
     server = raw.get("server", {})
     cell_cfg = PumpZThermalConfig(
         # No [pump] table = no pump on this bench yet; the cell then
@@ -131,6 +134,8 @@ def _load_pump_z_thermal(
         hotplate_port=hotplate.get("port"),
         max_celsius=float(hotplate.get("max_celsius", DEFAULT_MAX_CELSIUS)),
         lamp_target=lamp.get("target", "all"),
+        # No [fan] table = no fan on this bench; fan routes answer 409.
+        fan_target=fan.get("target"),
     )
     server_cfg = ServerConfig(
         host=server.get("host", "0.0.0.0"),
@@ -168,14 +173,15 @@ def _infer_cell(path: Path) -> str:
     """Pick the cell shape from the config's tables so `--config` alone selects
     it. An ``[arm]`` table → ``arm`` (cell6, cell7 — the only cell with
     no serial device at all); a ``[zstage]`` / ``[hotplate]`` / ``[lamp]``
-    table → ``pump_z_thermal`` (cell5, Cell 5 — checked before cell1–3 because
-    it also has a ``[pump]`` table); a ``[linear]`` (or ``[balance]``) table →
-    ``balance_linear`` (cell4); otherwise ``pump_gantry`` (cell1–3).
+    / ``[fan]`` table → ``pump_z_thermal`` (cell5, Cell 5 — checked before
+    cell1–3 because it also has a ``[pump]`` table); a ``[linear]`` (or
+    ``[balance]``) table → ``balance_linear`` (cell4); otherwise
+    ``pump_gantry`` (cell1–3).
     ``--cell`` overrides this."""
     raw = tomllib.loads(path.read_text(encoding="utf-8"))
     if "arm" in raw:
         return "arm"
-    if any(table in raw for table in ("zstage", "hotplate", "lamp")):
+    if any(table in raw for table in ("zstage", "hotplate", "lamp", "fan")):
         return "pump_z_thermal"
     has_bl = "linear" in raw or "balance" in raw
     return "balance_linear" if has_bl else "pump_gantry"
@@ -204,7 +210,8 @@ def main(argv: list[str] | None = None) -> int:
         help=(
             "Cell shape to serve. Omit to auto-detect from the config: an "
             "[arm] table → 'arm' (cell6, cell7), a "
-            "[zstage]/[hotplate]/[lamp] table → 'pump_z_thermal' (cell5), a "
+            "[zstage]/[hotplate]/[lamp]/[fan] table → 'pump_z_thermal' "
+            "(cell5), a "
             "[linear] table → 'balance_linear' (cell4), otherwise "
             "'pump_gantry' (cell1–3). Pass explicitly only to override the "
             "inference."
