@@ -155,8 +155,8 @@ params:
   arm_min_elapsed_s: 20.0
 
   # ── rail stations, taught 2026-08-13 ──
-  rail_home_mm: 5.0          # 0 mm is on the mechanical stop
-  rail_cell1_mm: 473.772   # 2026-09-16: station shifted at the operator's request (+3, was 470.772)
+  rail_home_mm: 17.98   # 2026-09-30: +17.98 (rail re-zeroed at the stop; was 5.0)  |          # 0 mm is on the mechanical stop
+  rail_cell1_mm: 491.752   # 2026-09-30: +17.98 (rail re-zeroed at the stop; was 473.772)  |   # 2026-09-16: station shifted at the operator's request (+3, was 470.772)
   # cell2 re-taught 2026-09-13: the vial lines up with the rail READING
   # 714.496. This param is the COMMAND that lands there, not the reading:
   # the rail stops short of what it is told, and on the run's own approach
@@ -164,9 +164,9 @@ params:
   # so the reading plus that shortfall. rail_tol_mm covers the difference.
   # 2026-09-15: moved 2 mm in the - direction at the operator's request
   # after watching the run (was 715.266).
-  rail_cell2_mm: 711.266   # 2026-09-16: +2 more at the operator's request (was 709.266)
-  rail_cell3_mm: 937.029   # 2026-09-17: -1 mm at the operator's request (was 938.029)
-  rail_end_mm: 970.0         # hard stop measured at 980.214
+  rail_cell2_mm: 729.246   # 2026-09-30: +17.98 (rail re-zeroed at the stop; was 711.266)  |   # 2026-09-16: +2 more at the operator's request (was 709.266)
+  rail_cell3_mm: 947.5   # 2026-09-30: taught by eye with the head at depth (landed 947.44); was 952.009
+  rail_end_mm: 978.0   # 2026-09-30: as close to the hard stop (980.37, measured today) as the 2 mm driver tolerance allows; 987.98 stalled, 980.369 IS the stop
 
   # ── gantry poses ──
   # X was taught on cell1 and reused; cell2/cell3 X is unverified.
@@ -189,11 +189,11 @@ params:
   # guarded descent stalled there with the balance still at zero, so it
   # is the axis's end of travel, not the vial. Keep c1_z_mm clear of it.
   c1_x_mm: 249.985   # 2026-09-17: +1 mm more at the operator's request
-  c1_z_mm: 225.0
+  c1_z_mm: 223.0   # 2026-10-14: 2 mm margin (cell1 Z_A lower limit at 224.3 since the cable carrier)
   # cell2 re-taught 2026-09-13 at cell1's new X/Z: readback X 248.004,
   # Z 224.999/224.996, balance 0.0000 g. No floor reached on the way to 225.
   c2_x_mm: 250.004   # 2026-09-17: +1 mm more at the operator's request
-  c2_z_mm: 225.0
+  c2_z_mm: 223.0   # 2026-10-14: 2 mm margin (cell1 Z_A lower limit at 224.3 since the cable carrier)
   # cell3 re-taught 2026-09-13: X 238, Z 225, confirmed by eye. NOT YET
   # REACHED UNDER POWER at that X — Z_A stalled at 198 then 191 mm on
   # something beside the head (balance read 0 g throughout), and the
@@ -205,7 +205,7 @@ params:
   # to 245.002 (readback) and Z confirmed at 223 (readback 222.982/
   # 222.999), reached four times in guarded steps with the balance at
   # 0 g. The note above about Z_A stalling describes the pre-fix hardware.
-  c3_x_mm: 245.002
+  c3_x_mm: 243.0   # 2026-09-30: -2 mm by eye at depth (was 245.002)
   c3_z_mm: 223.0
   # RETRACT HEIGHT, AND DELIBERATELY NOT 0.
   # Measured on cell3, 2026-08-13, and the same on every retract: with a
@@ -243,6 +243,7 @@ params:
   # split these into per-cell params rather than flipping them for all
   # three.
   volume_uL: 100.0
+  dispense_cycles: 20        # 2026-10-14: 2 mL per cell = 100 uL x 20 (125 uL syringe); ~7 s per cycle
   source_port: 1
   dispense_port: 2
   init_force: 2
@@ -412,6 +413,33 @@ steps:
     assert: "${h3.x_mm} <= ${params.gantry_tol_mm} and ${params.gantry_tol_mm} + ${h3.x_mm} >= 0 and ${h3.z_mm} <= ${params.gantry_tol_mm}"
 
   # ── cell6: the arm runs first, alone ────────────────────────────────
+  # 2026-09-30: rail home moved ahead of the arm — the arm's program expects the
+  # balance (on the rail) at home; on 09-30 it faulted (1/149, line 22) when the
+  # rail had been left at a station.
+  - id: rail_home
+    cell: cell4
+    action: linear/move
+    body:
+      y_mm: ${params.rail_home_mm}   # 2026-09-30: was linear/home (server home_mm 5.0)
+    timeout_s: 180.0
+    save_as: railed
+  # `linear/home` parks at the cell's `home_mm` (5 mm), NOT at the 0 mm
+  # encoder origin: 0 is on the mechanical stop and homing onto it is
+  # what trips Err16.0 (cell/balance_linear_cell.py home_linear). This
+  # assert first read `y_mm <= 2.0` and failed a perfectly good home at
+  # 4.275 mm — the rail was right and the expectation was wrong.
+  - id: verify_railed
+    assert: "${railed.y_mm} - ${params.rail_home_mm} <= ${params.rail_tol_mm} and ${params.rail_home_mm} - ${railed.y_mm} <= ${params.rail_tol_mm}"
+
+  - id: rail_park_home
+    cell: cell4
+    action: linear/move
+    body:
+      y_mm: "${params.rail_home_mm}"
+    timeout_s: 240.0
+    on_fail: retry
+    retries: 2
+
   - id: arm_enable
     cell: cell6
     action: arm/enable
@@ -440,28 +468,6 @@ steps:
     assert: "${prog.completed} == True and ${prog.last_line} >= ${params.arm_last_line} and ${prog.elapsed_s} >= ${params.arm_min_elapsed_s}"
 
   # ── Rail: home, then out to cell1 in segments ───────────────────────
-  - id: rail_home
-    cell: cell4
-    action: linear/home
-    timeout_s: 180.0
-    save_as: railed
-  # `linear/home` parks at the cell's `home_mm` (5 mm), NOT at the 0 mm
-  # encoder origin: 0 is on the mechanical stop and homing onto it is
-  # what trips Err16.0 (cell/balance_linear_cell.py home_linear). This
-  # assert first read `y_mm <= 2.0` and failed a perfectly good home at
-  # 4.275 mm — the rail was right and the expectation was wrong.
-  - id: verify_railed
-    assert: "${railed.y_mm} - ${params.rail_home_mm} <= ${params.rail_tol_mm} and ${params.rail_home_mm} - ${railed.y_mm} <= ${params.rail_tol_mm}"
-
-  - id: rail_park_home
-    cell: cell4
-    action: linear/move
-    body:
-      y_mm: "${params.rail_home_mm}"
-    timeout_s: 240.0
-    on_fail: retry
-    retries: 2
-
   - id: rail_at_cell1
     cell: cell4
     action: linear/move
@@ -524,14 +530,14 @@ steps:
     cell: cell1
     action: pump/cycle
     body:
-      cycles: 1
+      cycles: ${params.dispense_cycles}
       volume_uL: "${params.volume_uL}"
       source_port: "${params.source_port}"
       dispense_port: "${params.dispense_port}"
-    timeout_s: 180.0
+    timeout_s: 360.0
     save_as: disp
   - id: verify_dispensed
-    assert: "${disp.cycles_done} == 1"
+    assert: "${disp.cycles_done} == ${params.dispense_cycles}"
 
   - id: cell1_retract
     cell: cell1
@@ -617,15 +623,15 @@ steps:
     cell: cell2
     action: pump/cycle
     body:
-      cycles: 1
+      cycles: ${params.dispense_cycles}
       volume_uL: "${params.volume_uL}"
       source_port: "${params.source_port}"
       dispense_port: "${params.dispense_port}"
-    timeout_s: 180.0
+    timeout_s: 360.0
     save_as: disp2
 
   - id: verify_dispensed2
-    assert: "${disp2.cycles_done} == 1"
+    assert: "${disp2.cycles_done} == ${params.dispense_cycles}"
 
   - id: cell2_retract
     cell: cell2
@@ -708,15 +714,15 @@ steps:
     cell: cell3
     action: pump/cycle
     body:
-      cycles: 1
+      cycles: ${params.dispense_cycles}
       volume_uL: "${params.volume_uL}"
       source_port: "${params.source_port}"
       dispense_port: "${params.dispense_port}"
-    timeout_s: 180.0
+    timeout_s: 360.0
     save_as: disp3
 
   - id: verify_dispensed3
-    assert: "${disp3.cycles_done} == 1"
+    assert: "${disp3.cycles_done} == ${params.dispense_cycles}"
 
   - id: cell3_retract
     cell: cell3
