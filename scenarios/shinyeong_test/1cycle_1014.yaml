@@ -1,3 +1,63 @@
+# The synthesis stage + hand-off to the analysis arm.
+#
+# A COPY of test_synthesis_seq_free_shinyeong.yaml, made 2026-09-16. Keep
+# the two in step: every position, tolerance and guard above the rail's
+# end move is the same, and the reasoning lives in that file's header.
+# What differs is only the tail:
+#
+#   * rail_return_home / verify_rail_home are GONE. The rail stops at
+#     rail_end_mm and stays, because that is where cell7 picks from.
+#   * after the gantries park, cell7 runs two Lua programs in order:
+#     pick_and_place_vial.lua, then pick_and_place_head.lua. Both were
+#     confirmed present on the controller (claude_test/probe_arm_lua.py,
+#     2026-09-15) and added to allowed_programs in server/nuc1/cell7.toml.
+#   * cell7 is checked in the pre-flight, so a dead analysis arm stops the
+#     run before four minutes of synthesis rather than after them.
+#   * the rail comes home at the very end, but only after the analysis
+#     work is done — and it does so WHILE the three gantries re-home, the
+#     one parallel block in the chain (see the step for why that mix is
+#     safe). The bench therefore ends in its starting state: rail at
+#     rail_home_mm, every gantry zeroed at its switches.
+#
+# cell6 and cell7 are strictly sequential here — never in one parallel
+# block until their reach overlap is measured (cell7.toml, GAP-8).
+#
+# ── header of the file this was copied from follows ─────────────────────
+#
+# The synthesis stage, end to end, RUN WITHOUT GATES — for filming.
+#
+# This is test_synthesis_seq_shinyeong.yaml with its five `pause` steps
+# removed. Everything else is identical. Read that file's header for the
+# reasoning behind every position and guard; only the differences are
+# repeated here.
+#
+# DO NOT RUN THIS FIRST. docs/L1_BRINGUP.md §6 prescribes validate ->
+# --step-mode -> free run for every scenario, and the gated form has a
+# specific job on this chain that no assert can do:
+#
+#   cell2's and cell3's descent heights were NEVER TAUGHT ON THEIR OWN
+#   FRAMES. They inherit cell1's 223.654 mm on the operator's judgement
+#   that the three frames are built alike. The gated run is where a human
+#   looks at the gap before the head commits. Run this free version only
+#   after a --step-mode run has shown both of those descents clearing the
+#   pan — after that the heights are measured rather than assumed, and
+#   the film gets a clean take besides.
+#
+# What still protects the run once it starts:
+#   * confirm_first_motion still gates the very first hazardous step, so
+#     the run does not begin unattended;
+#   * every rail move is preceded by an assert that the gantry which just
+#     worked has its Z back at 0, and the pre-flight checks all three
+#     heads are up before the rail moves at all;
+#   * every move is verified against the encoder readback, and on_fail is
+#     abort, so the first bad measurement ends the run.
+# What is gone is the chance to look before each descent and before the
+# dispense. THE RAIL STILL CANNOT BE STOPPED FROM SOFTWARE (GAP-1) — the
+# physical e-stop is the only stop, and someone holds it for the whole
+# take.
+#
+# ── original header follows ─────────────────────────────────────────────
+#
 # The synthesis stage, end to end: arm -> rail -> three gantries -> rail
 # to the far end. Five cells across two NUCs, strictly sequential.
 #
@@ -85,12 +145,13 @@
 #   python -m orchestrator validate scenarios/test_synthesis_seq_shinyeong.yaml
 #   python -m orchestrator run scenarios/test_synthesis_seq_shinyeong.yaml --step-mode
 
-name: test_synthesis_seq_shinyeong
+name: one_cycle_1014   # file is 1cycle_1014.yaml; the schema needs the name to start with a letter
 description: >
-  The synthesis stage end to end. cell6's arm runs its Lua program, then
-  cell4's rail carries the balance under cell1, cell2 and cell3 in turn;
-  each gantry lowers over the vial and dispenses from its own syringe
-  pump. Five cells, two NUCs, one sequential run.
+  The synthesis stage, then the hand-off to analysis. Identical to
+  test_synthesis_seq_free_shinyeong up to the rail's run to its end
+  position; the rail then STAYS there instead of returning home, the
+  gantries park, and cell7's FR5 arm (192.168.0.59) runs
+  pick_and_place_vial.lua and then pick_and_place_head.lua.
 
 params:
   # ── cell6 ──
@@ -119,6 +180,50 @@ params:
   # alongside it.
   arm_last_line: 29
   arm_min_elapsed_s: 20.0
+
+  # ── cell7, the analysis-stage arm (192.168.0.59) ──
+  analysis_program_vial: "pick_and_place_vial.lua"
+  analysis_program_head: "pick_and_place_head.lua"
+  # Completion floors, from the first clean run through this file
+  # (2026-09-15 15:02Z): vial 18.76 s ending on line 26, head 19.77 s
+  # ending on line 32, the head program finishing at the controller's
+  # resting pose. A complete run can report its last line or the one
+  # before (cell6 has shown both 29 and 30), hence one line of slack.
+  # The elapsed floors sit near half the measured time: an early exit
+  # like cell6's 5.7 s on 2026-09-13 falls well under them. One run is
+  # thin evidence — tighten or loosen from the next few runlogs.
+  analysis_vial_last_line: 25
+  analysis_vial_min_s: 10.0
+  analysis_head_last_line: 31
+  analysis_head_min_s: 10.0
+  # Added 2026-09-16, after the pick-and-place pair: the sensor read and
+  # then its wash. Floors below are from their first clean run the same
+  # day (run 20260916T144510Z): zensor 19.76 s to line 17, ZensorWash
+  # 109.77 s to line 62, both ending at the controller's resting pose.
+  # One line of slack, as elsewhere here, because a complete run reports
+  # its last line or the one before. The elapsed floors sit near half the
+  # measured time — enough to catch an early exit like cell6's 5.7 s on
+  # 2026-09-13, loose enough not to fail on normal variation. Two data
+  # points would be better than one; revisit after a few more runs.
+  analysis_program_zensor: "zensor.lua"
+  analysis_zensor_last_line: 16
+  analysis_zensor_min_s: 10.0
+  analysis_program_wash: "ZensorWash.lua"
+  # The closing move, 2026-09-17: init_head.lua replaces the second run
+  # of pick_and_place_head.lua. Never run from here, so its assert below
+  # is the weak one again (completed + advanced at all); set real floors
+  # from the first clean runlog.
+  # cell5 (analysis pump + ball-screw Z), 2026-10-12. Z frame: 0 at the upper
+  # (home) switch, +mm down; dispense point taught 421.0 (lower end-stop ~422.6).
+  c5_z_dispense_mm: 421.0
+  c5_z_tol_mm: 0.5
+  hotplate_target_c: 100.0   # 2026-10-14: operator setpoint (cell5.toml cap raised to 110 on NUC2 _shinyeong)
+  c5_volume_uL: 50.0   # 2026-10-14: operator setting (one cycle holds at most 125 uL — the syringe)
+  analysis_program_init_head: "init_head.lua"
+  analysis_init_head_last_line: 28   # 2026-09-30: measured 28 lines / 14.7 s on run 20260930T152501Z
+  analysis_init_head_min_s: 10.0
+  analysis_wash_last_line: 61
+  analysis_wash_min_s: 55.0
 
   # ── rail stations, taught 2026-08-13 ──
   rail_home_mm: 17.98   # 2026-09-30: +17.98 (rail re-zeroed at the stop; was 5.0)  |          # 0 mm is on the mechanical stop
@@ -155,11 +260,11 @@ params:
   # guarded descent stalled there with the balance still at zero, so it
   # is the axis's end of travel, not the vial. Keep c1_z_mm clear of it.
   c1_x_mm: 249.985   # 2026-09-17: +1 mm more at the operator's request
-  c1_z_mm: 225.0
+  c1_z_mm: 223.0   # 2026-10-13: 2 mm margin — cell1 Z_A hit its lower limit at 224.3 after the cable carrier went on
   # cell2 re-taught 2026-09-13 at cell1's new X/Z: readback X 248.004,
   # Z 224.999/224.996, balance 0.0000 g. No floor reached on the way to 225.
   c2_x_mm: 250.004   # 2026-09-17: +1 mm more at the operator's request
-  c2_z_mm: 225.0
+  c2_z_mm: 223.0   # 2026-10-13: 2 mm margin — cell1 Z_A hit its lower limit at 224.3 after the cable carrier went on
   # cell3 re-taught 2026-09-13: X 238, Z 225, confirmed by eye. NOT YET
   # REACHED UNDER POWER at that X — Z_A stalled at 198 then 191 mm on
   # something beside the head (balance read 0 g throughout), and the
@@ -209,6 +314,7 @@ params:
   # split these into per-cell params rather than flipping them for all
   # three.
   volume_uL: 100.0
+  dispense_cycles: 20        # 2026-10-13: 2 mL per cell = 100 uL x 20 (125 uL syringe); ~7 s per cycle
   source_port: 1
   dispense_port: 2
   init_force: 2
@@ -235,6 +341,13 @@ steps:
     method: GET
     timeout_s: 20.0
     save_as: d6
+
+  - id: diag_cell7
+    cell: cell7
+    action: diagnose
+    method: GET
+    timeout_s: 20.0
+    save_as: d7
 
   - id: diag_cell4
     cell: cell4
@@ -264,8 +377,18 @@ steps:
     timeout_s: 20.0
     save_as: d3
 
+  - id: diag_cell5
+    cell: cell5
+    action: diagnose
+    method: GET
+    timeout_s: 30.0
+    save_as: d5
+
   - id: verify_arm_ready
     assert: "${d6.arm.ok} == True and ${d6.arm.ready} == True and ${d6.program.running} == False"
+
+  - id: verify_arm7_ready
+    assert: "${d7.arm.ok} == True and ${d7.arm.ready} == True and ${d7.program.running} == False"
 
   - id: verify_rail_and_balance
     assert: "${d4.stage.ok} == True and ${d4.balance.ok} == True"
@@ -328,6 +451,9 @@ steps:
   # Upper bound only. Positive Z is downward, so that is the direction
   # that collides; a slightly negative reading is a head parked hard
   # against its home limit, which is harmless.
+  - id: verify_cell5
+    assert: "${d5.pump.ok} == True and ${d5.stage.ok} == True and ${d5.ok_to_initialize} == True"
+
   - id: verify_all_gantries_up
     assert: "${d1.stage.z_a_mm} <= ${params.z_up_mm} + ${params.gantry_tol_mm} and ${d1.stage.z_b_mm} <= ${params.z_up_mm} + ${params.gantry_tol_mm} and ${d2.stage.z_a_mm} <= ${params.z_up_mm} + ${params.gantry_tol_mm} and ${d2.stage.z_b_mm} <= ${params.z_up_mm} + ${params.gantry_tol_mm} and ${d3.stage.z_a_mm} <= ${params.z_up_mm} + ${params.gantry_tol_mm} and ${d3.stage.z_b_mm} <= ${params.z_up_mm} + ${params.gantry_tol_mm}"
 
@@ -355,15 +481,6 @@ steps:
     action: gantry/home
     timeout_s: 180.0
     save_as: h1
-    pause: >
-      FIRST MOTION OF THE RUN, AND IT IS THE WIDEST ONE. Each gantry is
-      about to home: Z lifts, then X traverses until it finds its limit
-      switch. X can cross its whole travel, so clear all three frames --
-      not just the one in front of you -- and check nothing is resting on
-      a rail or clamped to a carriage. Hold the e-stop; a gantry stop
-      queues behind the move it means to interrupt (GAP-9), so the switch
-      in your hand is the only one that acts at once. About two minutes
-      for the three.
 
   - id: verify_init_cell1
     assert: "${h1.x_mm} <= ${params.gantry_tol_mm} and ${params.gantry_tol_mm} + ${h1.x_mm} >= 0 and ${h1.z_mm} <= ${params.gantry_tol_mm}"
@@ -390,6 +507,42 @@ steps:
   # 2026-09-30: rail home moved ahead of the arm — the arm's program expects the
   # balance (on the rail) at home; on 09-30 it faulted (1/149, line 22) when the
   # rail had been left at a station.
+  - id: init_home_cell5
+    cell: cell5
+    action: zstage/home
+    timeout_s: 180.0
+    save_as: h5
+
+  - id: verify_init_cell5
+    assert: "${h5.z_mm} <= ${params.c5_z_tol_mm}"
+
+  - id: cell5_pump_init
+    cell: cell5
+    action: pump/initialize
+    body:
+      force: ${params.init_force}
+    timeout_s: 60.0
+    save_as: p5init
+
+  - id: verify_pump5_initialised
+    assert: "${p5init.plunger_uL} == 0"
+
+  - id: cell5_hotplate_target
+    cell: cell5
+    action: hotplate/temperature
+    body:
+      celsius: ${params.hotplate_target_c}
+    timeout_s: 30.0
+    save_as: hp_t
+
+  - id: cell5_heater_on
+    cell: cell5
+    action: hotplate/heater
+    body:
+      enabled: true
+    timeout_s: 30.0
+    save_as: hp_on
+
   - id: rail_home
     cell: cell4
     action: linear/move
@@ -397,12 +550,6 @@ steps:
       y_mm: ${params.rail_home_mm}   # 2026-09-30: was linear/home (server home_mm 5.0)
     timeout_s: 180.0
     save_as: railed
-    pause: >
-      THE ARM MUST BE CLEAR OF THE RAIL AND THE GANTRY FRAMES. Its reach
-      overlap has never been measured (GAP-8) and nothing in software
-      checks it — your eyes are the check. Next the rail homes and then
-      travels to cell1's station, ~470 mm away.
-
   # `linear/home` parks at the cell's `home_mm` (5 mm), NOT at the 0 mm
   # encoder origin: 0 is on the mechanical stop and homing onto it is
   # what trips Err16.0 (cell/balance_linear_cell.py home_linear). This
@@ -424,15 +571,6 @@ steps:
     cell: cell6
     action: arm/enable
     save_as: en
-    pause: >
-      FIRST MOTION OF THE RUN. cell6's arm energises now (holding torque
-      only, no movement), and the next step runs Task1.lua at the speeds
-      written into the script. Clear the arm's frame. Also confirm now,
-      before the rail moves at all: the carriage is parked NEAR HOME by
-      hand, and if the amp has been power-cycled since the positions were
-      taught, the rail has been re-homed since. Every rail number in this
-      file is meaningless otherwise.
-
   - id: verify_enabled
     assert: "${en.fault_cleared} == True"
 
@@ -508,11 +646,6 @@ steps:
       accel_pct: "${params.accel_pct}"
     timeout_s: 120.0
     save_as: c1z
-    pause: >
-      cell1's head descends over the vial to the taught hover height. It
-      must STOP ABOVE the vial — if it touches the pan, hit the e-stop.
-      The balance is a 220 g instrument.
-
   - id: verify_cell1_descended
     assert: "${c1z.z_mm} - ${params.c1_z_mm} <= ${params.gantry_tol_mm} and ${params.c1_z_mm} - ${c1z.z_mm} <= ${params.gantry_tol_mm}"
 
@@ -524,20 +657,14 @@ steps:
     cell: cell1
     action: pump/cycle
     body:
-      cycles: 1
+      cycles: ${params.dispense_cycles}
       volume_uL: "${params.volume_uL}"
       source_port: "${params.source_port}"
       dispense_port: "${params.dispense_port}"
-    timeout_s: 180.0
+    timeout_s: 360.0
     save_as: disp
-    pause: >
-      DISPENSE. cell1 draws from the reservoir and expels into the vial.
-      WATCH THE TIP: a valve that reports a port number has not proved
-      any liquid moved. Confirm by eye that liquid actually leaves the
-      tip and lands in the vial.
-
   - id: verify_dispensed
-    assert: "${disp.cycles_done} == 1"
+    assert: "${disp.cycles_done} == ${params.dispense_cycles}"
 
   - id: cell1_retract
     cell: cell1
@@ -616,12 +743,6 @@ steps:
       accel_pct: "${params.accel_pct}"
     timeout_s: 120.0
     save_as: c2z
-    pause: >
-      WATCH THIS ONE HARDEST. cell2's Z target is cell1's taught height,
-      not one measured on cell2's own frame. If cell2 sits even a few
-      millimetres lower relative to the rail, the head reaches the pan
-      instead of hovering. E-stop the moment it looks like touching.
-
   - id: verify_cell2_descended
     assert: "${c2z.z_mm} - ${params.c2_z_mm} <= ${params.gantry_tol_mm} and ${params.c2_z_mm} - ${c2z.z_mm} <= ${params.gantry_tol_mm}"
 
@@ -629,22 +750,15 @@ steps:
     cell: cell2
     action: pump/cycle
     body:
-      cycles: 1
+      cycles: ${params.dispense_cycles}
       volume_uL: "${params.volume_uL}"
       source_port: "${params.source_port}"
       dispense_port: "${params.dispense_port}"
-    timeout_s: 180.0
+    timeout_s: 360.0
     save_as: disp2
-    pause: >
-      DISPENSE, AND THE FIRST ONE THIS CELL HAS EVER RUN. cell2's port
-      numbers are cell1's, carried over untested — this pump's tubing
-      has never been traced. A valve that reports a port number has not
-      proved any liquid moved. WATCH THE TIP: confirm by eye that liquid
-      leaves it and lands in the vial. If nothing comes out, or it comes
-      from the wrong tube, abort here rather than let the run continue.
 
   - id: verify_dispensed2
-    assert: "${disp2.cycles_done} == 1"
+    assert: "${disp2.cycles_done} == ${params.dispense_cycles}"
 
   - id: cell2_retract
     cell: cell2
@@ -720,10 +834,6 @@ steps:
       accel_pct: "${params.accel_pct}"
     timeout_s: 120.0
     save_as: c3z
-    pause: >
-      Same inherited-height risk as cell2: this Z was taught on cell1,
-      not on cell3. Watch the gap to the pan and e-stop if it closes.
-
   - id: verify_cell3_descended
     assert: "${c3z.z_mm} - ${params.c3_z_mm} <= ${params.gantry_tol_mm} and ${params.c3_z_mm} - ${c3z.z_mm} <= ${params.gantry_tol_mm}"
 
@@ -731,22 +841,15 @@ steps:
     cell: cell3
     action: pump/cycle
     body:
-      cycles: 1
+      cycles: ${params.dispense_cycles}
       volume_uL: "${params.volume_uL}"
       source_port: "${params.source_port}"
       dispense_port: "${params.dispense_port}"
-    timeout_s: 180.0
+    timeout_s: 360.0
     save_as: disp3
-    pause: >
-      DISPENSE, AND THE FIRST ONE THIS CELL HAS EVER RUN. cell3's port
-      numbers are cell1's, carried over untested — this pump's tubing
-      has never been traced. A valve that reports a port number has not
-      proved any liquid moved. WATCH THE TIP: confirm by eye that liquid
-      leaves it and lands in the vial. If nothing comes out, or it comes
-      from the wrong tube, abort here rather than let the run continue.
 
   - id: verify_dispensed3
-    assert: "${disp3.cycles_done} == 1"
+    assert: "${disp3.cycles_done} == ${params.dispense_cycles}"
 
   - id: cell3_retract
     cell: cell3
@@ -785,61 +888,16 @@ steps:
   - id: verify_rail_at_end
     assert: "${railend.y_mm} - ${params.rail_end_mm} <= ${params.rail_tol_mm} and ${params.rail_end_mm} - ${railend.y_mm} <= ${params.rail_tol_mm}"
 
-  # ── Rail back to home, so the bench ends where a run starts ─────────
-  # Without this the next run begins with the carriage 965 mm out, and
-  # its first act would be a full-length homing traverse — the one move
-  # the EMI workaround says to avoid (hand-park near home first). Ending
-  # here instead means the bench is already in its starting state, and
-  # the operator does not have to walk it back by hand.
-  #
-  # ~965 mm in one move, so the longest single travel in the run.
-  - id: rail_return_home
-    cell: cell4
-    action: linear/move
-    body:
-      y_mm: "${params.rail_home_mm}"
-    timeout_s: 240.0
-    on_fail: retry
-    retries: 2
-    save_as: railback
+  # ── NO RETURN HOME: the rail stays at rail_end_mm for cell7 ────────
+  # The synthesis-only file sends the rail home here. This one does not,
+  # because the analysis arm picks from the balance at the end position.
 
-  - id: verify_rail_home
-    assert: "${railback.y_mm} - ${params.rail_home_mm} <= ${params.rail_tol_mm} and ${params.rail_home_mm} - ${railback.y_mm} <= ${params.rail_tol_mm}"
-
-  # ── Park the gantries at X 0, so the bench ends where a run starts ──
-  # Without this the heads stay at X 260 and Z 3. Harmless while power
-  # stays on — but a power cycle re-zeros each encoder WHERE IT STANDS,
-  # so the next run's `x_mm: 260` would be a no-op with the head 260 mm
-  # from the vial. That is precisely the state cell1 and cell2 were found
-  # in on 2026-08-27, and what the init homing above now costs two
-  # minutes to undo. Parking at 0 keeps the stored origin and the
-  # physical home in the same place, so a power cycle costs nothing.
-  #
-  # Z goes to z_up, not 0: 0 is inside the home switch's trigger region
-  # on cell3, where the pair splits (see z_up_mm).
-  - id: park_cell1
-    cell: cell1
-    action: gantry/move
-    body:
-      x_mm: 0.0
-      z_mm: "${params.z_up_mm}"
-      speed_pct: "${params.speed_pct}"
-      accel_pct: "${params.accel_pct}"
-    timeout_s: 120.0
-    save_as: p1
-
-  - id: park_cell2
-    cell: cell2
-    action: gantry/move
-    body:
-      x_mm: 0.0
-      z_mm: "${params.z_up_mm}"
-      speed_pct: "${params.speed_pct}"
-      accel_pct: "${params.accel_pct}"
-    timeout_s: 120.0
-    save_as: p2
-
-  - id: park_cell3
+  # ── cell3 alone goes back to X 0 before the analysis arm starts ─────
+  # Added 2026-09-17. cell3's station is the closest to the rail end where
+  # cell7 works, so this one head is cleared out of the way while the
+  # other two stay where cellN_retract left them. Z stays at z_up — the
+  # head only travels sideways.
+  - id: cell3_x_home
     cell: cell3
     action: gantry/move
     body:
@@ -848,15 +906,233 @@ steps:
       speed_pct: "${params.speed_pct}"
       accel_pct: "${params.accel_pct}"
     timeout_s: 120.0
-    save_as: p3
+    save_as: c3home
 
-  - id: verify_parked
-    assert: "${p1.x_mm} <= ${params.gantry_tol_mm} and ${p2.x_mm} <= ${params.gantry_tol_mm} and ${p3.x_mm} <= ${params.gantry_tol_mm}"
+  - id: verify_cell3_x_home
+    assert: "${c3home.x_mm} <= ${params.gantry_tol_mm} and ${c3home.z_mm} <= ${params.z_up_mm} + ${params.gantry_tol_mm}"
+
+  # ── The other gantries do NOT park here any more ────────────────────
+  # They used to go to X 0 at this point, before the analysis arm ran.
+  # 2026-09-17: the operator moved that return to the very end so it
+  # happens together with the rail's, which means the heads stay where
+  # cellN_retract left them (their own X, Z_up) while cell7 works at the
+  # rail end. cell3's station is the closest to that end — watch the
+  # clearance there on the first runs.
+
+  # ── Analysis hand-off: cell7 runs its two programs, in order ─────────
+  # After the gantries park, so all three heads are at X 0 and Z_up and
+  # out of the arm's way while the rail sits at its end.
+  #
+  # THE PROGRAM ASSERTS WERE WEAK AT FIRST, KNOWINGLY — now set from
+  # the first clean run; see analysis_*_last_line / _min_s. `completed` only means the
+  # controller went idle unfaulted, and `last_line > 0` also passes a
+  # script that exits early — cell6 did exactly that on 2026-09-13
+  # (line 12 of 29, 5.7 s). The threshold that caught it came from
+  # measuring complete runs; these two programs have never been run from
+  # here, so there is nothing to measure against yet. After the first
+  # clean run, set a last_line and an elapsed floor from its runlog, the
+  # way arm_last_line / arm_min_elapsed_s were set for cell6.
+  - id: arm7_enable
+    cell: cell7
+    action: arm/enable
+    save_as: en7
+
+  - id: verify_arm7_enabled
+    assert: "${en7.fault_cleared} == True"
+
+  - id: arm7_pick_and_place_vial
+    cell: cell7
+    action: arm/program
+    body:
+      name: "${params.analysis_program_vial}"
+    # Above the cell's max_program_s (300 s), for the same reason as cell6.
+    timeout_s: 360.0
+    save_as: prog7v
+
+  - id: verify_arm7_vial
+    assert: "${prog7v.completed} == True and ${prog7v.last_line} >= ${params.analysis_vial_last_line} and ${prog7v.elapsed_s} >= ${params.analysis_vial_min_s}"
+
+  - id: arm7_pick_and_place_head
+    cell: cell7
+    action: arm/program
+    body:
+      name: "${params.analysis_program_head}"
+    timeout_s: 360.0
+    save_as: prog7h
+
+  - id: verify_arm7_head
+    assert: "${prog7h.completed} == True and ${prog7h.last_line} >= ${params.analysis_head_last_line} and ${prog7h.elapsed_s} >= ${params.analysis_head_min_s}"
+
+  # ── Sensor read, then wash ──────────────────────────────────────────
+  # Same arm, straight after the head is placed. Sequential like the rest
+  # of this file: cell6 and cell7 never share a parallel block until the
+  # reach overlap is measured (cell7.toml, GAP-8).
+  - id: arm7_zensor
+    cell: cell7
+    action: arm/program
+    body:
+      name: "${params.analysis_program_zensor}"
+    timeout_s: 360.0
+    save_as: prog7z
+
+  - id: verify_arm7_zensor
+    assert: "${prog7z.completed} == True and ${prog7z.last_line} >= ${params.analysis_zensor_last_line} and ${prog7z.elapsed_s} >= ${params.analysis_zensor_min_s}"
+
+  # cell5: the analysis pump dispenses into the vial while it sits in the
+  # analysis holder (after zensor.lua, before ZensorWash.lua — operator's order,
+  # 2026-10-12). Z goes from its upper home to the taught point in one move,
+  # the pump runs one cycle, Z homes again before the arm comes back.
+  - id: cell5_z_dispense
+    cell: cell5
+    action: zstage/move
+    body:
+      z_mm: ${params.c5_z_dispense_mm}
+      speed_pct: ${params.speed_pct}
+      accel_pct: ${params.accel_pct}
+    timeout_s: 120.0
+    save_as: c5z
+
+  - id: verify_cell5_at_dispense
+    assert: "${c5z.z_mm} - ${params.c5_z_dispense_mm} <= ${params.c5_z_tol_mm} and ${params.c5_z_dispense_mm} - ${c5z.z_mm} <= ${params.c5_z_tol_mm}"
+
+  - id: cell5_dispense
+    cell: cell5
+    action: pump/cycle
+    body:
+      cycles: 1
+      volume_uL: ${params.c5_volume_uL}
+      source_port: ${params.source_port}
+      dispense_port: ${params.dispense_port}
+    timeout_s: 60.0
+    save_as: disp5
+
+  - id: verify_dispensed5
+    assert: "${disp5.cycles_done} == 1"
+
+  - id: cell5_z_home
+    cell: cell5
+    action: zstage/home
+    timeout_s: 180.0
+    save_as: c5home
+
+  - id: verify_cell5_home
+    assert: "${c5home.z_mm} <= ${params.c5_z_tol_mm}"
+
+  - id: arm7_zensor_wash
+    cell: cell7
+    action: arm/program
+    body:
+      name: "${params.analysis_program_wash}"
+    timeout_s: 360.0
+    save_as: prog7w
+
+  - id: verify_arm7_wash
+    assert: "${prog7w.completed} == True and ${prog7w.last_line} >= ${params.analysis_wash_last_line} and ${prog7w.elapsed_s} >= ${params.analysis_wash_min_s}"
+
+  # The closing move of the analysis arm.
+  - id: cell5_fan_on
+    cell: cell5
+    action: fan/switch
+    body:
+      enabled: true
+    timeout_s: 30.0
+    save_as: fan_on
+
+  - id: verify_fan_on
+    assert: "${fan_on.is_on} == True"
+
+  - id: arm7_init_head
+    cell: cell7
+    action: arm/program
+    body:
+      name: "${params.analysis_program_init_head}"
+    timeout_s: 360.0
+    save_as: prog7i
+
+  - id: verify_arm7_init_head
+    assert: "${prog7i.completed} == True and ${prog7i.last_line} >= ${params.analysis_init_head_last_line} and ${prog7i.elapsed_s} >= ${params.analysis_init_head_min_s}"
+
+  # ── Shutdown: rail home WHILE the three gantries re-home ────────────
+  # The one parallel block in this chain, and it is deliberate. Everything
+  # else here is sequential because arm, rail and gantry share bench space
+  # that has never been measured (GAP-8) and L2's lock is per cell.
+  #
+  # WHY THIS PARTICULAR MIX IS SAFE: gantry/home only ever moves a head
+  # UP — it drives Z toward the home switch, then traverses X — so no head
+  # can descend into the rail's path while the carriage is running under
+  # it. The heads are already parked at Z_up from the steps above, and
+  # homing lifts them further. A descent in this block would be a
+  # different matter entirely; do not add one.
+  #
+  # Homing here also leaves every encoder zero freshly set at its switch,
+  # so a power cycle after the run costs nothing. Since 2026-09-17 this is
+  # the ONLY place the gantries return to origin — the mid-run park is
+  # gone — so a failure here leaves the heads out at their working X.
+  #
+  # The three gantries run CONCURRENTLY with each other, not one after
+  # the other: a parallel block cannot hold a sequence. Strict cell1 ->
+  # cell2 -> cell3 ordering would mean giving up running them with the
+  # rail.
+  - id: shutdown_rail_home_and_gantry_init
+    parallel:
+      - id: rail_home_shutdown
+        cell: cell4
+        action: linear/move
+        body:
+          y_mm: "${params.rail_home_mm}"
+        timeout_s: 240.0
+        on_fail: retry
+        retries: 2
+        save_as: railback
+      - id: init_cell1_shutdown
+        cell: cell1
+        action: gantry/home
+        timeout_s: 180.0
+        save_as: h1end
+      - id: init_cell2_shutdown
+        cell: cell2
+        action: gantry/home
+        timeout_s: 180.0
+        save_as: h2end
+      - id: init_cell3_shutdown
+        cell: cell3
+        action: gantry/home
+        timeout_s: 180.0
+        save_as: h3end
+
+  - id: verify_shutdown
+    assert: "${railback.y_mm} - ${params.rail_home_mm} <= ${params.rail_tol_mm} and ${params.rail_home_mm} - ${railback.y_mm} <= ${params.rail_tol_mm} and ${h1end.z_mm} <= ${params.gantry_tol_mm} and ${h2end.z_mm} <= ${params.gantry_tol_mm} and ${h3end.z_mm} <= ${params.gantry_tol_mm}"
 
   # ── Final witnesses ─────────────────────────────────────────────────
   # Read the cells once more through status rather than through the move
   # responses, so the verdict does not rest on the same readings the
   # moves already returned.
+  # 2026-10-14: fan off AFTER the shutdown block — the block ends when its longest
+  # child (the rail's ~40 s return home) ends, so this fires as the rail reaches
+  # home. Inside the block it fired at the block's start (fan ran only 15 s).
+  - id: cell5_fan_off
+    cell: cell5
+    action: fan/switch
+    body:
+      enabled: false
+    timeout_s: 30.0
+    save_as: fan_off
+
+  # 2026-10-14: retry — the hotplate's USB (hub 3-4) dropped exactly as this ran
+  # on run 20261013T154256Z and the heater stayed on until a manual retry.
+  - id: cell5_heater_off
+    cell: cell5
+    action: hotplate/heater
+    body:
+      enabled: false
+    timeout_s: 30.0
+    on_fail: retry
+    retries: 2
+    save_as: hp_off
+
+  - id: verify_fan_heater_off
+    assert: "${fan_off.is_on} == False"
+
   - id: final_rail
     cell: cell4
     action: status
