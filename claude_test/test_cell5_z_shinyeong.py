@@ -51,22 +51,38 @@ def _read(motor: MKSMotor) -> float:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="cell5 single Z, direct drive.")
-    parser.add_argument("commands", nargs="+", help="pos | move:<mm> | home:<0|1>")
+    parser = argparse.ArgumentParser(
+        description="cell5 single Z, direct drive."
+    )
+    parser.add_argument(
+        "commands", nargs="+", help="pos | move:<mm> | home:<0|1>"
+    )
     parser.add_argument("--max-mm", type=float, default=150.0)
     parser.add_argument("--speed-pct", type=int, default=10)
     parser.add_argument("--accel-pct", type=int, default=0)
-    parser.add_argument("--max-travel", type=float, default=None,
+    parser.add_argument(
+        "--max-travel",
+        type=float,
+        default=None,
         help="override the driver instance's _max_travel_mm (class default 400). cell5's lower switch sits "
-             "~422.6 mm below the upper (home) switch, measured 2026-10-12, so the dispense point needs ~450.")
-    parser.add_argument("--down-positive", action="store_true",
+        "~422.6 mm below the upper (home) switch, measured 2026-10-12, so the dispense point needs ~450.",
+    )
+    parser.add_argument(
+        "--down-positive",
+        action="store_true",
         help="flip the frame so +mm moves DOWN (measured 2026-10-08: with the default, +mm is up). "
-             "Use after a power-cycle at the top, since the driver refuses negative mm.")
+        "Use after a power-cycle at the top, since the driver refuses negative mm.",
+    )
     args = parser.parse_args(argv)
 
     prepare_usb_nodes()
     release_ftdi_sio()
-    motor = MKSMotor.open(serial=SERIAL_Z, coord_invert=not Z_COORD_INVERT if args.down_positive else Z_COORD_INVERT)
+    motor = MKSMotor.open(
+        serial=SERIAL_Z,
+        coord_invert=not Z_COORD_INVERT
+        if args.down_positive
+        else Z_COORD_INVERT,
+    )
     if args.max_travel is not None:
         motor._max_travel_mm = args.max_travel  # noqa: SLF001 — instance only; the driver is a submodule
     code = 0
@@ -85,11 +101,17 @@ def main(argv: list[str] | None = None) -> int:
                     code = 1
                     break
                 start = _read(motor)
-                MKSMotor.move_sync([motor], [(target, args.speed_pct, args.accel_pct)])
+                MKSMotor.move_sync(
+                    [motor], [(target, args.speed_pct, args.accel_pct)]
+                )
                 reached = _read(motor)
-                print(f"  move: {start:.3f} -> commanded {target:g}, reads {reached:.3f} mm (moved {reached - start:+.3f})")
+                print(
+                    f"  move: {start:.3f} -> commanded {target:g}, reads {reached:.3f} mm (moved {reached - start:+.3f})"
+                )
                 if abs(reached - target) > ARRIVAL_TOLERANCE_MM:
-                    print("[FAULT] did not arrive — limit, binding or dropped command")
+                    print(
+                        "[FAULT] did not arrive — limit, binding or dropped command"
+                    )
                     code = 2
                     break
             elif name == "home":
