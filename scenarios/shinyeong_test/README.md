@@ -7,15 +7,16 @@ Scenario `.yaml` 파일들에 대한 설명.
 전체적인 구조, Device 구동 low-level code 등에 대한 자세한 설명은 해당 repo 참조 바람
 https://github.com/coport-uni/InnoCORESDL_Sungwoo
 
-> 기준 시점: 2026-10-14 02:30 (벤치 체크아웃 `InnoCORESDL_Sungwoo` `main`, HEAD `57de7af` + 미커밋 작업 트리). 10-14 02:30 검증: 18개 파일의 스텝 수·params·run 기록을 실제 파일과 대조해 갱신함.
+> 기준 시점: 2026-10-14 15:30 (벤치 체크아웃 `InnoCORESDL_Sungwoo`, upstream `main` 570edd8 + 미커밋 작업 트리). 이 폴더의 YAML 6개(1014 계열 4 + 보조 2)의 스텝 수·params·run 기록을 실제 파일과 대조해 작성함. `init_1014` / `synthesis_1014` / `analysis_1014` 는 10-14 에 터미널에서 각각 1회 실행(아래 Output 은 그 터미널 로그).
 
 Contents
 
-1. Synthesis — 합성 단계만 (2개)
-2. Analysis — 분석 단계만 (2개)
-3. 통합 Process(Synthesis+Analysis) — 합성 → 분석 전체 (1개)
-4. 보조·검증 — 준비·측정 (2개)
-5. 공통 `params`
+1. init - 작동 전 cell(Gantry, Linear Rail 등의 장비) 원점 초기화 및 Hot plate 작동
+2. Synthesis — 합성 단계
+3. Analysis — 분석 단계
+4. 통합 Process(Synthesis+Analysis)
+5. 보조·검증 — 준비·측정 (2개)
+6. 공통 `params`
 
 장비 명칭
 
@@ -40,8 +41,8 @@ cd $REPO
 ```
 - **Input**:
 	- args: `--step-mode` (스텝별 확인), `--param KEY=VALUE` (params 덮어쓰기, 반복 가능), `--config <toml>` (주소록, 기본 `orchestrator/config.toml`)
-	- param: 각 YAML 의 `params` 블록. 값은 §5 표. 파일마다 쓰는 키만 아래에 적는다.
-	- 전제(모든 파일): 그 파일이 쓰는 cell 서버가 모두 떠 있고 `orchestrator/config.toml` 에 주석 해제돼 있을 것. 첫 모션 스텝에서 콘솔에 `y` 를 입력해야 진행된다(우회 불가).
+	- param: 각 YAML 의 `params` 블록. 값은 §6 표. 파일마다 쓰는 키만 아래에 적는다.
+	- 전제(모든 파일): 그 파일이 쓰는 cell 서버가 모두 떠 있고 `orchestrator/config.toml` 에 주석 해제돼 있을 것. 첫 모션 스텝에서 콘솔에 `!! next step '<id>' moves hardware … [enter]=continue, a=abort >` 가 뜨며 **Enter** 를 쳐야 진행된다(`a` 는 중단, 우회 불가). cell5 는 NUC2 `InnoCORESDL_shinyeong` 체크아웃에서 `claude_test/test_cell5_server_shinyeong.py --config server/nuc2/cell5.toml --max-travel 450` 으로 띄운다(정식 `python -m server` 는 Z 400 mm 한계라 421 을 못 감; 포트 17062 는 한 프로세스만).
 
 - **Output**: `runs/<UTC>-<name>/` (gitignore)
 	- `meta.json` — `state`(completed / failed / aborted), 시작·종료 시각, `git_commit`, 그때의 주소록
@@ -54,158 +55,429 @@ cd $REPO
 
 - **안전(모든 파일 공통)**: 레일(cell4)은 소프트웨어로 멈추지 않고(GAP-1), 다른 cell 의 `POST /v1/stop` 도 진행 중 move 뒤에 큐된다(GAP-9). **물리 e-stop 을 든 사람이 있어야 한다.** e-stop 뒤에는 cell7 gripper 를 다시 활성화할 것(안 하면 lua 가 11/14행에서 끝남). 상세는 루트 README `### Safety gaps`.
 
+- **명명 규칙 예외**: `init_1014` / `synthesis_1014` / `analysis_1014` / `1cycle_1014` 는 작업자 지정 이름으로 `test_…_shinyeong` 규칙의 예외. `1cycle_1014.yaml` 의 YAML `name` 은 스키마가 숫자 시작을 막아 `one_cycle_1014`(runlog 폴더명이 그 이름).
 
+
+
+---
+
+## Init
+
+### `init_1014.yaml`
+
+시나리오 실행 전 cell들의 원점 초기화 및 작동 테스트 단계
+약 30s ~ 1min 정도가 소요
+Hot plate 는 여기서 on 만 시킨다 — `analysis_1014.yaml` 끝(`cell5_heater_off`)에서 꺼지므로, 분석까지 가지 않을 때는 별도로 종료할 것:
+`curl -s -X POST http://192.168.0.120:17062/v1/hotplate/heater -H 'Content-Type: application/json' -d '{"enabled": false}'`
+
+- **Directory**: `scenarios/shinyeong_test/init_1014.yaml` (29 스텝 = `1cycle_1014` 의 1~4 단계)
+
+- **Run Command**:
+```Terminal
+cd ~/workspace/InnoCOREServer/InnoCORESDL_Sungwoo
+.venv/bin/python -m orchestrator validate scenarios/shinyeong_test/init_1014.yaml
+.venv/bin/python -m orchestrator run scenarios/shinyeong_test/init_1014.yaml
+```
+- **Input**:
+	- args: 없음(첫 모션 게이트 `init_home_cell1` 에서 Enter)
+	- param: `hotplate_target_c`(100), `init_force`(2), `rail_home_mm`(17.98), `rail_tol_mm`, `z_up_mm`/`gantry_tol_mm`(헤드 up 판정), `c5_z_tol_mm`. 나머지 키는 `1cycle_1014` 와 같지만 여기서는 쓰이지 않음
+	- 전제: 7개 cell 서버 전부. 저울 위 vial 없음.
+
+- **Output**: `d1..d7`, `h1/h2/h3`(갠트리 홈), `h5`(cell5 Z 홈), `p5init`, `hp_t`/`hp_on`, `railed`. 끝 상태: 갠트리 3개 0, cell5 Z 상단(0), 분석 펌프 plunger 0, 히터 on(100 °C 로 가열 시작), 레일 17.98 ± 2. 1 run `20261014T052721Z` completed(약 1 분).
+  
+```Terminal
+init_1014: ok (29 steps)
+run 20261014T052721Z-init_1014 started (29 steps)
+  [ok ] diag_cell6  cell6/diagnose  0.007s
+        pump={'present': False, 'ok': True}, balance={'present': False, 'ok': True}, stage={'present': False, 'ok': True}, ok_to_initialize=True, arm={'ok': True, 'robot_id': 'fr5_a', 'ip': '192.168.0.58', 'reachable': True, 'gripper': True, 'joints_deg': [-46.39798306002475, -119.2577883276609, 116.751165106745, -88.692518177599, -91.15867690284654, 0.09311185024752476], 'fault': [0, 0], 'ready': True, 'detail': None}, program={'running': False, 'name': None, 'last': {'name': 'Task1_original.lua', 'outcome': 'completed', 'last_line': 29, 'elapsed_s': 29.817440386861563}, 'dir': '/fruser', 'allowed': ['Test1.lua', 'Task1.lua', 'Task1_original.lua']}
+  [ok ] diag_cell7  cell7/diagnose  0.007s
+        pump={'present': False, 'ok': True}, balance={'present': False, 'ok': True}, stage={'present': False, 'ok': True}, ok_to_initialize=True, arm={'ok': True, 'robot_id': 'fr5_b', 'ip': '192.168.0.59', 'reachable': True, 'gripper': True, 'joints_deg': [-42.30084409808168, -122.6876982131807, 120.7571501779084, -90.27759514232673, -90.29282371596534, -2.112855816831683], 'fault': [0, 0], 'ready': True, 'detail': None}, program={'running': False, 'name': None, 'last': {'name': 'init_head.lua', 'outcome': 'completed', 'last_line': 29, 'elapsed_s': 14.233865869231522}, 'dir': '/fruser', 'allowed': ['Cell7Test1.lua', 'pick_and_place_vial.lua', 'pick_and_place_head.lua', 'zensor.lua', 'ZensorWash.lua', 'init_head.lua']}
+  [ok ] diag_cell4  cell4/diagnose  0.07s
+        pump={'present': False, 'ok': True}, balance={'model': 'N     -   6.6267 g', 'serial_number': 'SerNo.    0047304196', 'ok': True}, stage={'model': 'MDDLN45SL', 'version': 'Ver.1.016', 'ok': True}, ok_to_initialize=True
+  [ok ] diag_cell1  cell1/diagnose  0.709s
+        pump={'present': True, 'software_version': '8.33', 'serial_number': '32656', 'config': '4 way|9600|100K|TSY|high|XLP|AUTO', 'supply_volts': 24.0, 'valve': '2', 'ok': True}, balance={'present': False, 'ok': True}, stage={'serial_x': 'NTAMU6TO', 'x_mm': -0.0, 'z_a_mm': -0.0, 'z_b_mm': -0.0, 'ok': True}, ok_to_initialize=True
+  [ok ] diag_cell2  cell2/diagnose  0.716s
+        pump={'present': True, 'software_version': '8.33', 'serial_number': '50487', 'config': '4 way|9600|100K|TSY|high|XLP|AUTO', 'supply_volts': 24.0, 'valve': '2', 'ok': True}, balance={'present': False, 'ok': True}, stage={'serial_x': 'NTB19XKA', 'x_mm': -0.0, 'z_a_mm': -0.0, 'z_b_mm': -0.0, 'ok': True}, ok_to_initialize=True
+  [ok ] diag_cell3  cell3/diagnose  0.716s
+        pump={'present': True, 'software_version': '8.33', 'serial_number': '30308', 'config': '4 way|9600|100K|TSY|high|XLP|AUTO', 'supply_volts': 24.0, 'valve': '2', 'ok': True}, balance={'present': False, 'ok': True}, stage={'serial_x': 'NTB3FXCE', 'x_mm': -0.0, 'z_a_mm': -0.0, 'z_b_mm': -0.0, 'ok': True}, ok_to_initialize=True
+  [ok ] diag_cell5  cell5/diagnose  1.217s
+        pump={'software_version': '8.33', 'serial_number': '30946', 'config': '4 way|9600|100K|TSY|high|XLP|AUTO', 'supply_volts': 24.0, 'valve': '2', 'ok': True}, balance={'present': False, 'ok': True}, stage={'axes': 1, 'serial': 'NTB3EP5R', 'ok': True}, ok_to_initialize=True
+  [ok ] verify_arm_ready  assert/assert  0.0s
+        True == True and True == True and False == False
+  [ok ] verify_arm7_ready  assert/assert  0.0s
+        True == True and True == True and False == False
+  [ok ] verify_rail_and_balance  assert/assert  0.0s
+        True == True and True == True
+  [ok ] verify_cell1_has_pump  assert/assert  0.0s
+        True == True and True == True
+  [ok ] verify_cell23_gantries  assert/assert  0.0s
+        True == True and True == True and True == True and True == True
+  [ok ] verify_cell5  assert/assert  0.0s
+        True == True and True == True and True == True
+  [ok ] verify_all_gantries_up  assert/assert  0.0s
+        -0.0 <= 3.0 + 0.5 and -0.0 <= 3.0 + 0.5 and -0.0 <= 3.0 + 0.5 and -0.0 <= 3.0 + 0.5 and -0.0 <= 3.0 + 0.5 and -0.0 <= 3.0 + 0.5
+
+  !! next step 'init_home_cell1' moves hardware. Clear the frame, keep the e-stop in reach.
+  [enter]=continue, a=abort > 
+  [ok ] init_home_cell1  cell1/gantry/home  5.634s
+        x_mm=0.0006103515625, z_mm=0.0
+  [ok ] verify_init_cell1  assert/assert  0.0s
+        0.0006103515625 <= 0.5 and 0.5 + 0.0006103515625 >= 0 and 0.0 <= 0.5
+  [ok ] init_home_cell2  cell2/gantry/home  5.576s
+        x_mm=0.0006103515625, z_mm=0.0
+  [ok ] verify_init_cell2  assert/assert  0.0s
+        0.0006103515625 <= 0.5 and 0.5 + 0.0006103515625 >= 0 and 0.0 <= 0.5
+  [ok ] init_home_cell3  cell3/gantry/home  5.816s
+        x_mm=0.0, z_mm=0.0
+  [ok ] verify_init_cell3  assert/assert  0.0s
+        0.0 <= 0.5 and 0.5 + 0.0 >= 0 and 0.0 <= 0.5
+  [ok ] init_home_cell5  cell5/zstage/home  2.628s
+        z_mm=0.0
+  [ok ] verify_init_cell5  assert/assert  0.0s
+        0.0 <= 0.5
+  [ok ] cell5_pump_init  cell5/pump/initialize  11.212s
+        valve=4, plunger_uL=0.0
+  [ok ] verify_pump5_initialised  assert/assert  0.0s
+        0.0 == 0
+  [ok ] cell5_hotplate_target  cell5/hotplate/temperature  0.106s
+        target_c=100.0
+  [ok ] cell5_heater_on  cell5/hotplate/heater  0.702s
+        heating=True, target_c=100.0
+  [ok ] rail_home  cell4/linear/move  0.028s
+        y_mm=18.64
+  [ok ] verify_railed  assert/assert  0.0s
+        18.64 - 17.98 <= 2.0 and 17.98 - 18.64 <= 2.0
+  [ok ] rail_park_home  cell4/linear/move  0.028s
+        y_mm=18.64
+
+run 20261014T052721Z-init_1014: completed
+runlog: runs/20261014T052721Z-init_1014
+```
+
+- **Process 순서**
+1. `diag_cell6/7/4/1/2/3/5` + `verify_arm_ready`/`verify_arm7_ready`/`verify_rail_and_balance`/`verify_cell1_has_pump`/`verify_cell23_gantries`/`verify_cell5`/`verify_all_gantries_up`: 7개 cell 의 `diagnose` 를 읽어 팔 2개 ready·fault 없음, 저울 ok, cell1 펌프 있음, cell2/3 펌프·갠트리 ok, cell5 pump·stage ok, 헤드 3개가 올라가 있음(Z ≤ 3.5 mm). 하나라도 아니면 아무것도 움직이기 전에 중단.
+2. `init_home_cell1` → `init_home_cell2` → `init_home_cell3`: 갠트리 3개를 차례로 홈(Z 먼저 스위치까지 올린 뒤 X). 첫 모션 게이트가 여기서 뜬다.
+3. `init_home_cell5`: cell5 Z 를 상단 스위치로(영점 설정). `cell5_pump_init`: 분석 펌프 홈(`force` = `init_force`, plunger 0 — 시린지 잔량이 노즐로 나온다).
+4. `cell5_hotplate_target`(`hotplate_target_c`) → `cell5_heater_on`: 핫플레이트 설정·히터 on. 온도 도달을 기다리지 않는다.
+5. `rail_home` → `rail_park_home`: 레일을 `rail_home_mm` 로(서버 home_mm 5.0 이 아니라 명시적 `linear/move`).
 
 ---
 
 ## Synthesis
 
-### `test_synthesis_seq_shinyeong.yaml`
+### `synthesis_1014.yaml`
 
-합성 단계 원본 — cell6 arm 이 vial 을 놓고, 레일이 cell1→2→3 아래로 운반, 각 cell 이 분주. **`pause` 9개**가 각 하강·분주 앞에 있어 작업자가 헤드와 vial 사이 틈을 눈으로 확인한다. **주의(10-14)**: 이 파일은 아직 `c1/c2_z_mm` 225 와 1 × 100 µL 분주를 갖고 있다 — `_free` 와 통합 파일에만 10-13/14 의 223 mm·20 cycle 이 반영돼 있다. 게이트판을 쓸 땐 `--param c1_z_mm=223 --param c2_z_mm=223` 을 주거나 파일을 먼저 맞출 것. **헤더에 모든 좌표의 측정 근거와 순서의 이유가 적혀 있다** — 다른 합성 파일 헤더는 전부 이 파일을 가리킨다.
+합성 단계만 실행하는 시나리오 `.yaml`파일
+약 10min 정도 소요(2 mL 분주 3회가 각 139 s)
+`init_1014.yaml` 을 먼저 실행하고 이어서 실행할 것 — 프리플라이트 `verify_rail_home_pre` 가 레일이 홈(17.98 ± 2)에 있는지 확인하고 아니면 거부한다
+원활한 무게 측정을 위해 반드시 vial을 Tare 후 준비 단계 모듈에 배치할 것
+작동 중 Gantry system의 각 축의 ball-screw 모터들이 end-stop 스위치에 닿지 않을 경우 그대로 Process가 정지됨. 해당 오류의 경우 문제가 발생한 ball-screw 모터의 케이블을 분리 후 물리적으로 end-stop에 위치시킨 뒤 재연결 하는 것으로 해결 가능
+z축의 경우 좌우 balance가 안맞는 문제가 종종 발생. 해당 오류의 경우 문제의 Gantry system 축들을 서로 분리 후 오류 축 ball-screw 모터의 커버를 분리 뒤 고정 나사를 충분히 조이는 것으로 해결 가능
+58번 로봇팔의 경우 로봇팔과 그리퍼 모두 교시 모드(파란색 LED 점등)가 켜져 있어야 작동 가능
+3회 정도 실행 후 용매가 부족한 경우가 있으므로, 여분을 충분히 준비할 것(각 펌프 공급액 2 mL/run 이상, vial ≥ 6 mL)
 
-- **Directory**: `scenarios/shinyeong_test/test_synthesis_seq_shinyeong.yaml` (73 스텝)
+- **Directory**: `scenarios/shinyeong_test/synthesis_1014.yaml` (59 스텝 = 프리플라이트 11 + `1cycle_1014` 의 5~7 단계)
 
 - **Run Command**:
 ```Terminal
-cd $REPO
-.venv/bin/python -m orchestrator run scenarios/shinyeong_test/test_synthesis_seq_shinyeong.yaml --step-mode
+cd ~/workspace/InnoCOREServer/InnoCORESDL_Sungwoo
+.venv/bin/python -m orchestrator validate scenarios/shinyeong_test/synthesis_1014.yaml
+.venv/bin/python -m orchestrator run scenarios/shinyeong_test/synthesis_1014.yaml
+.venv/bin/python -m orchestrator run scenarios/shinyeong_test/synthesis_1014.yaml --param dispense_cycles=5   # 500 µL/cell (호스 채우기·짧은 확인)
 ```
 - **Input**:
-	- args: 게이트가 목적인 파일이므로 `--step-mode` 권장
-	- param: `program`(Task1_original.lua), `arm_last_line`/`arm_min_elapsed_s`, `rail_home_mm`, `rail_cell1/2/3_mm`, `rail_end_mm`, `c1/2/3_x_mm`, `c1/2/3_z_mm`, `volume_uL`(100), `source_port`/`dispense_port`/`init_force`, `z_up_mm`, `rail_tol_mm`/`gantry_tol_mm`
-	- 전제: cell1, 2, 3, 4, 6 서버. 저울 위에 이전 vial 없음.
+	- args: 없음(첫 모션 게이트 `arm_enable` 에서 Enter). 양을 바꿀 땐 `--param dispense_cycles=N`
+	- param: `program`(Task1_original.lua), `arm_last_line`/`arm_min_elapsed_s`, `rail_home_mm`/`rail_cell1/2/3_mm`/`rail_end_mm`/`rail_tol_mm`, `c1/2/3_x_mm`, `c1/2/3_z_mm`(223), `volume_uL`(100) × `dispense_cycles`(20), `source_port`/`dispense_port`/`init_force`, `z_up_mm`/`gantry_tol_mm`, `speed_pct`/`accel_pct`
+	- 전제: cell1, 2, 3, 4, 6 서버. 레일 홈, 헤드 3개 up, 저울 비어 있음(`init_1014` 직후 상태). 핫플레이트는 건드리지 않는다.
 
-- **Output**: 레일이 end 까지 간 뒤 **홈으로 돌아와** 끝남. `vars.json` 에 `prog`(cell6 lua 의 `completed`/`last_line`/`elapsed_s`), `disp`/`disp2`/`disp3`(`cycles_done`). 이 이름의 run 기록은 없음(실제 실행은 아래 `_free` 로).
+- **Output**: `prog`(cell6 `completed`/`last_line`/`elapsed_s`), `rail1/2/3`, `disp/disp2/disp3`(`cycles_done` == 20), `railend`, `c3home`. 끝 상태: 레일 978 ± 2 에 **머문 채**, vial 이 저울 위(3 × 2 mL), cell1/2 는 X 250·Z 3, cell3 는 X 0·Z 3. 1 run `20261014T053114Z` completed(약 10 분).
+  
+```Terminal
+synthesis_1014: ok (59 steps)
+run 20261014T053114Z-synthesis_1014 started (59 steps)
+  [ok ] diag_cell6  cell6/diagnose  0.007s
+        pump={'present': False, 'ok': True}, balance={'present': False, 'ok': True}, stage={'present': False, 'ok': True}, ok_to_initialize=True, arm={'ok': True, 'robot_id': 'fr5_a', 'ip': '192.168.0.58', 'reachable': True, 'gripper': True, 'joints_deg': [-46.39798306002475, -119.2580058787128, 116.751382657797, -88.69273572865097, -91.15867690284654, 0.09289429919554454], 'fault': [0, 0], 'ready': True, 'detail': None}, program={'running': False, 'name': None, 'last': {'name': 'Task1_original.lua', 'outcome': 'completed', 'last_line': 29, 'elapsed_s': 29.817440386861563}, 'dir': '/fruser', 'allowed': ['Test1.lua', 'Task1.lua', 'Task1_original.lua']}
+  [ok ] diag_cell4  cell4/diagnose  0.074s
+        pump={'present': False, 'ok': True}, balance={'model': 'N     -   6.6270', 'serial_number': 'SerNo.    0047304196', 'ok': True}, stage={'model': 'MDDLN45SL', 'version': 'Ver.1.016', 'ok': True}, ok_to_initialize=True
+  [ok ] diag_cell1  cell1/diagnose  0.709s
+        pump={'present': True, 'software_version': '8.33', 'serial_number': '32656', 'config': '4 way|9600|100K|TSY|high|XLP|AUTO', 'supply_volts': 24.0, 'valve': '2', 'ok': True}, balance={'present': False, 'ok': True}, stage={'serial_x': 'NTAMU6TO', 'x_mm': -0.0, 'z_a_mm': -0.0, 'z_b_mm': -0.0, 'ok': True}, ok_to_initialize=True
+  [ok ] diag_cell2  cell2/diagnose  0.716s
+        pump={'present': True, 'software_version': '8.33', 'serial_number': '50487', 'config': '4 way|9600|100K|TSY|high|XLP|AUTO', 'supply_volts': 24.0, 'valve': '2', 'ok': True}, balance={'present': False, 'ok': True}, stage={'serial_x': 'NTB19XKA', 'x_mm': -0.0, 'z_a_mm': -0.0, 'z_b_mm': 0.0006103515625, 'ok': True}, ok_to_initialize=True
+  [ok ] diag_cell3  cell3/diagnose  0.715s
+        pump={'present': True, 'software_version': '8.33', 'serial_number': '30308', 'config': '4 way|9600|100K|TSY|high|XLP|AUTO', 'supply_volts': 24.0, 'valve': '2', 'ok': True}, balance={'present': False, 'ok': True}, stage={'serial_x': 'NTB3FXCE', 'x_mm': -0.0, 'z_a_mm': -0.0, 'z_b_mm': -0.0, 'ok': True}, ok_to_initialize=True
+  [ok ] verify_arm_ready  assert/assert  0.0s
+        True == True and True == True and False == False
+  [ok ] verify_rail_and_balance  assert/assert  0.0s
+        True == True and True == True
+  [ok ] verify_cell1_has_pump  assert/assert  0.0s
+        True == True and True == True
+  [ok ] verify_cell23_gantries  assert/assert  0.0s
+        True == True and True == True and True == True and True == True
+  [ok ] verify_all_gantries_up  assert/assert  0.0s
+        -0.0 <= 3.0 + 0.5 and -0.0 <= 3.0 + 0.5 and -0.0 <= 3.0 + 0.5 and 0.0006103515625 <= 3.0 + 0.5 and -0.0 <= 3.0 + 0.5 and -0.0 <= 3.0 + 0.5
+  [ok ] pre_rail_home  cell4/status  0.028s
+        weight_g=0.0, valve=-, plunger_uL=0.0, stage_x_mm=18.64, stage_z_mm=0.0, busy=False
+  [ok ] verify_rail_home_pre  assert/assert  0.0s
+        18.64 - 17.98 <= 2.0 and 17.98 - 18.64 <= 2.0
+
+  !! next step 'arm_enable' moves hardware. Clear the frame, keep the e-stop in reach.
+  [enter]=continue, a=abort > 
+  [ok ] arm_enable  cell6/arm/enable  2.519s
+        error_before=[0, 0], error_after=[0, 0], error_settled=[0, 0], fault_cleared=True, joints_deg=[-46.39798306002475, -119.2577883276609, 116.751382657797, -88.69273572865097, -91.15867690284654, 0.09311185024752476]
+  [ok ] verify_enabled  assert/assert  0.0s
+        True == True
+  [ok ] arm_program  cell6/arm/program  29.835s
+        completed=True, name=Task1_original.lua, elapsed_s=29.822033767122775, last_line=29, joints_deg=[-46.39341448793317, -119.2638797571163, 116.7596495977723, -88.69317083075495, -91.15867690284654, 0.09289429919554454]
+  [ok ] verify_arm_done  assert/assert  0.0s
+        True == True and 29 >= 29 and 29.822033767122775 >= 20.0
+  [ok ] rail_at_cell1  cell4/linear/move  21.12s
+        y_mm=491.288
+  [ok ] verify_rail_at_cell1  assert/assert  0.0s
+        491.288 - 491.752 <= 2.0 and 491.752 - 491.288 <= 2.0
+  [ok ] cell1_pump_init  cell1/pump/initialize  6.425s
+        valve=4, plunger_uL=0.0
+  [ok ] verify_pump_initialised  assert/assert  0.0s
+        0.0 == 0
+  [ok ] cell1_x_over_vial  cell1/gantry/move  6.439s
+        x_mm=249.9932861328125, z_mm=3.055419921875
+  [ok ] verify_cell1_over_vial  assert/assert  0.0s
+        249.9932861328125 - 249.985 <= 0.5 and 249.985 - 249.9932861328125 <= 0.5
+  [ok ] cell1_descend  cell1/gantry/move  4.824s
+        x_mm=249.9932861328125, z_mm=223.00689697265625
+  [ok ] verify_cell1_descended  assert/assert  0.0s
+        223.00689697265625 - 223.0 <= 0.5 and 223.0 - 223.00689697265625 <= 0.5
+  [ok ] cell1_dispense  cell1/pump/cycle  139.081s
+        cycles_done=20, final_valve=2
+  [ok ] verify_dispensed  assert/assert  0.0s
+        20 == 20
+  [ok ] cell1_retract  cell1/gantry/move  4.823s
+        x_mm=249.9932861328125, z_mm=2.9833984375
+  [ok ] cell1_status  cell1/status  0.355s
+        weight_g=0.0, valve=2, plunger_uL=0.0, stage_x_mm=249.9835205078125, stage_z_mm=3.00048828125, busy=False
+  [ok ] verify_cell1_clear  assert/assert  0.0s
+        3.00048828125 <= 3.0 + 0.5 and None == null
+  [ok ] rail_at_cell2  cell4/linear/move  11.721s
+        y_mm=729.554
+  [ok ] verify_rail_at_cell2  assert/assert  0.0s
+        729.554 - 729.246 <= 2.0 and 729.246 - 729.554 <= 2.0
+  [ok ] cell2_pump_init  cell2/pump/initialize  10.208s
+        valve=4, plunger_uL=0.0
+  [ok ] verify_pump2_initialised  assert/assert  0.0s
+        0.0 == 0
+  [ok ] cell2_x_over_vial  cell2/gantry/move  6.376s
+        x_mm=250.0262451171875, z_mm=3.05938720703125
+  [ok ] verify_cell2_over_vial  assert/assert  0.0s
+        250.0262451171875 - 250.004 <= 0.5 and 250.004 - 250.0262451171875 <= 0.5
+  [ok ] cell2_descend  cell2/gantry/move  4.851s
+        x_mm=250.0262451171875, z_mm=223.0133056640625
+  [ok ] verify_cell2_descended  assert/assert  0.0s
+        223.0133056640625 - 223.0 <= 0.5 and 223.0 - 223.0133056640625 <= 0.5
+  [ok ] cell2_dispense  cell2/pump/cycle  139.511s
+        cycles_done=20, final_valve=2
+  [ok ] verify_dispensed2  assert/assert  0.0s
+        20 == 20
+  [ok ] cell2_retract  cell2/gantry/move  4.752s
+        x_mm=250.0262451171875, z_mm=2.962646484375
+  [ok ] cell2_status  cell2/status  0.361s
+        weight_g=0.0, valve=2, plunger_uL=0.0, stage_x_mm=250.0030517578125, stage_z_mm=3.00750732421875, busy=False
+  [ok ] verify_cell2_clear  assert/assert  0.0s
+        3.00750732421875 <= 3.0 + 0.5 and None == null
+  [ok ] rail_at_cell3  cell4/linear/move  10.894s
+        y_mm=947.01
+  [ok ] verify_rail_at_cell3  assert/assert  0.0s
+        947.01 - 947.5 <= 2.0 and 947.5 - 947.01 <= 2.0
+  [ok ] cell3_pump_init  cell3/pump/initialize  9.95s
+        valve=4, plunger_uL=0.0
+  [ok ] verify_pump3_initialised  assert/assert  0.0s
+        0.0 == 0
+  [ok ] cell3_x_over_vial  cell3/gantry/move  6.738s
+        x_mm=243.0975341796875, z_mm=2.9913330078125
+  [ok ] verify_cell3_over_vial  assert/assert  0.0s
+        243.0975341796875 - 243.0 <= 0.5 and 243.0 - 243.0975341796875 <= 0.5
+  [ok ] cell3_descend  cell3/gantry/move  5.091s
+        x_mm=243.0975341796875, z_mm=222.9913330078125
+  [ok ] verify_cell3_descended  assert/assert  0.0s
+        222.9913330078125 - 223.0 <= 0.5 and 223.0 - 222.9913330078125 <= 0.5
+  [ok ] cell3_dispense  cell3/pump/cycle  139.418s
+        cycles_done=20, final_valve=2
+  [ok ] verify_dispensed3  assert/assert  0.0s
+        20 == 20
+  [ok ] cell3_retract  cell3/gantry/move  4.758s
+        x_mm=243.0975341796875, z_mm=2.94281005859375
+  [ok ] cell3_status  cell3/status  0.361s
+        weight_g=0.0, valve=2, plunger_uL=0.0, stage_x_mm=242.9962158203125, stage_z_mm=2.99041748046875, busy=False
+  [ok ] verify_cell3_clear  assert/assert  0.0s
+        2.99041748046875 <= 3.0 + 0.5 and None == null
+  [ok ] rail_to_end  cell4/linear/move  3.406s
+        y_mm=977.298
+  [ok ] verify_rail_at_end  assert/assert  0.0s
+        977.298 - 978.0 <= 2.0 and 978.0 - 977.298 <= 2.0
+  [ok ] cell3_x_home  cell3/gantry/move  6.676s
+        x_mm=-0.0091552734375, z_mm=2.99102783203125
+  [ok ] verify_cell3_x_home  assert/assert  0.0s
+        -0.0091552734375 <= 0.5 and 2.99102783203125 <= 3.0 + 0.5
+
+run 20261014T053114Z-synthesis_1014: completed
+runlog: runs/20261014T053114Z-synthesis_1014
+```
 
 - **Process 순서**
-1. `diag_cell6/4/1/2/3` + `verify_*`: 5개 cell 의 `diagnose` 를 읽어 arm ready, 저울 ok, 헤드 3개가 올라가 있는지(Z ≤ 3.5 mm) 확인. 실패하면 아무것도 움직이기 전에 중단.
-2. `init_home_cell1/2/3`: 갠트리 3개를 차례로 홈(스위치에서 0). 첫 모션 게이트가 여기서 뜬다.
-3. `rail_home`: cell4 레일을 `rail_home_mm`(17.98 mm) 로. arm 프로그램이 저울이 홈에 있다고 가정하므로 arm 보다 먼저.
-4. `arm_enable` → `arm_program`: cell6 이 `Task1_original.lua` 를 실행해 vial 을 저울 위에 놓는다(last_line ≥ 29, ≥ 20 s 로 완료 판정).
-5. cell N = 1, 2, 3 각각 (`pause` 로 하강·분주 전 확인):
-   `rail_at_cellN`(레일을 스테이션으로) → `cellN_pump_init`(펌프 홈, plunger 0) → `cellN_x_over_vial`(X 를 vial 위로) → `cellN_descend`(Z 하강 — 이 파일은 225 mm, `_free`/통합은 223 mm) → `cellN_dispense`(`pump/cycle` 1 × 100 µL — `_free`/통합은 `dispense_cycles` 20 × 100 µL = 2 mL, 공급 포트 1 → 노즐 포트 2) → `cellN_retract`(Z 0) → `cellN_status` 로 Z 가 올라왔는지 확인 — **이 확인이 다음 레일 이동의 전제**(헤드-레일 충돌 방지).
-6. `rail_to_end`: 레일을 `rail_end_mm`(978 mm) 로.
-7. `rail_return_home`: 레일 홈 복귀 → `verify_rail_home`.
-8. `park_cell1/2/3`: 갠트리 3개를 파킹 위치로 → `verify_parked` → `final_rail`/`final_cell1`(status) → `verify_end_state`.
+1. `diag_cell6/4/1/2/3` + `verify_arm_ready`/`verify_rail_and_balance`/`verify_cell1_has_pump`/`verify_cell23_gantries`/`verify_all_gantries_up`: 5개 cell 의 `diagnose` 를 읽어 팔 ready, 저울 ok, 펌프 3개 있음, 헤드 3개 up. `pre_rail_home` → `verify_rail_home_pre`: 레일이 `rail_home_mm` ± `rail_tol_mm` 인지. 아니면 거부.
+2. `arm_enable` → `arm_program`: cell6 이 `Task1_original.lua` 를 실행해 vial 을 저울 위에 놓는다(`last_line` ≥ 29, ≥ 20 s 로 완료 판정). 첫 모션 게이트가 `arm_enable` 에서 뜬다.
+3. cell N = 1, 2, 3 각각: `rail_at_cellN`(레일을 스테이션으로) → `cellN_pump_init`(펌프 홈, plunger 0) → `cellN_x_over_vial`(X 를 vial 위로, Z 3) → `cellN_descend`(Z 하강 223 mm) → `cellN_dispense`(`pump/cycle` `dispense_cycles` × `volume_uL` = 20 × 100 µL, 공급 포트 1 → 노즐 포트 2, 약 139 s) → `cellN_retract`(Z 3) → `cellN_status` 로 Z 가 올라왔는지 확인 — **이 확인이 다음 레일 이동의 전제**(헤드-레일 충돌 방지).
+4. `rail_to_end`: 레일을 `rail_end_mm`(978) 로 → `cell3_x_home`: cell3 X 를 0 으로 파킹. 레일은 end 에 머문다.
 
-### `test_synthesis_seq_free_shinyeong.yaml`
-
-위 파일에서 `pause` 9개를 뺀 **촬영용 free run**. 10-14 부터는 통합 파일의 합성 값(`c1/c2_z_mm` 223, `dispense_cycles` 20 → 2 mL/cell, 분주 timeout 360 s)도 함께 갖는다 — `_seq` 와의 차이는 pause 와 이 두 값. `_seq` 를 step-mode 로 돌려 cell2/3 의 하강이 저울 팬을 비켜가는 것을 본 뒤에만 쓴다(cell2/3 하강 높이는 cell1 값을 물려받은 것).
-
-- **Directory**: `scenarios/shinyeong_test/test_synthesis_seq_free_shinyeong.yaml` (73 스텝)
-
-- **Run Command**:
-```Terminal
-cd $REPO
-.venv/bin/python -m orchestrator run scenarios/shinyeong_test/test_synthesis_seq_free_shinyeong.yaml
-```
-- **Input**:
-	- args: 없음(첫 모션 게이트만)
-	- param: `_seq` + `dispense_cycles`(20). `--param dispense_cycles=5` 로 500 µL/cell(호스 채우기용)
-	- 전제: `_seq` 와 동일. 2 mL × 3 이 들어갈 vial(≥ 6 mL)과 각 펌프 공급액 2 mL 이상
-
-- **Output**: `_seq` 와 동일. 59 runs(08-13~10-14). 10-14: `20261013T162332Z` completed(2 mL × 3), `20261013T163732Z`/`20261013T164330Z` completed(500 µL × 3, `dispense_cycles=5`). 이 폴더에서 가장 많이 돈 파일.
-
-- **Process 순서**: `_seq` 의 1~8 과 같고 `pause` 가 없다.
 
 ---
 
 ## Analysis
 
-두 파일 모두 통합 Process 의 **cell7 tail(`arm7_enable` .. `verify_end_state`)** 을 떼어낸 것이다. 합성이 끝났는데 분석 쪽에서 실패했을 때 합성을 다시 돌리지 않고 tail 만 재시도한다. 시작 지점만 다르다: vial 집기부터 / zensor 부터. (10-14 정리: `_from_head`, `_nocell1`, `_dispense_weigh_c23`, `_noarm`, `test_arm_program_cell6_task1`, `test_gantry_*` 6개는 미사용·구버전이라 삭제. 8월 bring-up 파일과 노암판은 git 이력(`57de7af` 이전)에 남아 있고, 나머지는 통합 파일에서 스텝 id 로 다시 만든다.)
+분석 단계 및 종료 후 원점 복귀까지의 시나리오
+약 5~6min 소요
+Linear Rail이 합성 단계 종료 지점(978 ± 2)에 있지 않으면 프리플라이트 `verify_rail_at_end_pre` 가 거부하니, 해당 위치로 linear rail 작동 후 진행할 것
+반드시 59번 로봇팔과 그리퍼 모두 교시 모드(파란색 LED)로 변경 후 진행할 것
+cell7 에 펜던트에서 돌린 프로그램이 남아 있으면 `arm/program` 이 409 로 거부된다 — `curl -s -X POST http://127.0.0.1:17066/v1/stop -H 'Content-Type: application/json' -d '{}'` 로 정리
 
-### `test_analysis_tail_shinyeong.yaml`
+### `analysis_1014.yaml`
 
-분석 tail 전체. **레일이 이미 end 에 있고 헤드 3개가 올라가 있지 않으면 시작을 거부**한다.
-
-- **Directory**: `scenarios/shinyeong_test/test_analysis_tail_shinyeong.yaml` (38 스텝)
+- **Directory**: `scenarios/shinyeong_test/analysis_1014.yaml` (40 스텝 = 프리플라이트 12 + `1cycle_1014` 의 8~13 단계).
 
 - **Run Command**:
 ```Terminal
-cd $REPO
-.venv/bin/python -m orchestrator run scenarios/shinyeong_test/test_analysis_tail_shinyeong.yaml --step-mode
+cd ~/workspace/InnoCOREServer/InnoCORESDL_Sungwoo
+.venv/bin/python -m orchestrator validate scenarios/shinyeong_test/analysis_1014.yaml
+.venv/bin/python -m orchestrator run scenarios/shinyeong_test/analysis_1014.yaml
 ```
-- **Input**:
-	- args: 좌표를 바꾼 뒤에는 `--step-mode` 먼저
-	- param: `analysis_program_{vial,head,zensor,wash,init_head}`, 각 `_last_line`/`_min_s`, `rail_end_mm`/`rail_home_mm`/`rail_tol_mm`, `c5_z_dispense_mm`(421), `c5_volume_uL`(50 — 10-14 에 통합·tail·from_zensor 모두 50 으로 통일), `c5_z_tol_mm`
-	- 전제: cell7, 5, 4 서버 + cell1/2/3 서버(확인·재홈용). vial 이 저울 위, 레일이 `rail_end_mm`.
 
-- **Output**: `prog7v/h/z/w/i`, `disp5`, `c5z`/`c5home`. 끝에 레일 홈 + 갠트리 재홈. 4 runs: `20260930T160502Z` failed(cell5 없는 26 스텝 버전), 10-12 `20261011T232810Z` completed(cell5 25 µL)·`20261011T234215Z` completed(75 µL) — cell5 포함 38 스텝의 첫 완주.
+- **Input**:
+	- args: 없음(첫 모션 게이트 `arm7_enable` 에서 Enter)
+	- param: `analysis_program_{vial,head,zensor,wash,init_head}` 와 각 `_last_line`/`_min_s`, `c5_z_dispense_mm`(421), `c5_volume_uL`(50), `c5_z_tol_mm`, `rail_end_mm`/`rail_home_mm`/`rail_tol_mm`, `z_up_mm`/`gantry_tol_mm`, `speed_pct`/`accel_pct`
+	- 전제: cell7, 4, 5 서버 + cell1/2/3 서버(확인·재홈용). 레일 978 ± 2, vial 이 저울 위, 헤드 3개 up(`synthesis_1014` 직후 상태). 히터는 `init_1014` 에서 켜진 것을 이 파일 끝에서 끈다.
+
+- **Output**: `prog7v/h/z/w/i`, `disp5`, `c5z`/`c5home`, `fan_on`/`fan_off`, `hp_off`, `railback`, `h1end/h2end/h3end`. 끝 상태: 레일 17.98 ± 2, 갠트리 3개 0, cell5 Z 0, 팬·히터 off. 1 run `20261014T055909Z` **failed** — vial·head·zensor·cell5 50 µL·wash·팬 on·init_head 까지 정상, 종료 병렬 블록에서 `init_cell2_shutdown`(cell2 gantry/home) 이 180 s 타임아웃(cell2 Z_A 홈 스위치가 늦게 잡힘, 10-13 과 같은 증상; 홈 자체는 그 뒤 끝났음). 블록이 실패해 `cell5_fan_off`/`cell5_heater_off` 는 실행되지 않았지만, abort 의 `/v1/stop` 이 cell5 를 세우며 팬·히터를 껐고 벤치는 레일 18.2·갠트리 0 으로 끝났다. 재발 시 cell2 Z_A 스위치 마운트 점검.
+```Terminal
+analysis_1014: ok (40 steps)
+run 20261014T055909Z-analysis_1014 started (40 steps)
+  [ok ] diag_cell7  cell7/diagnose  0.007s
+        pump={'present': False, 'ok': True}, balance={'present': False, 'ok': True}, stage={'present': False, 'ok': True}, ok_to_initialize=True, arm={'ok': True, 'robot_id': 'fr5_b', 'ip': '192.168.0.59', 'reachable': True, 'gripper': True, 'joints_deg': [-42.30084409808168, -122.6879157642326, 120.7567150758044, -90.27824779548267, -90.29282371596534, -2.112855816831683], 'fault': [0, 0], 'ready': True, 'detail': None}, program={'running': False, 'name': None, 'last': {'name': 'pick_and_place_vial.lua', 'outcome': 'completed', 'last_line': 11, 'elapsed_s': 4.181434962898493}, 'dir': '/fruser', 'allowed': ['Cell7Test1.lua', 'pick_and_place_vial.lua', 'pick_and_place_head.lua', 'zensor.lua', 'ZensorWash.lua', 'init_head.lua']}
+  [ok ] diag_cell4  cell4/diagnose  0.075s
+        pump={'present': False, 'ok': True}, balance={'model': 'Model  BCE224I-1SKR', 'serial_number': 'SerNo.    0047304196', 'ok': True}, stage={'model': 'MDDLN45SL', 'version': 'Ver.1.016', 'ok': True}, ok_to_initialize=True
+  [ok ] diag_cell5  cell5/diagnose  1.214s
+        pump={'software_version': '8.33', 'serial_number': '30946', 'config': '4 way|9600|100K|TSY|high|XLP|AUTO', 'supply_volts': 24.0, 'valve': '2', 'ok': True}, balance={'present': False, 'ok': True}, stage={'axes': 1, 'serial': 'NTB3EP5R', 'ok': True}, ok_to_initialize=True
+  [ok ] diag_cell1  cell1/diagnose  0.71s
+        pump={'present': True, 'software_version': '8.33', 'serial_number': '32656', 'config': '4 way|9600|100K|TSY|high|XLP|AUTO', 'supply_volts': 24.0, 'valve': '2', 'ok': True}, balance={'present': False, 'ok': True}, stage={'serial_x': 'NTAMU6TO', 'x_mm': 249.984130859375, 'z_a_mm': 2.9998779296875, 'z_b_mm': 2.9974365234375, 'ok': True}, ok_to_initialize=True
+  [ok ] diag_cell2  cell2/diagnose  0.716s
+        pump={'present': True, 'software_version': '8.33', 'serial_number': '50487', 'config': '4 way|9600|100K|TSY|high|XLP|AUTO', 'supply_volts': 24.0, 'valve': '2', 'ok': True}, balance={'present': False, 'ok': True}, stage={'serial_x': 'NTB19XKA', 'x_mm': 250.003662109375, 'z_a_mm': 3.004150390625, 'z_b_mm': 3.0084228515625, 'ok': True}, ok_to_initialize=True
+  [ok ] diag_cell3  cell3/diagnose  0.719s
+        pump={'present': True, 'software_version': '8.33', 'serial_number': '30308', 'config': '4 way|9600|100K|TSY|high|XLP|AUTO', 'supply_volts': 24.0, 'valve': '2', 'ok': True}, balance={'present': False, 'ok': True}, stage={'serial_x': 'NTB3FXCE', 'x_mm': -0.0, 'z_a_mm': 2.9815673828125, 'z_b_mm': 2.999267578125, 'ok': True}, ok_to_initialize=True
+  [ok ] verify_arm7_ready  assert/assert  0.0s
+        True == True and True == True and False == False
+  [ok ] verify_rail_and_balance  assert/assert  0.0s
+        True == True and True == True
+  [ok ] verify_cell5  assert/assert  0.0s
+        True == True and True == True and True == True
+  [ok ] verify_all_gantries_up  assert/assert  0.0s
+        2.9998779296875 <= 3.0 + 0.5 and 2.9974365234375 <= 3.0 + 0.5 and 3.004150390625 <= 3.0 + 0.5 and 3.0084228515625 <= 3.0 + 0.5 and 2.9815673828125 <= 3.0 + 0.5 and 2.999267578125 <= 3.0 + 0.5
+  [ok ] pre_rail  cell4/status  0.028s
+        weight_g=0.0, valve=-, plunger_uL=0.0, stage_x_mm=977.392, stage_z_mm=0.0, busy=False
+  [ok ] verify_rail_at_end_pre  assert/assert  0.0s
+        977.392 - 978.0 <= 2.0 and 978.0 - 977.392 <= 2.0
+
+  !! next step 'arm7_enable' moves hardware. Clear the frame, keep the e-stop in reach.
+  [enter]=continue, a=abort > 
+  [ok ] arm7_enable  cell7/arm/enable  2.517s
+        error_before=[0, 0], error_after=[0, 0], error_settled=[0, 0], fault_cleared=True, joints_deg=[-42.30084409808168, -122.6881333152846, 120.7569326268564, -90.2780302444307, -90.29282371596534, -2.112638265779703]
+  [ok ] verify_arm7_enabled  assert/assert  0.0s
+        True == True
+  [ok ] arm7_pick_and_place_vial  cell7/arm/program  18.777s
+        completed=True, name=pick_and_place_vial.lua, elapsed_s=18.762986254878342, last_line=25, joints_deg=[-133.9390035194926, -116.2862585086633, 141.7355981203589, -115.4260616491336, -89.99956489789604, -88.43863609993812]
+  [ok ] verify_arm7_vial  assert/assert  0.0s
+        True == True and 25 >= 25 and 18.762986254878342 >= 10.0
+  [ok ] arm7_pick_and_place_head  cell7/arm/program  21.791s
+        completed=True, name=pick_and_place_head.lua, elapsed_s=21.776698363013566, last_line=32, joints_deg=[-42.29518777073019, -122.6861753558168, 120.7584554842203, -90.2767249381188, -90.29260616491337, -2.112638265779703]
+  [ok ] verify_arm7_head  assert/assert  0.0s
+        True == True and 32 >= 31 and 21.776698363013566 >= 10.0
+  [ok ] arm7_zensor  cell7/arm/program  19.782s
+        completed=True, name=zensor.lua, elapsed_s=19.767061243765056, last_line=17, joints_deg=[-42.30802328279703, -122.6850876005569, 120.748883237933, -90.27280901918317, -90.29064820544555, -2.090230507425743]
+  [ok ] verify_arm7_zensor  assert/assert  0.0s
+        True == True and 17 >= 16 and 19.767061243765056 >= 10.0
+  [ok ] cell5_z_dispense  cell5/zstage/move  8.697s
+        z_mm=421.0
+  [ok ] verify_cell5_at_dispense  assert/assert  0.0s
+        421.0 - 421.0 <= 0.5 and 421.0 - 421.0 <= 0.5
+  [ok ] cell5_dispense  cell5/pump/cycle  4.649s
+        cycles_done=1, final_valve=2
+  [ok ] verify_dispensed5  assert/assert  0.0s
+        1 == 1
+  [ok ] cell5_z_home  cell5/zstage/home  16.271s
+        z_mm=0.0
+  [ok ] verify_cell5_home  assert/assert  0.0s
+        0.0 <= 0.5
+  [ok ] arm7_zensor_wash  cell7/arm/program  109.785s
+        completed=True, name=ZensorWash.lua, elapsed_s=109.76733626099303, last_line=62, joints_deg=[-42.308240833849, -122.6792137221534, 120.7578028310643, -90.27259146813118, -90.2899955522896, -2.095234181621287]
+  [ok ] verify_arm7_wash  assert/assert  0.0s
+        True == True and 62 >= 61 and 109.76733626099303 >= 55.0
+  [ok ] cell5_fan_on  cell5/fan/switch  0.409s
+        is_on=True, target=192.168.0.77, devices=['192.168.0.77']
+  [ok ] verify_fan_on  assert/assert  0.0s
+        True == True
+  [ok ] arm7_init_head  cell7/arm/program  14.252s
+        completed=True, name=init_head.lua, elapsed_s=14.236916339024901, last_line=29, joints_deg=[-42.2797416460396, -122.6809541305693, 120.7582379331683, -90.26845799814356, -90.29086575649752, -2.114813776299505]
+  [ok ] verify_arm7_init_head  assert/assert  0.0s
+        True == True and 29 >= 28 and 14.236916339024901 >= 10.0
+  [ok ] init_cell3_shutdown  cell3/gantry/home  5.181s
+        x_mm=0.0, z_mm=0.0
+  [ok ] init_cell1_shutdown  cell1/gantry/home  13.258s
+        x_mm=0.0006103515625, z_mm=0.0
+  [ok ] rail_home_shutdown  cell4/linear/move  40.578s
+        y_mm=18.226
+### 해당 부분은 cell2 z축 좌측의 이물질이 끼어 원점 복귀 인식이 안됨. 그 외 정상적으로 종료를 확인
+  [FAIL] init_cell2_shutdown  cell2/gantry/home  180.005s
+        cell2 POST gantry/home timed out after 180.0s
+ 
+
+run 20261014T055909Z-analysis_1014: failed
+runlog: runs/20261014T055909Z-analysis_1014
+```
 
 - **Process 순서**
-1. `diag_cell7/4/1/2/3` → `pre_rail`(cell4 status) → `verify_rail_at_end_pre`: 레일이 978 ± 2 mm 이고 cell1/2/3 Z_A 가 모두 ≤ 3.5 mm(`z_up_mm + gantry_tol_mm`, 즉 올라가 있음)인지. 아니면 거부.
-2. `diag_cell5` → `init_home_cell5`(Z 를 상단 스위치로) → `cell5_pump_init`(분석 펌프 홈).
-3. `arm7_enable` → `arm7_pick_and_place_vial`: cell7 이 저울 위 vial 을 분석 홀더로.
-4. `arm7_pick_and_place_head`: head 장착.
-5. `arm7_zensor`: zensor.lua.
-6. `cell5_z_dispense`(Z 421 mm 하강) → `cell5_dispense`(`pump/cycle` 1 × `c5_volume_uL`) → `cell5_z_home`(Z 상단 복귀).
-7. `arm7_zensor_wash`: ZensorWash.lua(≥ 55 s).
-8. `arm7_init_head`: init_head.lua.
-9. `parallel[rail_home_shutdown, init_cell1/2/3_shutdown]`: 레일 홈과 갠트리 3개 재홈을 동시에 → `verify_shutdown` → `final_rail`/`final_cell1` → `verify_end_state`.
-
-### `test_analysis_tail_from_zensor_shinyeong.yaml`
-
-`zensor.lua` 부터 시작 — vial **과 head 가 이미 장착**된 상태. **레일 위치는 확인하지 않는다.** cell5 분주 구간을 가장 짧게 반복 테스트할 수 있는 파일.
-
-- **Directory**: `scenarios/shinyeong_test/test_analysis_tail_from_zensor_shinyeong.yaml` (32 스텝)
-
-- **Run Command**:
-```Terminal
-cd $REPO
-.venv/bin/python -m orchestrator run scenarios/shinyeong_test/test_analysis_tail_from_zensor_shinyeong.yaml --step-mode
-```
-- **Input**:
-	- args: `--step-mode`
-	- param: `test_analysis_tail` 과 동일(cell5 포함)
-	- 전제: cell7, 5, 4 + cell1/2/3 서버. vial·head 장착 완료.
-
-- **Output**: `prog7z/w/i`, `disp5`, `c5z`/`c5home`. 미실행.
-
-- **Process 순서**: 위 1(단, `pre_rail` 확인 없음) → 2 → 5 → 6 → 7 → 8 → 9.
-
+1. `diag_cell7/4/5/1/2/3` + `verify_arm7_ready`/`verify_rail_and_balance`/`verify_cell5`/`verify_all_gantries_up`: cell7 ready, 저울 ok, cell5 pump·stage ok, 헤드 3개 up. `pre_rail` → `verify_rail_at_end_pre`: 레일이 `rail_end_mm` ± `rail_tol_mm` 인지. 아니면 거부.
+2. `arm7_enable` → `arm7_pick_and_place_vial`: cell7 이 저울 위 vial 을 분석 홀더로(≥ 25 행). 첫 모션 게이트가 `arm7_enable` 에서 뜬다.
+3. `arm7_pick_and_place_head`(≥ 31 행) → `arm7_zensor`(≥ 16 행): head 장착, zensor 동작.
+4. `cell5_z_dispense`(Z 421 mm 하강) → `cell5_dispense`(`pump/cycle` 1 × `c5_volume_uL` = 50 µL) → `cell5_z_home`(Z 상단 복귀): 분석 펌프가 홀더 안 vial 에 분주.
+5. `arm7_zensor_wash`(≥ 61 행, ≥ 55 s, 약 110 s) → `cell5_fan_on`: 세척 후 선풍기 on → `arm7_init_head`(≥ 28 행): head 초기화.
+6. `parallel[rail_home_shutdown, init_cell1/2/3_shutdown]`: 레일 홈 + 갠트리 3개 재홈을 동시에(블록은 가장 긴 자식 — 레일 ~40 s — 가 끝나야 끝남; 각 자식 timeout 180 s) → `verify_shutdown`.
+7. `cell5_fan_off`(레일 홈 도착 시점) → `cell5_heater_off`(`on_fail: retry`, 2회 — 10-14 핫플레이트 USB 순단 대응) → `verify_fan_heater_off`.
+8. `final_rail`/`final_cell1` → `verify_end_state`: 레일 17.98 ± 2, cell1 Z ≤ 3.5.
 
 
 ---
 
 ## 통합 Process(Synthesis+Analysis)
 
-### `test_synthesis_to_analysis_shinyeong.yaml`
+### `1cycle_1014.yaml`
 
-**메인 체인.** Synthesis(`_seq_free`) 뒤에 레일을 end 에 세운 채 cell7 이 vial 을 받아 분석을 끝내고, 마지막에 벤치를 시작 상태로 되돌린다. 2026-10-12 에 cell5 분주, 10-13 에 핫플레이트·선풍기·20 cycle 분주가 들어갔다. 다른 파일은 모두 "이 파일과 params 를 맞춰라" 고 가리킨다.
+**메인 체인.** `init_1014` → `synthesis_1014` → `analysis_1014` 를 한 파일로 이어 돌린 것(세 파일은 이 파일에서 잘라낸 것이라 스텝 블록·주석·`params` 가 같다). 10-14 에 `test_synthesis_to_analysis_shinyeong.yaml` 에서 이름만 바꿈. 촬영·반복 검증은 이 파일로, 단계별 재시도는 위 세 파일로.
 
-- **Directory**: `scenarios/shinyeong_test/test_synthesis_to_analysis_shinyeong.yaml` (104 스텝, 10-14 02:30 기준)
+- **Directory**: `scenarios/shinyeong_test/1cycle_1014.yaml` (104 스텝)
 
 - **Run Command**:
 ```Terminal
-cd $REPO
-.venv/bin/python -m orchestrator validate scenarios/shinyeong_test/test_synthesis_to_analysis_shinyeong.yaml
-.venv/bin/python -m orchestrator run      scenarios/shinyeong_test/test_synthesis_to_analysis_shinyeong.yaml --step-mode
-.venv/bin/python -m orchestrator run      scenarios/shinyeong_test/test_synthesis_to_analysis_shinyeong.yaml
-.venv/bin/python -m orchestrator run      scenarios/shinyeong_test/test_synthesis_to_analysis_shinyeong.yaml --param dispense_cycles=1   # 짧은 확인용
+cd ~/workspace/InnoCOREServer/InnoCORESDL_Sungwoo
+.venv/bin/python -m orchestrator validate scenarios/shinyeong_test/1cycle_1014.yaml
+.venv/bin/python -m orchestrator run scenarios/shinyeong_test/1cycle_1014.yaml
+# 짧은 확인용(분주 1 cycle): --param dispense_cycles=1
 ```
+
 - **Input**:
-	- args: 좌표나 cycle 수를 바꾼 뒤에는 `--step-mode`. `--param dispense_cycles=1` 로 2분짜리 분주 3회를 7초로 줄일 수 있음
-	- param: §5 전부. 핵심은 `dispense_cycles`(20), `volume_uL`(100), `hotplate_target_c`(100), `c5_volume_uL`(50), `c5_z_dispense_mm`(421), `rail_*_mm`, `c1/2/3_x/z_mm`
-	- 전제: **7개 cell 서버 전부**. 저울 위 vial 없음. 레일은 어디 있어도 됨(첫 모션이 `rail_home`). cell7 펜던트 잔여 상태 없음(`arm/program` 이 409 "already has a job program" 이면 `curl -X POST localhost:17066/v1/stop`). cell6/7 컨트롤러에 lua 6개. NUC2 에서 cell5 는 **`InnoCORESDL_shinyeong` 체크아웃**에서 `claude_test/test_cell5_server_shinyeong.py --config server/nuc2/cell5.toml --max-travel 450` 로 기동(IKA 가 있으면 실제 핫플레이트, 없으면 거부 stub; 팬·핫플레이트 코드는 10-14 에 `_Sungwoo` 작업 트리에서 그 체크아웃으로 복사됨, 원본은 `_shinyeong_backup_20261014/`). 포트 17062 는 한 프로세스만 — 다른 작업자의 정식 `python -m server` 가 떠 있으면 먼저 내려야 한다(정식 서버는 Z 400 mm 한계라 421 을 못 간다).
+	- args: 좌표·cycle 수를 바꾼 뒤에는 `--step-mode`. `--param dispense_cycles=1` 로 2분짜리 분주 3회를 7초로 줄일 수 있음
+	- param: §6 전부. 핵심은 `dispense_cycles`(20), `volume_uL`(100), `hotplate_target_c`(100), `c5_volume_uL`(50), `c5_z_dispense_mm`(421), `rail_*_mm`, `c1/2/3_x/z_mm`
+	- 전제: **7개 cell 서버 전부**. 저울 위 vial 없음, 58번 랙에 새 vial(≥ 6 mL), 공급액 각 2 mL 이상. 레일은 어디 있어도 됨(첫 모션이 갠트리 홈, 그 다음 `rail_home`). cell7 펜던트 잔여 없음, cell6/7 컨트롤러에 lua 6개.
 
-- **Output**: 벤치가 시작 상태로 복귀 — 레일 17.98, 갠트리 3개 0, cell5 Z 상단, 히터·선풍기 off. `vars.json`: `d1..d7`, `prog`(cell6), `prog7v/h/z/w/i`(cell7), `disp/disp2/disp3`(`cycles_done` == 20), `disp5`, `c5z`/`c5home`, `hp_t`/`hp_on`/`hp_off`, `fan_on`/`fan_off`.
-	run 기록: 30 runs. 09-15~09-30 22 runs(cell5 없는 85 스텝) + 10-12 2 runs completed(cell5 75 µL, 7분 53초) + 10-13(UTC) 6 runs — 3 failed(레일 스톨 3.796 mm / cell1 Z 224.33 미도달 / cell2 retract 500: Z_B 어댑터 USB 순단), `20261013T152247Z` completed 15분 10초(20 cycle 분주 3회가 각 139 s), `20261013T154256Z` failed(마지막 `cell5_heater_off` 만 — 핫플레이트 USB 순단, 히터는 수동 재시도로 off), **`20261013T164947Z` completed — 104 스텝 기준 런**(선풍기 17:03:23→17:04:19 UTC 56 s, 히터 off 1회 성공).
+- **Output**: 벤치가 시작 상태로 복귀 — 레일 17.98, 갠트리 3개 0, cell5 Z 상단, 히터·선풍기 off. `vars.json`: `d1..d7`, `prog`(cell6), `prog7v/h/z/w/i`(cell7), `disp/disp2/disp3`(`cycles_done` == 20), `disp5`, `c5z`/`c5home`, `hp_t`/`hp_on`/`hp_off`, `fan_on`/`fan_off`, `railback`, `h1end/h2end/h3end`. 약 15 분. run 기록(옛 이름 포함 30 runs): 10-13 `20261013T152247Z` completed(103 스텝), `20261013T154256Z` failed(마지막 `cell5_heater_off` 만 — 핫플레이트 USB 순단), **`20261013T164947Z` completed — 104 스텝 기준 런, 촬영본**(선풍기 56 s, 히터 off 1회 성공). 이 폴더명 변경 뒤의 run 은 `runs/<UTC>-one_cycle_1014` 로 남는다.
 
-- **Process 순서**
-1. `diag_cell6/7/4/1/2/3/5` + `verify_*`: 7개 cell 의 `diagnose`. arm ready ×2, 저울 ok, cell1 펌프 있음, cell5 pump·stage ok, 헤드 3개 올라가 있음.
-2. `init_home_cell1/2/3`: 갠트리 홈(첫 모션 게이트). `init_home_cell5`: cell5 Z 를 상단 스위치로. `cell5_pump_init`: 분석 펌프 홈.
-3. `cell5_hotplate_target`(100 °C) → `cell5_heater_on`: 핫플레이트 예열 시작. 온도 도달을 기다리지는 않는다.
-4. `rail_home` → `rail_park_home`: 레일을 17.98 mm 로.
-5. `arm_enable` → `arm_program`: cell6 이 `Task1_original.lua` 로 vial 을 저울 위에 놓는다.
-6. cell N = 1, 2, 3 각각: `rail_at_cellN` → `cellN_pump_init` → `cellN_x_over_vial` → `cellN_descend`(Z 223 mm) → `cellN_dispense`(**`pump/cycle` 20 × 100 µL = 2 mL**, 약 139 s) → `cellN_retract` → `cellN_status`(Z 0 확인, 다음 레일 이동의 전제).
-7. `rail_to_end`(978 mm) → `cell3_x_home`: 갠트리 파킹.
-8. `arm7_enable` → `arm7_pick_and_place_vial` → `arm7_pick_and_place_head` → `arm7_zensor`: cell7 이 vial 을 홀더로, head 장착, zensor.
-9. `cell5_z_dispense`(Z 421 mm) → `cell5_dispense`(1 × 50 µL; 1 cycle 최대 125 µL = 시린지) → `cell5_z_home`: 분석 펌프가 홀더 안 vial 에 분주하고 Z 복귀.
-10. `arm7_zensor_wash`(약 110 s) → `cell5_fan_on` → `arm7_init_head`: 세척, 선풍기 켬, head 초기화.
-11. `parallel[rail_home_shutdown, init_cell1/2/3_shutdown]`: 레일 홈 + 갠트리 3개 재홈 동시에 → `verify_shutdown`.
-12. `cell5_fan_off` → `cell5_heater_off`(`on_fail: retry`, 2회) → `verify_fan_heater_off`: 선풍기·히터 off(10-14: 선풍기 off 를 parallel 블록 **밖**으로 — 블록 안에서는 시작 시점에 꺼져 15 s 만 돌았음. 히터 off 는 10-14 핫플레이트 USB(허브 3-4) 순단으로 한 번 실패해 재시도를 붙임).
-13. `final_rail`/`final_cell1` → `verify_end_state`: 레일 17.98 ± 2, cell1 Z ≤ 3.5.
+- **Process 순서**: `init_1014` 1~5 → `synthesis_1014` 2~4 → `analysis_1014` 2~8 과 같다(통합 파일에는 단계 사이 프리플라이트 `pre_rail_home`/`pre_rail` 이 없음 — 앞 단계가 그 상태를 만들었으므로).
+
 
 ---
 
@@ -213,7 +485,7 @@ cd $REPO
 
 ### `test_vial_place_to_end_shinyeong.yaml`
 
-linear Rail 지정 위치 테스트용 + 분석 tail 의 **전제 상태(vial 이 저울 위, 레일이 end) 를 빨리 만드는** 준비용. 분주 없음.
+linear Rail 지정 위치 테스트용 + 분석 단계의 **전제 상태(vial 이 저울 위, 레일이 end) 를 빨리 만드는** 준비용. 분주 없음.
 
 - **Directory**: `scenarios/shinyeong_test/test_vial_place_to_end_shinyeong.yaml` (17 스텝)
 
@@ -248,7 +520,7 @@ cd $REPO
 ```
 - **Input**:
 	- args: `--param weigh_cycles=N` 으로 분주 횟수 변경
-	- param: 통합 파일의 `rail_*_mm`, `c1/2/3_x/z_mm`, `volume_uL`(100), 포트/force + `weigh_cycles`(3 → 300 µL/cell)
+	- param: 통합 파일의 `rail_*_mm`, `c1/2/3_x/z_mm`, `volume_uL`(100), 포트/force + `weigh_cycles`(3 → 300 µL/cell). **이 파일의 `c1/c2_z_mm` 는 아직 225** — 10-13 이후 cell1 Z_A 하한이 224.3 이라 `--param c1_z_mm=223 --param c2_z_mm=223` 을 줄 것
 	- 전제: cell1, 2, 3, 4 서버. 저울 위 **빈 vial**. 헤드 3개 up(첫 스텝이 홈이 아니라 cell1 로 레일 이동).
 
 - **Output**: `vars.json` 의 `z1/z2/z3`(tare 후 영점 readback, ≤ 0.05 g 이어야 함), `w1/w2/w3`(분주 후, > 0.05 g). 1 run `20260930T141111Z` failed — cell1 0.3066 g 측정 뒤 `cell2_descend` 에서 Z 가 225 mm 명령에 210.81 mm 에서 멈춤. cell2·cell3 는 같은 날 cell1 블록을 뺀 사본(삭제됨)으로 `20260930T141552Z` completed — **cell2 0.3363 g, cell3 0.3185 g**(300 µL 기준). 세 값이 모두 모임.
@@ -266,11 +538,15 @@ python3 -c "import json;v=json.load(open('$R/vars.json'));print({k:v[k].get('wei
 6. `cellN_retract` → `weigh_cellN`: Z 복귀 후 무게 읽기.
 7. 세 cell 뒤 `rail_home`: 레일 홈.
 
+### 정리된 파일 (2026-10-14 삭제)
+
+`test_synthesis_seq_shinyeong` / `test_synthesis_seq_free_shinyeong`(합성 원본·free run, `c1/c2_z_mm` 225 또는 1 × 100 µL) 과 `test_analysis_tail_shinyeong` / `test_analysis_tail_from_zensor_shinyeong`(분석 tail, 팬·히터 off 없음) 은 1014 계열이 대신하므로 삭제함. 내용은 git 이력(`570edd8` 이전) 과 run 기록 `runs/<UTC>-<그 이름>` 에 남아 있다. `1cycle_1014.yaml` 헤더 주석의 "A COPY of test_synthesis_seq_free_shinyeong" 은 계보 기록이라 그대로 둠.
+
 ---
 
 ## 공통 `params`
 
-통합 Process `test_synthesis_to_analysis_shinyeong.yaml` 기준(2026-10-14 02:30). 다른 파일은 이 값의 09-30 또는 10-12 사본이다(차이는 각 파일 Input 에 적음).
+통합 Process `1cycle_1014.yaml` 기준(2026-10-14 15:30). `init_1014`/`synthesis_1014`/`analysis_1014` 는 같은 값(파일마다 쓰는 키만 다름). `test_dispense_weigh`/`test_vial_place_to_end` 는 09-30 사본(차이는 각 파일 Input 에 적음).
 
 | Params | Value (unit) | Meaning |
 | ------ | ------------ | ------- |
@@ -287,7 +563,7 @@ python3 -c "import json;v=json.load(open('$R/vars.json'));print({k:v[k].get('wei
 | `rail_cell1_mm` / `rail_cell2_mm` / `rail_cell3_mm` | 491.752 / 729.246 / 947.5 (mm) | 각 스테이션 레일 위치(09-30 재영점 후) |
 | `rail_end_mm` | 978.0 (mm) | cell7 이 vial 을 집는 위치. 기계적 끝 980.37, 987.98 은 스톨+amp fault |
 | `c1_x_mm` / `c2_x_mm` / `c3_x_mm` | 249.985 / 250.004 / 243.0 (mm) | vial 위 갠트리 X |
-| `c1_z_mm` / `c2_z_mm` / `c3_z_mm` | 223.0 / 223.0 / 223.0 (mm) | 하강 Z. **Z+ 가 아래**, 0 = 올라간 상태. 10-13 에 225→223(cell1 Z_A 가 224.3 에서 하한에 닿음). `_seq`·tail·dispense_weigh·vial_place 사본은 아직 225 |
+| `c1_z_mm` / `c2_z_mm` / `c3_z_mm` | 223.0 / 223.0 / 223.0 (mm) | 하강 Z. **Z+ 가 아래**, 0 = 올라간 상태. 10-13 에 225→223(cell1 Z_A 가 224.3 에서 하한에 닿음). `test_dispense_weigh` 는 아직 225 |
 | `z_up_mm` | 3.0 (mm) | "헤드가 올라가 있다" 판정 상한 |
 | `volume_uL` | 100.0 (µL) | 합성 분주 1 cycle 양 |
 | `dispense_cycles` | 20 | 합성 분주 cycle 수 → 2 mL/cell(125 µL 시린지, 약 7 s/cycle). 10-13 추가 |
@@ -300,4 +576,3 @@ python3 -c "import json;v=json.load(open('$R/vars.json'));print({k:v[k].get('wei
 | `rail_tol_mm` / `gantry_tol_mm` | 2.0 / 0.5 (mm) | 레일 / 갠트리 verify 허용 오차 |
 | `speed_pct` / `accel_pct` | 10 / 0 (%) | arm·cell5 Z 속도·가속 |
 | `weigh_cycles` | 3 | `test_dispense_weigh*` 만. 분주 반복 수 |
-
