@@ -1,0 +1,40 @@
+# cell7 — FR5 robot arm, ANALYSIS stage (docs/SPEC_ARM_REPLAY_CELL.md).
+#
+# Live bench config, tracked in git since 2026-11-16 (template: server/nuc1/cell7.toml.example).
+# Same shape as cell6, config apart (spec D1):
+#
+#     python -m server --config server/nuc1/cell7.toml
+#
+# SAFETY (spec §8): every replay is motion. Operator at the bench,
+# e-stop in hand, arm's reach clear. Do NOT put cell6 and cell7 in the
+# same parallel block of a scenario until their reach overlap has been
+# measured (spec §8.4, GAP-8).
+
+[server]
+port = 17066
+host = "0.0.0.0"
+log_level = "info"
+
+[arm]
+robot_id = "fr5_b"
+# Analysis-stage arm. Must differ from cell6's 192.168.0.58; changed on
+# the teach pendant before both arms join the LAN (spec §8.3).
+ip_address = "192.168.0.59"
+gripper_enabled = true
+
+# --- motion envelope ----------------------------------------------------
+jog_speed_pct = 10.0
+
+# --- Lua job programs (docs/SPEC_ARM_LUA_PROGRAM.md) ---------------------
+# Names measured off this controller 2026-08-11 with
+# claude_test/probe_arm_lua.py: test0403.lua, Cell7Test1.lua.
+# Only the one being commissioned is allowed.
+program_dir = "/fruser"
+# 2026-09-15: the analysis hand-off after the synthesis stage runs these
+# two in order (scenarios/test_synthesis_to_analysis_shinyeong.yaml).
+# Both confirmed present on this controller with probe_arm_lua.py.
+allowed_programs = ["Cell7Test1.lua", "pick_and_place_vial.lua",
+                    "pick_and_place_head.lua", "zensor.lua",
+                    "ZensorWash.lua", "init_head.lua"]
+max_program_s = 420.0   # 7 min (2026-11-16): arm actions can exceed 5 min
+program_poll_s = 0.5

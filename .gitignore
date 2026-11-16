@@ -10,12 +10,13 @@ env/
 .mypy_cache/
 .ruff_cache/
 
-# Server: real bench config (the .example is committed)
-server/*.toml
-server/*/*.toml
+# Server / orchestrator bench configs (server/*/*.toml,
+# orchestrator/config.toml) are tracked since 2026-11-16 so the live
+# settings (e.g. max_program_s) are versioned with the scenarios. They
+# hold no credentials -- the Tapo login lives in
+# external/SmartPlugController/secure.env. Keep it that way.
 
-# Orchestrator: real address book + run records (examples are committed)
-orchestrator/config.toml
+# Orchestrator run records
 runs/
 
 # Editor / OS

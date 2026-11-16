@@ -785,7 +785,8 @@ python -m server --config server/nuc1/cell7.toml    # :17066  FR5 arm, analysis
 
 A cell whose real `.toml` does not exist yet needs
 `cp server/<nuc>/cellN.toml.example server/<nuc>/cellN.toml` first; the
-real files are gitignored.
+real files are tracked in git (since 2026-11-16) — commit them after
+editing.
 
 **2. Check every server before any motion.** `diagnose` is the last gate
 that can catch a device which answers reads but will not move — an arm

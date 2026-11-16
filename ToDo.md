@@ -2862,3 +2862,9 @@ runlogs (`runs/`) and the cell2 server log on NUC2.
       max_program_s = 420 takes effect (no active run). Both health 200,
       diagnose arm ok/ready, fault [0,0]. Issue #57; bench run of a >5 min
       program still pending.
+- [x] 2026-11-16: track live bench tomls in git (user request). Removed
+      server/*.toml, server/*/*.toml, orchestrator/config.toml from
+      .gitignore; added NUC1's cell1/cell4/cell7/cell6 tomls +
+      orchestrator/config.toml after a full read (no credentials; Tapo
+      login stays in secure.env). Docs + in-file comments updated.
+      NUC2's cell2/3/5.toml still to add from NUC2. Issue #59.

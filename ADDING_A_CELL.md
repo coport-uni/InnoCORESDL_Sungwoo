@@ -106,7 +106,8 @@ correct one and the web gets a stable error envelope:
   your cell module, like `Config` / `BalanceLinearConfig`.
 - Add a `_load_<shape>()` in `server/__main__.py` that parses the TOML tables
   into that config (mirror `_load` / `_load_balance_linear`).
-- Add a `server/cell<N>.toml.example` (real `.toml` is gitignored). Resolve
+- Add a `server/cell<N>.toml.example` (the real `.toml` is tracked too, since
+  2026-11-16 — no credentials in it). Resolve
   device addresses by **VID:PID**, not `/dev/ttyUSBn` (renumbers).
 
 ### 5. Wire the `--cell` flag

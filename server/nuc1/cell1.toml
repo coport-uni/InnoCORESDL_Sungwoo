@@ -1,0 +1,30 @@
+# NUC1 / Cell A -- pump + XZ gantry (X axis 1, Z axes 2 driven in sync).
+# Live bench config (tracked in git since 2026-11-16). Generated 2026-07-28 from the observed
+# USB enumeration on this NUC; [pump] restored 2026-07-29 (evening).
+#   .venv/bin/python -m server --config server/nuc1/cell1.toml
+#
+# The SY-01B's CH340 link was re-enumerating every ~10-15 s untouched
+# earlier today (LearnedPatterns #35). After the servo-driver power was
+# tidied on the bench, the devnum held still across a 60 s watch
+# (2026-07-29 19:28, device 017 throughout), so the [pump] table is
+# back. If the flapping returns, remove this table to fall back to the
+# gantry-only shape rather than leaving the whole cell's probes 500ing.
+[pump]
+port = "1A86:7523"     # SY-01B CH340 USB-serial (VID:PID)
+syringe_uL = 125
+init_force = 2
+
+[stage]
+# FTDI serial of the X adapter; the other two adapters are the paired Z,
+# auto-assigned and always driven together (mks_motor move_sync).
+# Read off this bench 2026-07-28 -- the three adapters present are
+# NTAMU6TO (X) and A10PUO5V / A10PUO5W (the paired Z), matching the
+# serials bridge.py and CVMeasure.py use upstream.
+serial_x = "NTAMU6TO"
+z_coord_invert = true
+x_coord_invert = true
+
+[server]
+host = "0.0.0.0"
+port = 17054           # cell1 -- matches [cells.cell1] in the orchestrator
+log_level = "info"

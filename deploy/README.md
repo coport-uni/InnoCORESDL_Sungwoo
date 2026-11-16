@@ -34,7 +34,8 @@ git rev-parse HEAD                   # must match on NUC1 and NUC2
 ## 2. Cell servers (both NUCs)
 
 Copy the examples for the cells this NUC owns and fill in the real device
-identifiers (`*.toml` is gitignored; `*.toml.example` is tracked):
+identifiers (both `*.toml` and `*.toml.example` are tracked since 2026-11-16 —
+commit a NUC's real `.toml` after editing it; never put credentials in it):
 
 ```bash
 cp server/nuc1/cell1.toml.example server/nuc1/cell1.toml   # NUC1

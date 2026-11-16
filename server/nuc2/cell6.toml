@@ -1,0 +1,59 @@
+# cell6 — FR5 robot arm, SYNTHESIS stage (docs/SPEC_ARM_REPLAY_CELL.md).
+#
+# Live bench config, tracked in git since 2026-11-16 (template: server/nuc2/cell6.toml.example).
+# Shape is auto-detected from the [arm] table, so `--config` alone is
+# enough:
+#
+#     python -m server --config server/nuc2/cell6.toml
+#
+# SAFETY (spec §8): every replay is motion. Operator at the bench,
+# e-stop in hand, arm's reach clear. cell6 and cell7 must never share an
+# ip_address — that is teach-pendant work no second process can detect.
+
+[server]
+port = 17064
+host = "0.0.0.0"
+log_level = "info"
+
+[arm]
+# Which arm this is, in logs, runlogs and --robot.id.
+robot_id = "fr5_a"
+# Synthesis-stage arm. Fixed network asset, so the VID:PID rule that
+# governs the serial devices does not apply.
+ip_address = "192.168.0.58"
+gripper_enabled = true
+
+# --- motion envelope ----------------------------------------------------
+# timeout = min(frames / fps * replay_timeout_factor, max_replay_s)
+# Above this gap to the episode's first frame, the cell MoveJ's there
+# first at jog_speed_pct. The fork's follower ramps toward a far ServoJ
+# target instead of refusing it, so without this a replay started from
+# the wrong pose lunges rather than failing.
+# Reported in the replay response as final_joint_error_deg; the pass/fail
+# call belongs to the scenario, not the cell (spec §5).
+# MoveJ velocity % for the start-pose approach and claude_test/smoke_arm.py.
+jog_speed_pct = 10.0
+
+# --- Lua job programs (docs/SPEC_ARM_LUA_PROGRAM.md) ---------------------
+# Names measured off this controller 2026-08-11 with
+# claude_test/probe_arm_lua.py: test.lua, example.lua, new_pr.lua,
+# SimpleLoadIdentify.lua, Test0902.lua, Test1.lua, test2.lua.
+# Only the one being commissioned is allowed. Note the capital T —
+# there is no lowercase test1.lua on this arm.
+program_dir = "/fruser"
+# Task1.lua added 2026-08-13: the synthesis-stage program, exported from
+# this controller by the operator and re-read here with probe_arm_lua.py
+# (GetLuaList now returns nine names, Task1.lua among them). Test1.lua
+# stays because it is the acceptance program docs/SPEC_ARM_LUA_PROGRAM.md
+# §7 T2 refers to, and demo_arm_program.yaml still names it.
+# Task1_original.lua added 2026-08-13. Task1.lua is the same motion with
+# its `while loop1 < 3` wrapper removed, and that edited copy faults:
+# reproduced twice, latched main=1 sub=21 at line 6, having reached
+# check_point_1 and stopped on the way down to Grasp_pose. The looped
+# original ran 76.6 s to last_line 29 clean earlier the same day and ran
+# clean again from the WebApp afterwards, from the same start pose and
+# with no fault carried in. Task1.lua stays listed but is not what the
+# synthesis scenario names.
+allowed_programs = ["Test1.lua", "Task1.lua", "Task1_original.lua"]
+max_program_s = 420.0   # 7 min (2026-11-16): arm actions can exceed 5 min
+program_poll_s = 0.5

@@ -1,0 +1,22 @@
+# NUC1 / cell4 -- Entris-II balance + MINAS A6 linear rail.
+# Live bench config (tracked in git since 2026-11-16). Generated 2026-07-28 from the observed
+# USB enumeration on this NUC; see LearnedPatterns.md #9.
+#   .venv/bin/python -m server --config server/nuc1/cell4.toml
+
+[linear]
+# Moxa UPort 1150 RS-485 adapter -- enumerated on this bench as
+# /dev/ttyUSB1 (driver ti_usb_3410_5052). The "VID:PID" form is resolved
+# at open time so it survives ttyUSBn renumbering.
+port = "110A:1150"
+
+[balance]
+# Omit `port` to auto-detect the Sartorius balance by vendor ID 0x24BC.
+# The balance must already be in SBI mode with AUTO W/ (front panel):
+#   DEVICE -> USB -> DAT.REC = SBI
+#   DATA.OUT. -> COM. SBI -> COM.OUTP = AUTO W/ , STAB.RNG = V.FAST
+ambient = "very_unstable"
+
+[server]
+host = "0.0.0.0"
+port = 17060           # cell4 -- matches [cells.cell4] in the orchestrator
+log_level = "info"
