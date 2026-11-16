@@ -305,10 +305,10 @@ steps:
     action: arm/program
     body:
       name: "${params.program}"
-    # Above the cell's own max_program_s (300 s) so the CELL times out
+    # Above the cell's own max_program_s (420 s) so the CELL times out
     # first and issues ProgramStop; an L2 timeout would only drop the
     # connection and leave the controller executing.
-    timeout_s: 360.0
+    timeout_s: 480.0
     save_as: prog
 
 
@@ -393,7 +393,7 @@ steps:
       volume_uL: "${params.volume_uL}"
       source_port: "${params.source_port}"
       dispense_port: "${params.dispense_port}"
-    timeout_s: 360.0
+    timeout_s: 420.0
     save_as: disp
 
   - id: verify_dispensed
@@ -491,7 +491,7 @@ steps:
       volume_uL: "${params.volume_uL}"
       source_port: "${params.source_port}"
       dispense_port: "${params.dispense_port}"
-    timeout_s: 360.0
+    timeout_s: 420.0
     save_as: disp2
 
   - id: verify_dispensed2
@@ -585,7 +585,7 @@ steps:
       volume_uL: "${params.volume_uL}"
       source_port: "${params.source_port}"
       dispense_port: "${params.dispense_port}"
-    timeout_s: 360.0
+    timeout_s: 420.0
     save_as: disp3
 
   - id: verify_dispensed3

@@ -43,5 +43,5 @@ program_dir = "/fruser"
 # can launch a new program with no config change and no restart. That is
 # a real convenience and a real loss of control; choose deliberately.
 allowed_programs = ["Cell7Test1.lua"]
-max_program_s = 300.0
+max_program_s = 420.0   # 7 min (2026-11-16): arm actions can exceed 5 min
 program_poll_s = 0.5

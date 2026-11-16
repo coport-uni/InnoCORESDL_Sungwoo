@@ -2838,3 +2838,27 @@ runlogs (`runs/`) and the cell2 server log on NUC2.
       re-enumerated at 10:13 (ttyACM1 -> ttyACM0), same stale-fd 500 as
       2026-11-04. Diagnose 200 after restart. Issue #55 (root cause
       tracked on #51).
+- [x] 2026-11-16: push blocked by a half-finished merge with origin/main.
+      Cause: PR #46 renamed the 1014 stage files inside
+      scenarios/shinyeong_test/ while local backup commits moved the same
+      files to scenarios/production/ (rename/rename). Resolved to the local
+      tree (remote copies were older versions; synthesis_1014 + README
+      identical). Merge 4dd8988 == b908edd tree; pushed. Issue #56.
+      Scenarios themselves still not bench-verified.
+- [ ] 2026-11-16: device timeout -> 7 min. cell6/cell7 max_program_s
+      300 -> 420 (live tomls + examples); production scenarios arm/program
+      timeout_s 360 -> 480 (kept above L1 so the cell's ProgramStop fires
+      first), pump/cycle 360 -> 420. All production scenarios validate.
+      Pending: restart cell6/cell7 servers (running since Nov 04 with
+      300 s) and a bench run of a >5 min program. Issue #57.
+- [ ] 2026-11-16: new scenarios/production/1cycle_1116.yaml (copy of
+      1cycle_1014). Synthesis dispenses 3 / 2 / 1 mL at cell1/2/3
+      (c1/c2/c3_dispense_cycles 30/20/10). Between zensor.lua and the cell5
+      dispense: hotplate/state check (heating, target_c) and a 300 s
+      pre-heat with the lamp off (c5_preheat_s). Post-dispense lamp soak
+      c5_soak_s 60 -> 300 s. Validates (118 steps); awaiting bench run
+      (--step-mode first). Issue #58.
+- [x] 2026-11-16 19:33: restarted cell6 (:17064) and cell7 (:17066) so
+      max_program_s = 420 takes effect (no active run). Both health 200,
+      diagnose arm ok/ready, fault [0,0]. Issue #57; bench run of a >5 min
+      program still pending.

@@ -300,8 +300,8 @@ steps:
     action: arm/program
     body:
       name: "${params.analysis_program_vial}"
-    # Above the cell's max_program_s (300 s), for the same reason as cell6.
-    timeout_s: 360.0
+    # Above the cell's max_program_s (420 s), for the same reason as cell6.
+    timeout_s: 480.0
     save_as: prog7v
 
   - id: verify_arm7_vial
@@ -312,7 +312,7 @@ steps:
     action: arm/program
     body:
       name: "${params.analysis_program_head}"
-    timeout_s: 360.0
+    timeout_s: 480.0
     save_as: prog7h
 
   - id: verify_arm7_head
@@ -328,7 +328,7 @@ steps:
     action: arm/program
     body:
       name: "${params.analysis_program_zensor}"
-    timeout_s: 360.0
+    timeout_s: 480.0
     save_as: prog7z
 
   - id: verify_arm7_zensor
@@ -414,7 +414,7 @@ steps:
     action: arm/program
     body:
       name: "${params.analysis_program_wash}"
-    timeout_s: 360.0
+    timeout_s: 480.0
     save_as: prog7w
 
   - id: verify_arm7_wash
@@ -476,7 +476,7 @@ steps:
     action: arm/program
     body:
       name: "${params.analysis_program_init_head}"
-    timeout_s: 360.0
+    timeout_s: 480.0
     save_as: prog7i
 
   - id: verify_arm7_init_head

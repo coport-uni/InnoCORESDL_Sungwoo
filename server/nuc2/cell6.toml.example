@@ -47,7 +47,7 @@ program_dir = "/fruser"
 allowed_programs = ["Test1.lua"]
 # A program's length cannot be derived — the cell does not read the
 # script, so there is no frames/fps to compute a timeout from.
-max_program_s = 300.0
+max_program_s = 420.0   # 7 min (2026-11-16): arm actions can exceed 5 min
 # How often the cell asks the controller whether the program is still
 # running. GetCurrentLine is the only progress channel a job program has.
 program_poll_s = 0.5
