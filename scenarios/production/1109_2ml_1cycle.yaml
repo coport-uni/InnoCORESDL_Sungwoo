@@ -1,3 +1,7 @@
+# 1109_2ml_1cycle.yaml — 2026-11-09 copy of 1cycle_1014.yaml (115 steps) with the
+# synthesis volume cut to 12 uL per cell (volume_uL 12 x dispense_cycles 1; the source
+# file dispenses 100 uL x 20 = 2 mL) for the month of integrated motion tests after
+# the external test. Nothing else differs; change volumes here, not in 1cycle_1014.yaml.
 # The synthesis stage + hand-off to the analysis arm.
 #
 # A COPY of test_synthesis_seq_free_shinyeong.yaml, made 2026-09-16. Keep
@@ -145,7 +149,7 @@
 #   python -m orchestrator validate scenarios/test_synthesis_seq_shinyeong.yaml
 #   python -m orchestrator run scenarios/test_synthesis_seq_shinyeong.yaml --step-mode
 
-name: test_synthesis_to_analysis_shinyeong
+name: one_cycle_2ml_1109   # file is 1109_2ml_1cycle.yaml; the schema needs the name to start with a letter
 description: >
   The synthesis stage, then the hand-off to analysis. Identical to
   test_synthesis_seq_free_shinyeong up to the rail's run to its end
@@ -219,6 +223,8 @@ params:
   c5_z_tol_mm: 0.5
   hotplate_target_c: 100.0   # 2026-10-14: operator setpoint (cell5.toml cap raised to 110 on NUC2 _shinyeong)
   c5_volume_uL: 50.0   # 2026-10-14: operator setting (one cycle holds at most 125 uL — the syringe)
+  c5_soak_s: 60.0   # 2026-10-14: hold after the cell5 dispense, before ZensorWash.lua (operator's request; was 300)
+  c5_dry_s: 60.0   # 2026-10-14: fan-on drying hold after the wash, heater already off (operator's request; was 300)
   analysis_program_init_head: "init_head.lua"
   analysis_init_head_last_line: 28   # 2026-09-30: measured 28 lines / 14.7 s on run 20260930T152501Z
   analysis_init_head_min_s: 10.0
@@ -313,8 +319,8 @@ params:
   # each of the two new cells. If either is plumbed the other way round,
   # split these into per-cell params rather than flipping them for all
   # three.
-  volume_uL: 100.0
-  dispense_cycles: 20        # 2026-10-13: 2 mL per cell = 100 uL x 20 (125 uL syringe); ~7 s per cycle
+  volume_uL: 12.0           # 2026-11-10: operator — 12 uL per cell for the month of integrated motion tests (was 100; 2 and 6 on 11-09/11-10)
+  dispense_cycles: 1         # 2026-11-10: 1 x 12 uL per cell (was 20 x 100 uL = 2 mL)
   source_port: 1
   dispense_port: 2
   init_force: 2
@@ -436,26 +442,8 @@ steps:
   - id: verify_cell23_gantries
     assert: "${d2.stage.ok} == True and ${d3.stage.ok} == True and ${d2.pump.present} == True and ${d3.pump.present} == True"
 
-  # EVERY HEAD MUST BE UP BEFORE THE RAIL MOVES AT ALL. The later guards
-  # only cover the gantry that just finished working; this one covers the
-  # state the run starts in, which is whatever the last session left
-  # behind. Teaching parks a head at its hover height and there is no
-  # reason it would have been raised since — cell1 was found at Z 223.65
-  # while writing this, with the rail already homed and about to be sent
-  # 470 mm to meet it.
-  #
-  # Both motors of each pair are checked, not an average: an average
-  # hides one Z sitting low while its partner is up, which is exactly the
-  # racked state that would reach furthest into the rail's path.
-  #
-  # Upper bound only. Positive Z is downward, so that is the direction
-  # that collides; a slightly negative reading is a head parked hard
-  # against its home limit, which is harmless.
   - id: verify_cell5
     assert: "${d5.pump.ok} == True and ${d5.stage.ok} == True and ${d5.ok_to_initialize} == True"
-
-  - id: verify_all_gantries_up
-    assert: "${d1.stage.z_a_mm} <= ${params.z_up_mm} + ${params.gantry_tol_mm} and ${d1.stage.z_b_mm} <= ${params.z_up_mm} + ${params.gantry_tol_mm} and ${d2.stage.z_a_mm} <= ${params.z_up_mm} + ${params.gantry_tol_mm} and ${d2.stage.z_b_mm} <= ${params.z_up_mm} + ${params.gantry_tol_mm} and ${d3.stage.z_a_mm} <= ${params.z_up_mm} + ${params.gantry_tol_mm} and ${d3.stage.z_b_mm} <= ${params.z_up_mm} + ${params.gantry_tol_mm}"
 
   # ── Initialize: home every gantry before anything else moves ────────
   # Added 2026-08-27, after all three gantries were found holding an
@@ -515,6 +503,59 @@ steps:
 
   - id: verify_init_cell5
     assert: "${h5.z_mm} <= ${params.c5_z_tol_mm}"
+
+
+  # EVERY HEAD MUST BE UP BEFORE THE RAIL MOVES AT ALL. The later guards
+  # only cover the gantry that just finished working; this one covers the
+  # state the run starts in, which is whatever the last session left
+  # behind. Teaching parks a head at its hover height and there is no
+  # reason it would have been raised since — cell1 was found at Z 223.65
+  # while writing this, with the rail already homed and about to be sent
+  # 470 mm to meet it.
+  #
+  # Both motors of each pair are checked, not an average: an average
+  # hides one Z sitting low while its partner is up, which is exactly the
+  # racked state that would reach furthest into the rail's path.
+  #
+  # Upper bound only. Positive Z is downward, so that is the direction
+  # that collides; a slightly negative reading is a head parked hard
+  # against its home limit, which is harmless.
+  #
+  # 2026-11-05: moved here from before the homing block, and now reads a
+  # fresh post-home diagnose instead of the start-of-run one. Before the
+  # move it refused a run whose only problem was a head left down by an
+  # aborted 1cycle (cell1 Z 223 mm, issue #54) — a state the homing steps
+  # above fix safely, since homing raises Z before it moves X and the
+  # rail does not move until rail_home. The guarantee is unchanged:
+  # every head is verified up, per motor, before the rail moves at all.
+  #
+  # It now runs after cell5's home too, so it covers every Z axis on the
+  # bench. cell5 is checked on its zstage/home result (h5), NOT a fresh
+  # read: PumpZThermalCell reports a cached Z in status and no position in
+  # diagnose, so a post-home read there would only echo the command.
+  - id: post_home_diag_cell1
+    cell: cell1
+    action: diagnose
+    method: GET
+    timeout_s: 30.0
+    save_as: p1
+
+  - id: post_home_diag_cell2
+    cell: cell2
+    action: diagnose
+    method: GET
+    timeout_s: 20.0
+    save_as: p2
+
+  - id: post_home_diag_cell3
+    cell: cell3
+    action: diagnose
+    method: GET
+    timeout_s: 20.0
+    save_as: p3
+
+  - id: verify_all_gantries_up
+    assert: "${p1.stage.z_a_mm} <= ${params.z_up_mm} + ${params.gantry_tol_mm} and ${p1.stage.z_b_mm} <= ${params.z_up_mm} + ${params.gantry_tol_mm} and ${p2.stage.z_a_mm} <= ${params.z_up_mm} + ${params.gantry_tol_mm} and ${p2.stage.z_b_mm} <= ${params.z_up_mm} + ${params.gantry_tol_mm} and ${p3.stage.z_a_mm} <= ${params.z_up_mm} + ${params.gantry_tol_mm} and ${p3.stage.z_b_mm} <= ${params.z_up_mm} + ${params.gantry_tol_mm} and ${h5.z_mm} <= ${params.c5_z_tol_mm}"
 
   - id: cell5_pump_init
     cell: cell5
@@ -1018,6 +1059,40 @@ steps:
   - id: verify_cell5_home
     assert: "${c5home.z_mm} <= ${params.c5_z_tol_mm}"
 
+  # 2026-10-14: the IR lamp (plug 1) is on for the soak hold and off again
+  # before the wash. lamp/ is a hazard prefix: the orchestrator waits for the
+  # operator's confirmation before the first lamp/switch of a run.
+  - id: cell5_lamp_on
+    cell: cell5
+    action: lamp/switch
+    body:
+      enabled: true
+    timeout_s: 30.0
+    save_as: lamp_on
+
+  - id: verify_lamp_on
+    assert: "${lamp_on.is_on} == True"
+
+  # 2026-10-14: hold with the dispensed liquid in the vial before the wash.
+  # No cell is called; Z is already home and the arm is idle at its rest pose.
+  - id: cell5_soak
+    wait_s: ${params.c5_soak_s}
+
+  # 2026-10-14: retry, as cell5_heater_off — a dropped plug call here would
+  # leave the lamp on for the rest of the run.
+  - id: cell5_lamp_off
+    cell: cell5
+    action: lamp/switch
+    body:
+      enabled: false
+    timeout_s: 30.0
+    on_fail: retry
+    retries: 2
+    save_as: lamp_off
+
+  - id: verify_lamp_off
+    assert: "${lamp_off.is_on} == False"
+
   - id: arm7_zensor_wash
     cell: cell7
     action: arm/program
@@ -1040,6 +1115,44 @@ steps:
 
   - id: verify_fan_on
     assert: "${fan_on.is_on} == True"
+
+  # 2026-10-14: heat off here, before the drying hold, so the vial takes no
+  # more heat while the fan runs. The later cell5_heater_off stays as the
+  # retried safety net (the hotplate USB dropped at that point on
+  # 20261013T154256Z); this one is asserted on the response.
+  - id: cell5_heater_off_dry
+    cell: cell5
+    action: hotplate/heater
+    body:
+      enabled: false
+    timeout_s: 30.0
+    on_fail: retry
+    retries: 2
+    save_as: hp_off_dry
+
+  - id: verify_heater_off_dry
+    assert: "${hp_off_dry.heating} == False"
+
+  # 2026-10-14: drying hold with the fan on. No cell is called; the arm is
+  # idle at its rest pose after ZensorWash.lua.
+  - id: cell5_dry
+    wait_s: ${params.c5_dry_s}
+
+  # 2026-10-14: fan off right after the drying hold (operator's request). It
+  # used to run on until after the shutdown block; the fan's on-time is now
+  # exactly c5_dry_s. Retry, as the other plug/heater switch-offs here.
+  - id: cell5_fan_off
+    cell: cell5
+    action: fan/switch
+    body:
+      enabled: false
+    timeout_s: 30.0
+    on_fail: retry
+    retries: 2
+    save_as: fan_off
+
+  - id: verify_fan_off
+    assert: "${fan_off.is_on} == False"
 
   - id: arm7_init_head
     cell: cell7
@@ -1107,17 +1220,7 @@ steps:
   # Read the cells once more through status rather than through the move
   # responses, so the verdict does not rest on the same readings the
   # moves already returned.
-  # 2026-10-14: fan off AFTER the shutdown block — the block ends when its longest
-  # child (the rail's ~40 s return home) ends, so this fires as the rail reaches
-  # home. Inside the block it fired at the block's start (fan ran only 15 s).
-  - id: cell5_fan_off
-    cell: cell5
-    action: fan/switch
-    body:
-      enabled: false
-    timeout_s: 30.0
-    save_as: fan_off
-
+  # 2026-10-14: the fan is already off (cell5_fan_off, after the drying hold).
   # 2026-10-14: retry — the hotplate's USB (hub 3-4) dropped exactly as this ran
   # on run 20261013T154256Z and the heater stayed on until a manual retry.
   - id: cell5_heater_off
@@ -1129,9 +1232,6 @@ steps:
     on_fail: retry
     retries: 2
     save_as: hp_off
-
-  - id: verify_fan_heater_off
-    assert: "${fan_off.is_on} == False"
 
   - id: final_rail
     cell: cell4

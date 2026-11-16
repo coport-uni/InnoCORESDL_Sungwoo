@@ -1753,3 +1753,112 @@ format below. Newest entries at the bottom.
   bench off", the fan among them. Bench notes that say what hardware is
   absent carry a date for a reason; re-check the bus before trusting
   them.
+
+## 49. cell2 `gantry/home` "intermittently" times out — it is Z_A never seeing its home switch, and the driver does not call that a fault
+
+**Problem.** `init_home_cell2` (and `init_cell2_shutdown`) time out at the
+orchestrator's 180 s on some runs (20261014T121131Z, 123914Z,
+20261015T004137Z, 004612Z) and finish in 5.6 s on others, from the same
+physical state. The operator saw it as random.
+
+**Cause.** The cell2 server log on NUC2
+(`claude_test/server_cell2_shinyeong.log`) shows, for every failed home,
+both Z motors acknowledging 0x90 and answering `Running` to 0x91, then
+one `Homing complete` and — 250 s later (`_max_wait_sec`) —
+`[ERROR] Motor not responding`. The runlogs' next `diag_cell2` identify
+the silent motor: `z_a_mm` steps -7875 → -15510 → -23144 across the
+three failures while `z_b_mm` stays 0. 7634 mm per attempt is
+180 rpm × 10 mm/turn × ~254 s, and the readback is the multi-turn
+encoder (0x31), so Z_A (NTAFT1KQ) really turned ~760 turns at homing
+speed without its home switch ever tripping. 8 of 83 Z homes since
+2026-10-13 failed this way, 5 of the last 7. A coupled shaft cannot turn
+760 turns against the top stop, so either Z_A's switch input (IN_1) is
+flaky — switch, connector, cable — or the Z_A screw slips relative to the
+head, or both. cell1's cable carrier went on 2026-10-13; cell2's Z_A
+cable may have been disturbed the same day. Two driver gaps made it look
+random: `home()` *returns* on a `_wait()` timeout (prints `Homing ended:
+None`), so `home_xz` goes on to home X while Z_A may still be running
+and no group fault fires; and the server-side home outlives the
+orchestrator's 180 s by ~70 s, so the next `diagnose` times out on the
+cell lock (20261015T004456Z) and looks like a second, unrelated failure.
+
+**Fix.** Pending at the bench (issue #48): home cell2 from Z ≈ 3 mm
+while watching Z_A's shaft, screw and the head's Z_A side; check the Z_A
+home switch and its cable to NTAFT1KQ IN_1. Then decide upstream whether
+`home()` should raise on a `_wait()` timeout so `home_sync`'s interlock
+stops the pair.
+
+**Rule.** When a paired-Z home "sometimes" times out, do not retry it
+blindly: read `diagnose` first and compare `z_a_mm` with `z_b_mm`. A
+multi-thousand-mm reading on one motor means that motor ran at homing
+speed for the whole driver wait without seeing its switch — a hardware
+inspection, not a flaky run. Server-side `print` lines carry no
+timestamps; pair them with the runlog's `diag` readings to attribute a
+failure to a motor.
+
+## 50. One wedged FTDI adapter takes every cell server on that NUC down with it
+
+**Problem.** Restarting NUC2's three cell servers (cell2, cell3, cell5)
+on 2026-10-15: all three launchers died at startup with
+`ValueError: The device has no langid (permission issue …)` or
+`USBError: [Errno 32] Pipe error`, although node permissions were 0666
+and nothing had changed in the configs.
+
+**Cause.** `Ftdi.list_devices()` (pyftdi) reads the serial string of
+*every* 0403:6001 device on the bus before returning. One adapter —
+NTA4FH8Q, cell3's Z_A — had been wedged since cell3's last descend
+(`[SAFETY] move fault on a motor (UsbError: Pipe error)` in its server
+log) and failed every control transfer. pyusb wraps that as "no langid",
+which reads like a permission problem and is not one. Because every
+launcher enumerates the whole bus, cell2 and cell5 could not start
+either, even though their own adapters were fine. `ftdi_sio` being
+bound to all seven adapters was a red herring: pyusb detaches it
+unprivileged when the node is writable.
+
+**Fix.** Find the bad one without a server: a pyusb loop reading
+`iSerialNumber` per device names the single failing bus/dev. Then
+reset that device (ioctl `USBDEVFS_RESET` on `/dev/bus/usb/BBB/DDD`,
+no root needed on a 0666 node, touches no motor) or replug it; only
+then relaunch the servers. (The reset itself was left to the operator
+this time — issue #49.)
+
+**Rule.** "No langid" from pyftdi at startup, right after a USB fault
+in a server log, means one wedged adapter, not permissions. Test each
+adapter individually before touching udev rules or groups. And never
+stop a server whose adapter just faulted expecting the restart alone
+to clear it — the USB device has to be reset first.
+
+Related: `pgrep -f '<pattern>'` inside a heredoc script matches the
+wrapper shell that carries the script text; the first stop attempt
+SIGINT'd itself. Anchor on the interpreter (`^\.venv/bin/python …`) and
+run such scripts from a file.
+
+## 51. The read-only motor census still breaks a running cell server, because "read-only" is about the motor, not the USB handle
+
+- **Problem**: While cell2's Z_B refused to answer (issue #52), I ran
+  `claude_test/test_nuc2_motor_census_shinyeong.py --help` on NUC2 to see
+  its options. The script has no argument parsing: it ran the census,
+  opened cell3's Z_B adapter (`NT9ZVXLU`) while the cell3 server held it,
+  and died on the next adapter with `[Errno 16] Resource busy`. From then
+  on cell3's `/v1/diagnose` returned 500 with `[Errno 19] No such device`
+  while `/v1/health` still said `stage_ok: true`.
+- **Cause**: The census is read-only toward the *motor* (it only sends
+  encoder read `0x31`), but toward the *adapter* it does a full pyftdi
+  claim: `usbfs: interface 0 claimed by ftdi_sio while 'python' sets
+  config #1`, then the kernel re-bound `ftdi_sio` to the adapter on
+  close. The cell3 server's libusb handle on that interface was invalid
+  afterwards — the same "fd outlives the device" outage as #21, caused
+  by a second process rather than a cable. Folder rule 2 (one owner per
+  port) applies to FTDI/libusb adapters exactly as it does to tty nodes,
+  and a probe that only *reads* is still a second owner.
+- **Fix**: Restarted cell3 (SIGINT, relaunch, diagnose 200). While doing
+  so, `ps | grep "...--cell cell3"` matched the remote `bash -c` command
+  line and SIGINT'd my own ssh shell (exit 255) — the #50 self-match,
+  again; the anchored `pgrep -f "^\.venv/bin/python.*--cell cell3"` is
+  the only safe form over ssh too.
+- **Rule**: Never run a probe that opens an adapter by serial while a
+  cell server that owns it is up — stop that server first, or point the
+  probe at only the orphaned adapter. Read the script before invoking it
+  with `--help`; a `claude_test/` tool without `argparse` runs on any
+  argument. And after any such probe, check `/v1/diagnose` (not
+  `/v1/health`, which answers from cache) on every cell on that NUC.

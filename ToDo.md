@@ -2671,3 +2671,170 @@ changed, no device touched. NUC2 inspected over ssh (read-only).
 - [ ] Choose: strip the merge duplicates from the launcher (restores
       the known-good path), or create the two TOMLs and bench-verify
       #32 on NUC2 — do it BEFORE stopping either running process.
+
+## 2026-10-14 — resolve the add/add conflict on two cell5 shinyeong tools, GitHub version wins (issue #45)
+
+The in-progress merge of `origin/main` (570edd8, PR #44) into the bench
+checkout (`1f530fb backup`) left `claude_test/test_cell5_dispense_seq_shinyeong.py`
+and `claude_test/test_cell5_z_shinyeong.py` in `AA` state. Operator
+decision: take the GitHub version of both. No hardware touched; nothing
+under `cell/` / `server/` changed.
+
+- [x] `git checkout --theirs` + `git add` on both files.
+- [x] Staged content byte-identical to `origin/main`
+      (`git diff origin/main --` on the two paths shows no change).
+- [x] `ruff check` clean, `ruff format --check` clean on both files.
+- [x] `git commit` to finish the merge — done by the operator while
+      this entry was being written: `15bfd00 Merge branch 'main'`
+      (parents 1f530fb + 570edd8); both files in it are identical to
+      `origin/main`. This ToDo entry itself is staged, not committed.
+
+## 2026-10-14 — analysis_1014: soak hold, heater-off + drying hold (issue #47)
+
+Operator-requested edits to `scenarios/shinyeong_test/analysis_1014.yaml`.
+No code under `cell/` / `server/` changed; the file is still untracked.
+
+- [x] `cell5_soak`: 300 s `wait_s` between `verify_cell5_home` and
+      `arm7_zensor_wash` (param `c5_soak_s`).
+- [x] `cell5_heater_off_dry`: `hotplate/heater enabled=false` right after
+      `cell5_fan_on`, retried x2, asserted on `heating == False`. The
+      closing `cell5_heater_off` stays as the retried safety net.
+- [x] `cell5_dry`: 300 s `wait_s` with the fan on, between the heater-off
+      and `arm7_init_head` (param `c5_dry_s`).
+- [x] `python -m orchestrator validate` passes (44 steps).
+- [ ] Bench-verify with one gated run, operator present (rule 4); then
+      commit the scenario + this entry.
+- [x] 2026-10-14 later: both holds cut to 60 s (`c5_soak_s`, `c5_dry_s`
+      were 300) at the operator's request; files now live under
+      `scenarios/production/`. Validate passes (44 steps).
+- [x] 2026-10-14 later: the same four steps + two params mirrored into
+      `scenarios/production/1cycle_1014.yaml` (now 108 top-level steps,
+      was 104). Comment-stripped step bodies of 1cycle and
+      init+synthesis+analysis differ only by the per-stage re-checks;
+      params identical. Validate passes.
+- [x] 2026-10-14 later: IR lamp (plug 1, `lamp/switch`) on before the
+      `cell5_soak` hold and off (retried x2) after it, asserted on
+      `is_on`, in both `analysis_1014.yaml` (48 steps) and
+      `1cycle_1014.yaml` (112 top-level steps). Validate passes.
+- [x] 2026-10-14 later: fan block regrouped at the operator's request —
+      `cell5_fan_on` → `cell5_heater_off_dry` → `cell5_dry` (60 s) →
+      `cell5_fan_off` (retry x2, asserted `is_on == False`) →
+      `arm7_init_head`. The late `cell5_fan_off` after the shutdown
+      block and its `verify_fan_heater_off` are removed; the closing
+      `cell5_heater_off` safety net stays. Both files; validate passes
+      (analysis 48, 1cycle 112).
+
+## 2026-10-15 — cell2 gantry/home intermittent timeout: Z_A never sees its home switch (issue #48)
+
+Diagnosis only; no hardware commanded. Evidence from the orchestrator
+runlogs (`runs/`) and the cell2 server log on NUC2.
+
+- [x] Runlogs: four 180 s timeouts on cell2 `gantry/home`; `z_a_mm`
+      steps -7875 → -15510 → -23144 across them, `z_b_mm` stays 0.
+- [x] NUC2 log: 8 of 83 Z homes end in `Motor not responding` after the
+      driver's 250 s wait; both motors answered `Running` first.
+- [x] Arithmetic: 7634 mm per failure = 180 rpm × 10 mm/turn × ~254 s —
+      the Z_A shaft (NTAFT1KQ) really turned, switch never tripped.
+- [x] LearnedPatterns #49, issue #48.
+- [ ] Operator: inspect cell2 Z_A home switch / cable (IN_1) and the Z_A
+      screw coupling; home from Z ≈ 3 mm while watching.
+- [ ] Decide whether driver `home()` should raise on `_wait()` timeout
+      (upstream ESP32S3BOX3MotorController change, then bump the pin).
+
+## 2026-10-15 — restart all seven cell servers (operator's request); NUC2 blocked on a wedged USB2CAN adapter (issue #49)
+
+- [x] Pre-check: all cells idle, no active orchestrator run, server
+      startup commands no motion or power (only USB node prep +
+      encoder reads).
+- [x] NUC1: cell4, cell1, cell6, cell7 SIGINT → relaunched with their
+      original commands (logs in this session's scratchpad), all
+      `/v1/health` 200, positions unchanged.
+- [x] NUC2: cell3, cell2, cell5 stopped; relaunch fails in
+      `Ftdi.list_devices()` because adapter NTA4FH8Q (cell3 Z_A, bus 003
+      dev 056, port 3-7.2.1) answers every descriptor read with
+      `Pipe error` — the same fault that aborted cell3's last descend.
+- [ ] Reset or replug NTA4FH8Q on NUC2 (ioctl USBDEVFS_RESET was
+      prepared; remote write denied by policy → operator's call), then
+      relaunch cell3/cell2/cell5 with `restart_cells.sh`.
+- [ ] cell3 is racked 3.75 mm with the head down (Z_A 222.98 / Z_B
+      219.23 at X 243): inspect before any motion.
+- [x] 2026-10-15 later: reset approved; the adapter had already left the
+      bus (sysfs 3-7.2.1 gone, hub present) and did not return in 60 s.
+      cell2 and cell5 relaunched and healthy (6 of 7 servers up).
+- [ ] Replug NTA4FH8Q at hub port 3-7.2.1 on NUC2, then launch cell3
+      with `restart_cells.sh` (cell3 only).
+- [x] 2026-10-15 later: after the reconnect the kernel sees a device on
+      3-7.2 port 1 but it fails enumeration (descriptor read error -32,
+      not accepting address -71, "unable to enumerate"). Adapter or its
+      cable is faulty at the USB level; cell2 restarted once more after
+      the reseat re-enumerated its adapters (diagnose OK).
+- [ ] Try NTA4FH8Q on another port/cable; if dead, fit a spare USB2CAN
+      and update `serial_z_a` (launcher + cell3.toml), then launch cell3.
+- [x] 2026-10-15 15:57: operator rebooted NUC2. Same enumeration failure
+      on 3-7.2 port 1 (error -71) on a fresh kernel → adapter/cable
+      fault. cell2 and cell5 relaunched after the reboot, diagnose OK.
+
+## 2026-11-04 — 1cycle without cell2; bring cell5 and cell3 back online
+
+- [x] `scenarios/production/1cycle_1014_no_cell2.yaml`: 1cycle_1014 with
+      every cell2 step/param/assert term removed (96 top-level steps,
+      was 112; rail goes cell1 → cell3 directly; 4 mL into the vial).
+      YAML/schema validate OK.
+- [x] NUC2 had been rebooted 14:24 with no servers up. cell3's Z_A
+      adapter NTA4FH8Q enumerates again (issue #49); cell2's three
+      adapters are absent from the bus. cell5 (pid 2912) and cell3
+      (pid 2987) launched, diagnose OK. cell3 encoders read 0/0/0 after
+      the power cycle — NOT proof the head is up; look before homing.
+- [ ] Bench-verify 1cycle_1014_no_cell2 with the operator; commit after.
+- [x] 2026-11-04: `scenarios/production/init_1014_no_cell2.yaml` — init_1014
+      minus diag_cell2 / init_home_cell2 / their asserts and the three
+      cell2 params; pairs with 1cycle_1014_no_cell2. Validate OK.
+- [x] 2026-11-04: first no-cell2 runs failed at cell6 — Task1_original.lua
+      exited at line 12 (9.2 s), then faulted main=1 sub=21 at line 14.
+      Diagnosed as controller/arm-side (post-power-cycle, gripper step),
+      not the cell server; arm parked mid-path. Issue #50 (see number
+      printed above). Operator to read the pendant fault and re-home the
+      arm before any retry.
+- [x] 2026-11-04: restarted cell4 (:17060) at operator request. The
+      balance had re-enumerated at 16:42 (ttyACM0 -> ttyACM1) and the
+      server kept the stale fd, so `/v1/diagnose` returned 500 with
+      `termios.error: (5, 'Input/output error')` (LearnedPatterns #21,
+      same mechanism as the rail). After restart diagnose is 200,
+      balance + stage ok. Issue #51; no code change.
+- [ ] 2026-11-05: operator asked to run init_1014 then 1cycle_1014. Blocked:
+      cell2 server refuses to serve because Z_B (NTA0X8KN) does not answer
+      setup/encoder read after the 01:34 adapter replug (adapter opens;
+      motor side silent). Five relaunch attempts (last at 01:47 after the
+      operator reconnected twice); read-only census also says NO REPLY.
+      Sixth launch ~01:58 same; CAN id sweep 1..16 on NTA0X8KN: no answer
+      (inconclusive by design). ~02:02 seventh launch refused: Z_A adapter
+      NTAFT1KQ off the bus since 01:57:23 (never re-enumerated).
+      09:30 eighth and 09:33 ninth launch, all adapters back: Z_B still silent.
+      Operator was reseating the Z_A adapter,
+      not Z_B's. Issue #52. Side effect: census probed cell3's adapter under the
+      running server -> cell3 diagnose 500; cell3 restarted, healthy.
+      Other six cells + orchestrator (:17100) are up. Runs not started.
+- [x] 2026-11-05: restarted cell3 (NUC2 :17058) after my census probe
+      opened its Z_B adapter under the running server and left diagnose
+      at 500. Relaunched: all axes setup OK, diagnose 200. Issue #53,
+      LearnedPatterns #51. Follow-up: argparse/--serial for the census.
+- [x] 2026-11-05 09:41: cell2 back after the operator fixed internal Z_B
+      wiring (all axes setup OK, diagnose 200); issue #52 closed. cell3's Z_B
+      adapter dropped during that work -> cell3 restarted again (#53); its
+      status now reports Z_A 2.98 / Z_B 0.00 mm (desync > 0.5 mm limit).
+      Operator to check cell3 gantry level by eye before init. init_1014 and
+      1cycle_1014 validate ok; runs handed to the operator terminal.
+- [ ] 2026-11-05: init_1014 failed at verify_all_gantries_up because cell1's
+      head was left down (Z 223 mm) by the aborted 1cycle run (abort during
+      cell1_dispense, before cell1_retract; cell1 stop timed out, GAP-9).
+      Operator to home cell1 and rerun init. Issue #54.
+- [ ] 2026-11-05: init_1014 / init_1014_no_cell2 — moved verify_all_gantries_up
+      after the homing block, reading new post_home_diag_cell* diagnose steps
+      (p1/p2/p3) instead of the start-of-run d1/d2/d3 (issue #54). Validates
+      (32 / 28 steps). Then extended to all gantries (check after cell5 home
+      too, h5 term) and to 1cycle_1014 / 1cycle_1014_no_cell2 (115 / 98
+      steps). All validate; awaiting bench run.
+- [x] 2026-11-05: restarted cell4 again at operator request. Balance
+      re-enumerated at 10:13 (ttyACM1 -> ttyACM0), same stale-fd 500 as
+      2026-11-04. Diagnose 200 after restart. Issue #55 (root cause
+      tracked on #51).
