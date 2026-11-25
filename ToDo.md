@@ -2868,3 +2868,18 @@ runlogs (`runs/`) and the cell2 server log on NUC2.
       orchestrator/config.toml after a full read (no credentials; Tapo
       login stays in secure.env). Docs + in-file comments updated.
       NUC2's cell2/3/5.toml still to add from NUC2. Issue #59.
+
+## 2026-11-25 — Temporary no-hotplate scenarios (hotplate out of service)
+
+- [x] scenarios/production/1cycle_1109_2ml_nocell5.yaml: 1cycle_1109_2ml
+      cut to the synthesis stage (69 steps) — no cell5, no cell7, no
+      shutdown block; ends with the rail at rail_end_mm. `validate` ok.
+- [x] scenarios/production/init_1014_nocell5.yaml: init_1014 without
+      cell5 (24 steps; cell7 pre-flight kept). `validate` ok.
+- [x] Bench-verified 2026-11-25 with the operator present: init run
+      20261125T012032Z completed 24/24; synthesis run 20261125T012731Z
+      completed 69/69 (12 uL x 1 at cell1/2/3, rail ended 977.419 mm).
+      The earlier run 20261125T012604Z stopped at verify_arm_done (Task1
+      exited at line 5 after 1.16 s); the guard worked as intended.
+      Renamed _nohotplate -> _nocell5. Issue #65.
+- [ ] Delete both files once the hotplate is back. Issue #65.
